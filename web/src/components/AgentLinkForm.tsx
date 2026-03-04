@@ -44,7 +44,11 @@ export function AgentLinkForm({
           <label className="block text-sm text-gray-600 mb-1">From</label>
           <select
             value={fromAgentId}
-            onChange={(e) => setFromAgentId(e.target.value)}
+            onChange={(e) => {
+              const newFrom = e.target.value;
+              setFromAgentId(newFrom);
+              if (toAgentId === newFrom) setToAgentId("");
+            }}
             className="w-full border rounded px-2 py-1.5 text-sm"
             required
           >
@@ -66,11 +70,13 @@ export function AgentLinkForm({
             required
           >
             <option value="">Select agent</option>
-            {agents.map((agent) => (
-              <option key={agent.id} value={agent.id}>
-                {agent.name}
-              </option>
-            ))}
+            {agents
+              .filter((agent) => agent.id !== fromAgentId)
+              .map((agent) => (
+                <option key={agent.id} value={agent.id}>
+                  {agent.name}
+                </option>
+              ))}
           </select>
         </div>
 

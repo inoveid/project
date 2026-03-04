@@ -77,8 +77,9 @@ async def update_agent(
         await db.commit()
     except IntegrityError:
         await db.rollback()
+        name = data.name or agent.name
         raise AgentDuplicateNameError(
-            f"Agent with name '{data.name}' already exists in this team"
+            f"Agent with name '{name}' already exists in this team"
         )
     await db.refresh(agent)
     return agent

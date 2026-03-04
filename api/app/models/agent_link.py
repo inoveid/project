@@ -16,6 +16,10 @@ class AgentLink(Base):
             "link_type IN ('handoff', 'review', 'migration_brief')",
             name="ck_agent_links_link_type",
         ),
+        CheckConstraint(
+            "from_agent_id != to_agent_id",
+            name="ck_agent_links_no_self_link",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

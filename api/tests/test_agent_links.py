@@ -161,3 +161,28 @@ def test_agent_link_create_invalid_type():
             to_agent_id=uuid.uuid4(),
             link_type="invalid",  # type: ignore[arg-type]
         )
+
+
+def test_agent_link_create_self_link_rejected():
+    agent_id = uuid.uuid4()
+    with pytest.raises(ValueError, match="must be different"):
+        AgentLinkCreate(
+            from_agent_id=agent_id,
+            to_agent_id=agent_id,
+            link_type=LinkType.handoff,
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_link_self_link_returns_422(client):
+    tid = uuid.uuid4()
+    agent_id = str(uuid.uuid4())
+    resp = await client.post(
+        f"/api/teams/{tid}/links",
+        json={
+            "from_agent_id": agent_id,
+            "to_agent_id": agent_id,
+            "link_type": "handoff",
+        },
+    )
+    assert resp.status_code == 422

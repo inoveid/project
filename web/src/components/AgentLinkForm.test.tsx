@@ -111,6 +111,28 @@ describe("AgentLinkForm", () => {
     expect(screen.getByText("Duplicate link")).toBeInTheDocument();
   });
 
+  it("filters selected from-agent out of to-agent options", async () => {
+    const user = userEvent.setup();
+    render(
+      <AgentLinkForm
+        agents={agents}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+        isLoading={false}
+        error={null}
+      />,
+    );
+
+    const selects = screen.getAllByRole("combobox");
+    await user.selectOptions(selects[0]!, "agent-1");
+
+    // "To" dropdown should not contain "Coder" (agent-1)
+    const toOptions = Array.from((selects[1] as HTMLSelectElement).options);
+    const toValues = toOptions.map((o) => o.value).filter((v) => v !== "");
+    expect(toValues).not.toContain("agent-1");
+    expect(toValues).toContain("agent-2");
+  });
+
   it("shows loading state", () => {
     render(
       <AgentLinkForm

@@ -80,7 +80,8 @@ async def update_team(
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise TeamDuplicateNameError(f"Team with name '{data.name}' already exists")
+        name = data.name or team.name
+        raise TeamDuplicateNameError(f"Team with name '{name}' already exists")
     await db.refresh(team)
     return await get_team(db, team_id)
 
