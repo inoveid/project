@@ -46,7 +46,7 @@ async def get_session(db: AsyncSession, session_id: uuid.UUID) -> Session:
     stmt = (
         select(Session)
         .where(Session.id == session_id)
-        .options(selectinload(Session.messages))
+        .options(selectinload(Session.messages), selectinload(Session.agent))
     )
     result = await db.execute(stmt)
     session = result.scalar_one_or_none()

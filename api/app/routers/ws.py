@@ -23,7 +23,7 @@ async def websocket_session(
     websocket: WebSocket,
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-):
+) -> None:
     await websocket.accept()
 
     try:
@@ -43,7 +43,7 @@ async def websocket_session(
         )
 
     try:
-        await _handle_messages(websocket, db, session_id, agent)
+        await _handle_messages(websocket, db, session_id)
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected for session %s", session_id)
 
@@ -52,7 +52,6 @@ async def _handle_messages(
     websocket: WebSocket,
     db: AsyncSession,
     session_id: uuid.UUID,
-    agent: object,
 ) -> None:
     while True:
         raw = await websocket.receive_text()
@@ -116,10 +115,10 @@ async def _stream_response(
             tool_uses=tool_uses if tool_uses else None,
         )
 
-    running = runtime._processes.get(session_id)
-    if running and running.claude_session_id:
+    claude_sid = runtime.get_claude_session_id(session_id)
+    if claude_sid:
         session = await get_session(db, session_id)
-        session.claude_session_id = running.claude_session_id
+        session.claude_session_id = claude_sid
         await db.commit()
 
     await websocket.send_json({"type": "done"})
