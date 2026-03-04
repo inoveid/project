@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/main.tsx","./src/api/client.ts","./src/components/layout.tsx","./src/pages/chatpage.tsx","./src/pages/dashboard.tsx","./src/pages/teampage.tsx","./src/types/index.ts"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/main.tsx","./src/api/client.ts","./src/api/teams.ts","./src/components/createteamform.tsx","./src/components/layout.tsx","./src/components/teamcard.tsx","./src/hooks/useteams.ts","./src/pages/chatpage.tsx","./src/pages/dashboard.tsx","./src/pages/teampage.tsx","./src/types/index.ts"],"version":"5.9.3"}
