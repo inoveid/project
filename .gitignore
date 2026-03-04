@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+
+# Build
+dist/
+.vite/
+
+# Environment
+.env
+
+# IDE
+.idea/
+.vscode/
+
+# Test/cache
+.pytest_cache/
+coverage/
+*.pyc
+
+# OS
+.DS_Store
