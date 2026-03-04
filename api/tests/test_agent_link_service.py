@@ -28,6 +28,7 @@ def _mock_db_result(value):
 
 def _make_db():
     db = AsyncMock()
+    db.add = MagicMock()
     return db
 
 

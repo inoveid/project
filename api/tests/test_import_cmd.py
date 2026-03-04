@@ -133,6 +133,7 @@ def test_get_agent_role_no_agents_section():
 @pytest.mark.asyncio
 async def test_import_team_creates_new(teams_dir):
     db = AsyncMock()
+    db.add = MagicMock()
     db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
     db.flush = AsyncMock()
 
@@ -164,6 +165,7 @@ async def test_import_team_skips_existing(teams_dir):
         return MagicMock(scalar_one_or_none=MagicMock(return_value=None))
 
     db = AsyncMock()
+    db.add = MagicMock()
     db.execute = AsyncMock(side_effect=lambda stmt: mock_scalar())
     db.flush = AsyncMock()
 
