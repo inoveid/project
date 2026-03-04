@@ -71,11 +71,35 @@ export interface Session {
   messages?: Message[];
 }
 
+export interface ToolUse {
+  tool_name: string;
+  tool_input: Record<string, unknown>;
+}
+
 export interface Message {
   id: string;
   session_id: string;
   role: "user" | "assistant";
   content: string;
-  tool_uses: unknown[] | null;
+  tool_uses: ToolUse[] | null;
   created_at: string;
 }
+
+export interface SessionListItem {
+  id: string;
+  agent_id: string;
+  status: "active" | "stopped";
+  created_at: string;
+  stopped_at: string | null;
+}
+
+export type WsOutgoing =
+  | { type: "message"; content: string }
+  | { type: "stop" };
+
+export type WsIncoming =
+  | { type: "assistant_text"; content: string }
+  | { type: "tool_use"; tool_name: string; tool_input: Record<string, unknown> }
+  | { type: "tool_result"; tool_name: string; output: string }
+  | { type: "done" }
+  | { type: "error"; error: string };
