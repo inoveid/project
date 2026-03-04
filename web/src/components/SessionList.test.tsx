@@ -51,6 +51,7 @@ describe("SessionList", () => {
       {
         id: "abc12345-session-id",
         agent_id: "agent-1",
+        agent_name: "Test Agent",
         status: "active",
         created_at: "2024-01-01T00:00:00Z",
         stopped_at: null,
@@ -59,7 +60,7 @@ describe("SessionList", () => {
 
     renderSessionList();
     expect(await screen.findByText("Sessions")).toBeInTheDocument();
-    expect(screen.getByText("abc12345...")).toBeInTheDocument();
+    expect(screen.getByText("Test Agent")).toBeInTheDocument();
     expect(screen.getByText("active")).toBeInTheDocument();
   });
 
@@ -69,6 +70,7 @@ describe("SessionList", () => {
       {
         id: "abc12345-session-id",
         agent_id: "agent-1",
+        agent_name: "Test Agent",
         status: "active",
         created_at: "2024-01-01T00:00:00Z",
         stopped_at: null,
@@ -76,7 +78,7 @@ describe("SessionList", () => {
     ]);
 
     renderSessionList({ onSelectSession: onSelect });
-    const item = await screen.findByText("abc12345...");
+    const item = await screen.findByText("Test Agent");
     fireEvent.click(item);
     expect(onSelect).toHaveBeenCalledWith("abc12345-session-id");
   });
@@ -87,6 +89,7 @@ describe("SessionList", () => {
       {
         id: "abc12345-session-id",
         agent_id: "agent-1",
+        agent_name: "Test Agent",
         status: "active",
         created_at: "2024-01-01T00:00:00Z",
         stopped_at: null,
@@ -104,6 +107,7 @@ describe("SessionList", () => {
       {
         id: "abc12345-session-id",
         agent_id: "agent-1",
+        agent_name: "Test Agent",
         status: "active",
         created_at: "2024-01-01T00:00:00Z",
         stopped_at: null,
@@ -111,7 +115,7 @@ describe("SessionList", () => {
     ]);
 
     renderSessionList({ activeSessionIds: ["abc12345-session-id"] });
-    const item = await screen.findByText("abc12345...");
+    const item = await screen.findByText("Test Agent");
     const container = item.closest("[role='button']");
     expect(container?.className).toContain("border-blue-400");
   });

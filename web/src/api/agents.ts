@@ -1,6 +1,10 @@
 import type { Agent, AgentCreate, AgentUpdate } from "../types";
 import { fetchApi } from "./client";
 
+export function getAllAgents(): Promise<Agent[]> {
+  return fetchApi<Agent[]>("/agents");
+}
+
 export function getAgents(teamId: string): Promise<Agent[]> {
   return fetchApi<Agent[]>(`/teams/${teamId}/agents`);
 }

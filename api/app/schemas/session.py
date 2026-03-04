@@ -35,6 +35,7 @@ class SessionRead(BaseModel):
 class SessionListItem(BaseModel):
     id: uuid.UUID
     agent_id: uuid.UUID
+    agent_name: str = ""
     status: str
     created_at: datetime
     stopped_at: Optional[datetime] = None

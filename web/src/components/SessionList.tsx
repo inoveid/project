@@ -34,7 +34,7 @@ function SessionItem({
     >
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-gray-700">
-          {session.id.slice(0, 8)}...
+          {session.agent_name || session.id.slice(0, 8)}
         </span>
         <span
           className={`text-xs px-2 py-0.5 rounded ${

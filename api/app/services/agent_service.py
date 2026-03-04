@@ -21,6 +21,12 @@ class AgentDuplicateNameError(Exception):
     pass
 
 
+async def get_all_agents(db: AsyncSession) -> list[Agent]:
+    stmt = select(Agent).order_by(Agent.created_at.desc())
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
 async def get_agents(db: AsyncSession, team_id: uuid.UUID) -> list[Agent]:
     await _ensure_team_exists(db, team_id)
     stmt = (

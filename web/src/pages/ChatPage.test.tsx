@@ -88,6 +88,7 @@ const mockSessionsList: SessionListItem[] = [
   {
     id: "session-1",
     agent_id: "agent-1",
+    agent_name: "Agent One",
     status: "active",
     created_at: "2024-01-01T00:00:00Z",
     stopped_at: null,
@@ -95,6 +96,7 @@ const mockSessionsList: SessionListItem[] = [
   {
     id: "session-2",
     agent_id: "agent-2",
+    agent_name: "Agent Two",
     status: "active",
     created_at: "2024-01-01T00:01:00Z",
     stopped_at: null,

@@ -13,10 +13,16 @@ from app.services.agent_service import (
     delete_agent,
     get_agent,
     get_agents,
+    get_all_agents,
     update_agent,
 )
 
 router = APIRouter()
+
+
+@router.get("/agents", response_model=list[AgentRead])
+async def list_all_agents(db: AsyncSession = Depends(get_db)):
+    return await get_all_agents(db)
 
 
 @router.get("/teams/{team_id}/agents", response_model=list[AgentRead])

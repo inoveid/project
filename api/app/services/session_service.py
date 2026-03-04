@@ -32,14 +32,26 @@ async def create_session(db: AsyncSession, data: SessionCreate) -> Session:
     return session
 
 
-async def get_sessions(db: AsyncSession) -> list[Session]:
+async def get_sessions(db: AsyncSession) -> list[dict]:
     stmt = (
-        select(Session)
+        select(Session, Agent.name.label("agent_name"))
+        .join(Agent, Session.agent_id == Agent.id)
         .where(Session.status == "active")
         .order_by(Session.created_at.desc())
     )
     result = await db.execute(stmt)
-    return list(result.scalars().all())
+    rows = result.all()
+    return [
+        {
+            "id": session.id,
+            "agent_id": session.agent_id,
+            "agent_name": agent_name,
+            "status": session.status,
+            "created_at": session.created_at,
+            "stopped_at": session.stopped_at,
+        }
+        for session, agent_name in rows
+    ]
 
 
 async def get_session(db: AsyncSession, session_id: uuid.UUID) -> Session:

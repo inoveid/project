@@ -1,14 +1,17 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { ActiveSessions } from "../components/ActiveSessions";
+import { QuickStartChat } from "../components/QuickStartChat";
+import { SummaryCards } from "../components/SummaryCards";
 import { TeamCard } from "../components/TeamCard";
 import { TeamForm } from "../components/TeamForm";
-import { SessionList } from "../components/SessionList";
 import {
   useCreateTeam,
   useDeleteTeam,
   useTeams,
   useUpdateTeam,
 } from "../hooks/useTeams";
+import { useSessions } from "../hooks/useSessions";
 import type { Team } from "../types";
 
 type FormMode =
@@ -19,6 +22,7 @@ type FormMode =
 export function Dashboard() {
   const navigate = useNavigate();
   const { data: teams, isLoading, error } = useTeams();
+  const { data: sessions } = useSessions();
   const createTeam = useCreateTeam();
   const updateTeam = useUpdateTeam();
   const deleteTeam = useDeleteTeam();
@@ -44,14 +48,40 @@ export function Dashboard() {
     );
   }
 
+  const teamsCount = teams?.length ?? 0;
+  const agentsCount = teams?.reduce((sum, t) => sum + t.agents_count, 0) ?? 0;
+  const activeSessions = sessions ?? [];
   const activeMutation = formMode.kind === "create" ? createTeam : updateTeam;
 
   return (
     <div>
-      <SessionList onSelectSession={(id) => navigate(`/chat/${id}`)} />
+      <SummaryCards
+        teamsCount={teamsCount}
+        agentsCount={agentsCount}
+        activeSessionsCount={activeSessions.length}
+      />
+
+      <section className="mb-8">
+        <h2 className="text-lg font-semibold text-gray-900 mb-3">
+          Quick Start
+        </h2>
+        <QuickStartChat
+          onSessionCreated={(id) => navigate(`/chat/${id}`)}
+        />
+      </section>
+
+      <section className="mb-8">
+        <h2 className="text-lg font-semibold text-gray-900 mb-3">
+          Active Sessions
+        </h2>
+        <ActiveSessions
+          sessions={activeSessions}
+          onOpenChat={(id) => navigate(`/chat/${id}`)}
+        />
+      </section>
 
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Teams</h1>
+        <h2 className="text-lg font-semibold text-gray-900">Teams</h2>
         {formMode.kind === "closed" && (
           <button
             onClick={() => setFormMode({ kind: "create" })}

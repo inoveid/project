@@ -89,6 +89,7 @@ export interface Message {
 export interface SessionListItem {
   id: string;
   agent_id: string;
+  agent_name: string;
   status: "active" | "stopped";
   created_at: string;
   stopped_at: string | null;

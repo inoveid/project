@@ -3,12 +3,22 @@ import {
   createAgent,
   deleteAgent,
   getAgents,
+  getAllAgents,
   updateAgent,
 } from "../api/agents";
 import type { AgentCreate, AgentUpdate } from "../types";
 
+const ALL_AGENTS_KEY = ["agents"] as const;
+
 function agentsKey(teamId: string) {
   return ["teams", teamId, "agents"] as const;
+}
+
+export function useAllAgents() {
+  return useQuery({
+    queryKey: ALL_AGENTS_KEY,
+    queryFn: getAllAgents,
+  });
 }
 
 export function useAgents(teamId: string) {
