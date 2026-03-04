@@ -22,7 +22,7 @@ class AgentLinkRead(BaseModel):
     team_id: uuid.UUID
     from_agent_id: uuid.UUID
     to_agent_id: uuid.UUID
-    link_type: str
+    link_type: LinkType
     created_at: datetime
 
     model_config = {"from_attributes": True}
