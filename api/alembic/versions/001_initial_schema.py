@@ -109,6 +109,10 @@ def upgrade() -> None:
             "link_type IN ('handoff', 'review', 'migration_brief')",
             name="ck_agent_links_link_type",
         ),
+        sa.CheckConstraint(
+            "from_agent_id != to_agent_id",
+            name="ck_agent_links_no_self_link",
+        ),
     )
     op.create_index("idx_agent_links_team_id", "agent_links", ["team_id"])
 
