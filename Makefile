@@ -1,4 +1,4 @@
-.PHONY: dev stop migrate logs
+.PHONY: dev stop migrate logs import
 
 dev:
 	docker compose -f docker-compose.dev.yml up --build
@@ -20,3 +20,6 @@ logs-api:
 
 db-shell:
 	docker compose -f docker-compose.dev.yml exec db psql -U postgres agent_console
+
+import:
+	docker compose -f docker-compose.dev.yml exec api python -m app.import_cmd $(TEAMS_DIR)
