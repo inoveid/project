@@ -74,6 +74,7 @@ export interface Session {
 export interface ToolUse {
   tool_name: string;
   tool_input: Record<string, unknown>;
+  result?: string;
 }
 
 export interface Message {
@@ -100,6 +101,6 @@ export type WsOutgoing =
 export type WsIncoming =
   | { type: "assistant_text"; content: string }
   | { type: "tool_use"; tool_name: string; tool_input: Record<string, unknown> }
-  | { type: "tool_result"; tool_name: string; output: string }
+  | { type: "tool_result"; content: string }
   | { type: "done" }
   | { type: "error"; error: string };

@@ -8,6 +8,7 @@ import { ChatWindow } from "../components/ChatWindow";
 
 function StatusIndicator({ status }: { status: ChatStatus }) {
   const labels: Record<ChatStatus, string> = {
+    idle: "Loading...",
     connecting: "Connecting...",
     connected: "Ready",
     typing: "Agent is typing...",
@@ -16,6 +17,7 @@ function StatusIndicator({ status }: { status: ChatStatus }) {
   };
 
   const colors: Record<ChatStatus, string> = {
+    idle: "text-gray-400",
     connecting: "text-yellow-600",
     connected: "text-green-600",
     typing: "text-blue-600",
@@ -76,19 +78,20 @@ export function ChatPage() {
     enabled: Boolean(sessionId),
   });
 
+  const sessionLoaded = Boolean(session);
+
   const {
     messages,
     status,
     error: chatError,
     sendMessage,
     stopAgent,
-  } = useChat(sessionId ?? "", session?.messages ?? []);
+  } = useChat(sessionId ?? "", session?.messages ?? [], sessionLoaded);
 
   async function handleStop() {
+    if (!sessionId) return;
     stopAgent();
-    if (sessionId) {
-      await stopSession(sessionId);
-    }
+    await stopSession(sessionId);
     navigate("/");
   }
 
@@ -119,7 +122,7 @@ export function ChatPage() {
         </div>
         <button
           onClick={() => void handleStop()}
-          disabled={status === "disconnected"}
+          disabled={status === "disconnected" || status === "idle"}
           className="rounded border border-red-300 px-3 py-1 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
         >
           Stop

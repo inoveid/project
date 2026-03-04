@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { TeamCard } from "../components/TeamCard";
 import { TeamForm } from "../components/TeamForm";
+import { SessionList } from "../components/SessionList";
 import {
   useCreateTeam,
   useDeleteTeam,
@@ -45,6 +46,8 @@ export function Dashboard() {
 
   return (
     <div>
+      <SessionList />
+
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Teams</h1>
         {formMode.kind === "closed" && (

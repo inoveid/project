@@ -26,9 +26,16 @@ export function ToolUseBlock({ toolUse }: ToolUseBlockProps) {
         )}
       </button>
       {expanded && (
-        <pre className="overflow-x-auto border-t border-gray-200 bg-gray-100 px-3 py-2 font-mono text-xs text-gray-600">
-          {JSON.stringify(toolUse.tool_input, null, 2)}
-        </pre>
+        <>
+          <pre className="overflow-x-auto border-t border-gray-200 bg-gray-100 px-3 py-2 font-mono text-xs text-gray-600">
+            {JSON.stringify(toolUse.tool_input, null, 2)}
+          </pre>
+          {toolUse.result && (
+            <pre className="overflow-x-auto border-t border-gray-200 bg-green-50 px-3 py-2 font-mono text-xs text-green-700">
+              {toolUse.result}
+            </pre>
+          )}
+        </>
       )}
     </div>
   );

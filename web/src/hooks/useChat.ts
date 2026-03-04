@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Message, ToolUse, WsIncoming } from "../types";
 
-export type ChatStatus = "connecting" | "connected" | "typing" | "tool" | "disconnected";
+export type ChatStatus = "idle" | "connecting" | "connected" | "typing" | "tool" | "disconnected";
 
 interface UseChatResult {
   messages: Message[];
@@ -25,15 +25,21 @@ function makeLocalMessage(role: "user" | "assistant", content: string): Message 
 const RECONNECT_DELAY_MS = 2000;
 const MAX_RECONNECT_ATTEMPTS = 5;
 
-export function useChat(sessionId: string, initialMessages: Message[]): UseChatResult {
-  const [messages, setMessages] = useState<Message[]>(initialMessages);
-  const [status, setStatus] = useState<ChatStatus>("connecting");
+export function useChat(
+  sessionId: string,
+  initialMessages: Message[],
+  enabled: boolean,
+): UseChatResult {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [status, setStatus] = useState<ChatStatus>("idle");
   const [error, setError] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectCount = useRef(0);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingTextRef = useRef("");
   const pendingToolsRef = useRef<ToolUse[]>([]);
+  const initializedRef = useRef(false);
 
   const handleEvent = useCallback(
     (event: WsIncoming) => {
@@ -63,24 +69,31 @@ export function useChat(sessionId: string, initialMessages: Message[]): UseChatR
           });
           break;
 
-        case "tool_result":
+        case "tool_result": {
+          const lastTool = pendingToolsRef.current[pendingToolsRef.current.length - 1];
+          if (lastTool) {
+            lastTool.result = event.content;
+          }
           break;
+        }
 
-        case "done":
+        case "done": {
+          const text = pendingTextRef.current;
+          const tools = [...pendingToolsRef.current];
+          pendingTextRef.current = "";
+          pendingToolsRef.current = [];
+
           setMessages((prev) => {
             const withoutStreaming = prev.filter((m) => m.id !== "__streaming__");
-            const text = pendingTextRef.current;
-            const tools = pendingToolsRef.current;
             if (!text && tools.length === 0) return withoutStreaming;
 
             const msg = makeLocalMessage("assistant", text);
-            msg.tool_uses = tools.length > 0 ? [...tools] : null;
+            msg.tool_uses = tools.length > 0 ? tools : null;
             return [...withoutStreaming, msg];
           });
-          pendingTextRef.current = "";
-          pendingToolsRef.current = [];
           setStatus("connected");
           break;
+        }
 
         case "error":
           setError(event.error);
@@ -96,6 +109,7 @@ export function useChat(sessionId: string, initialMessages: Message[]): UseChatR
     const wsUrl = `${protocol}//${window.location.host}/api/ws/sessions/${sessionId}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
+    setStatus("connecting");
 
     ws.onopen = () => {
       setStatus("connected");
@@ -117,7 +131,7 @@ export function useChat(sessionId: string, initialMessages: Message[]): UseChatR
       setStatus("disconnected");
       if (reconnectCount.current < MAX_RECONNECT_ATTEMPTS) {
         reconnectCount.current += 1;
-        setTimeout(connect, RECONNECT_DELAY_MS);
+        reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY_MS);
       }
     };
 
@@ -126,17 +140,28 @@ export function useChat(sessionId: string, initialMessages: Message[]): UseChatR
     };
   }, [sessionId, handleEvent]);
 
+  // Set initial messages once when session loads
   useEffect(() => {
+    if (!enabled || initializedRef.current) return;
+    initializedRef.current = true;
+    setMessages(initialMessages);
+  }, [enabled, initialMessages]);
+
+  // Connect/disconnect WS separately from message initialization
+  useEffect(() => {
+    if (!enabled || !initializedRef.current) return;
+
     connect();
+
     return () => {
       reconnectCount.current = MAX_RECONNECT_ATTEMPTS;
+      if (reconnectTimer.current !== null) {
+        clearTimeout(reconnectTimer.current);
+        reconnectTimer.current = null;
+      }
       wsRef.current?.close();
     };
-  }, [connect]);
-
-  useEffect(() => {
-    setMessages(initialMessages);
-  }, [initialMessages]);
+  }, [enabled, connect]);
 
   const sendMessage = useCallback(
     (content: string) => {

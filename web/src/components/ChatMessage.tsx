@@ -1,3 +1,4 @@
+import Markdown from "react-markdown";
 import type { Message } from "../types";
 import { ToolUseBlock } from "./ToolUseBlock";
 
@@ -19,9 +20,9 @@ export function ChatMessage({ message }: ChatMessageProps) {
   return (
     <div className="flex justify-start">
       <div className="max-w-[70%] rounded-lg bg-white px-4 py-2 shadow-sm border border-gray-200">
-        <p className="whitespace-pre-wrap text-sm text-gray-800">
-          {message.content}
-        </p>
+        <div className="prose prose-sm prose-gray max-w-none text-sm text-gray-800">
+          <Markdown>{message.content}</Markdown>
+        </div>
         {message.tool_uses && message.tool_uses.length > 0 && (
           <div className="mt-2">
             {message.tool_uses.map((tu, idx) => (
