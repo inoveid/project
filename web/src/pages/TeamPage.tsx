@@ -2,14 +2,22 @@ import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { AgentCard } from "../components/AgentCard";
 import { AgentForm } from "../components/AgentForm";
+import { AgentLinkForm } from "../components/AgentLinkForm";
+import { AgentLinkList } from "../components/AgentLinkList";
 import {
   useAgents,
   useCreateAgent,
   useDeleteAgent,
   useUpdateAgent,
 } from "../hooks/useAgents";
+import {
+  useAgentLinks,
+  useCreateAgentLink,
+  useDeleteAgentLink,
+} from "../hooks/useAgentLinks";
 import { useTeam } from "../hooks/useTeams";
 import type { Agent, AgentCreate, AgentUpdate } from "../types";
+import type { AgentLinkCreate } from "../api/agentLinks";
 
 type FormMode = { kind: "closed" } | { kind: "create" } | { kind: "edit"; agent: Agent };
 
@@ -18,10 +26,14 @@ export function TeamPage() {
   const teamId = id ?? "";
   const { data: team, isLoading: teamLoading } = useTeam(teamId);
   const { data: agents, isLoading: agentsLoading } = useAgents(teamId);
+  const { data: links } = useAgentLinks(teamId);
   const createAgent = useCreateAgent(teamId);
   const updateAgent = useUpdateAgent(teamId);
   const deleteAgent = useDeleteAgent(teamId);
+  const createLink = useCreateAgentLink(teamId);
+  const deleteLink = useDeleteAgentLink(teamId);
   const [formMode, setFormMode] = useState<FormMode>({ kind: "closed" });
+  const [showLinkForm, setShowLinkForm] = useState(false);
 
   function handleDelete(agentId: string) {
     if (window.confirm("Delete this agent?")) {
@@ -45,6 +57,18 @@ export function TeamPage() {
       { id: formMode.agent.id, data },
       { onSuccess: () => setFormMode({ kind: "closed" }) },
     );
+  }
+
+  function handleCreateLink(data: AgentLinkCreate) {
+    createLink.mutate(data, {
+      onSuccess: () => setShowLinkForm(false),
+    });
+  }
+
+  function handleDeleteLink(linkId: string) {
+    if (window.confirm("Delete this link?")) {
+      deleteLink.mutate(linkId);
+    }
   }
 
   if (teamLoading || agentsLoading) {
@@ -111,6 +135,38 @@ export function TeamPage() {
           No agents yet. Add your first agent to this team.
         </p>
       )}
+
+      <div className="mt-8">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Links</h2>
+          {!showLinkForm && agents && agents.length >= 2 && (
+            <button
+              onClick={() => setShowLinkForm(true)}
+              className="border px-3 py-1.5 rounded text-sm hover:bg-gray-50"
+            >
+              Add Link
+            </button>
+          )}
+        </div>
+
+        {showLinkForm && agents && (
+          <div className="mb-4">
+            <AgentLinkForm
+              agents={agents}
+              onSubmit={handleCreateLink}
+              onCancel={() => setShowLinkForm(false)}
+              isLoading={createLink.isPending}
+              error={createLink.error?.message ?? null}
+            />
+          </div>
+        )}
+
+        <AgentLinkList
+          links={links ?? []}
+          agents={agents ?? []}
+          onDelete={handleDeleteLink}
+        />
+      </div>
     </div>
   );
 }
