@@ -40,6 +40,9 @@ export function useChat(
   const pendingTextRef = useRef("");
   const pendingToolsRef = useRef<ToolUse[]>([]);
   const initializedRef = useRef(false);
+  const stoppedRef = useRef(false);
+  const initialMessagesRef = useRef(initialMessages);
+  initialMessagesRef.current = initialMessages;
 
   const handleEvent = useCallback(
     (event: WsIncoming) => {
@@ -105,6 +108,8 @@ export function useChat(
   );
 
   const connect = useCallback(() => {
+    if (stoppedRef.current) return;
+
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${protocol}//${window.location.host}/api/ws/sessions/${sessionId}`;
     const ws = new WebSocket(wsUrl);
@@ -129,7 +134,7 @@ export function useChat(
     ws.onclose = () => {
       wsRef.current = null;
       setStatus("disconnected");
-      if (reconnectCount.current < MAX_RECONNECT_ATTEMPTS) {
+      if (!stoppedRef.current && reconnectCount.current < MAX_RECONNECT_ATTEMPTS) {
         reconnectCount.current += 1;
         reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY_MS);
       }
@@ -144,13 +149,14 @@ export function useChat(
   useEffect(() => {
     if (!enabled || initializedRef.current) return;
     initializedRef.current = true;
-    setMessages(initialMessages);
-  }, [enabled, initialMessages]);
+    setMessages(initialMessagesRef.current);
+  }, [enabled]);
 
-  // Connect/disconnect WS separately from message initialization
+  // Connect/disconnect WS
   useEffect(() => {
     if (!enabled || !initializedRef.current) return;
 
+    stoppedRef.current = false;
     connect();
 
     return () => {
@@ -174,6 +180,11 @@ export function useChat(
   );
 
   const stopAgent = useCallback(() => {
+    stoppedRef.current = true;
+    if (reconnectTimer.current !== null) {
+      clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = null;
+    }
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     wsRef.current.send(JSON.stringify({ type: "stop" }));
   }, []);

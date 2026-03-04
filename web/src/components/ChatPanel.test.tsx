@@ -128,4 +128,24 @@ describe("ChatPanel", () => {
 
     expect(screen.getByText("How are you?")).toBeInTheDocument();
   });
+
+  it("disables input while agent is typing", async () => {
+    vi.mocked(sessionsApi.getSession).mockResolvedValue(mockSession);
+    renderPanel();
+    await screen.findByText("Hello");
+
+    const ws = wsInstances[wsInstances.length - 1];
+    await act(async () => {
+      ws?.simulateOpen();
+    });
+
+    const input = screen.getByPlaceholderText("Type a message...");
+    await waitFor(() => expect(input).not.toBeDisabled());
+
+    // Simulate agent typing — input should become disabled
+    await act(async () => {
+      ws?.onmessage?.({ data: JSON.stringify({ type: "assistant_text", content: "Hi" }) });
+    });
+    expect(input).toBeDisabled();
+  });
 });

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSession, stopSession } from "../api/sessions";
 import { useChat } from "../hooks/useChat";
 import type { ChatStatus } from "../hooks/useChat";
@@ -74,6 +74,7 @@ interface ChatPanelProps {
 }
 
 export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
+  const queryClient = useQueryClient();
   const { data: session, isLoading, error: loadError } = useQuery({
     queryKey: ["session", sessionId],
     queryFn: () => getSession(sessionId),
@@ -93,6 +94,7 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
   async function handleStop() {
     stopAgent();
     await stopSession(sessionId);
+    void queryClient.invalidateQueries({ queryKey: ["sessions"] });
   }
 
   if (isLoading) {
@@ -107,7 +109,7 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
     );
   }
 
-  const isActive = status === "connected" || status === "typing" || status === "tool";
+  const canSend = status === "connected";
 
   return (
     <div className="flex h-full flex-col border-l first:border-l-0">
@@ -145,7 +147,7 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
 
       <ChatWindow messages={messages} />
 
-      <ChatInput onSend={sendMessage} disabled={!isActive} />
+      <ChatInput onSend={sendMessage} disabled={!canSend} />
     </div>
   );
 }

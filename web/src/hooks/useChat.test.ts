@@ -193,4 +193,18 @@ describe("useChat", () => {
     rerender({ enabled: true });
     expect(MockWebSocket.instances).toHaveLength(1);
   });
+
+  it("does not reconnect after stopAgent", () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useChat("s-1", [], true));
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.simulateOpen());
+
+    act(() => result.current.stopAgent());
+    act(() => ws.simulateClose());
+
+    act(() => vi.advanceTimersByTime(2000));
+    // Should NOT have created a new WS instance
+    expect(MockWebSocket.instances).toHaveLength(1);
+  });
 });

@@ -35,12 +35,17 @@ async def websocket_session(
 
     agent = session.agent
     if not runtime.is_running(session_id):
-        await runtime.start_session(
-            session_id=session_id,
-            workdir=agent.config.get("workdir", "") if agent.config else "",
-            system_prompt=agent.system_prompt,
-            claude_session_id=session.claude_session_id,
-        )
+        try:
+            await runtime.start_session(
+                session_id=session_id,
+                workdir=agent.config.get("workdir", "") if agent.config else "",
+                system_prompt=agent.system_prompt,
+                claude_session_id=session.claude_session_id,
+            )
+        except Exception as exc:
+            await websocket.send_json({"type": "error", "error": str(exc)})
+            await websocket.close(code=4000)
+            return
 
     try:
         await _handle_messages(websocket, db, session_id)
@@ -91,20 +96,25 @@ async def _stream_response(
 ) -> None:
     full_text = ""
     tool_uses: list[dict] = []
+    stream = runtime.send_message(session_id, content)
 
-    async for event in runtime.send_message(session_id, content):
-        event_type = event.get("type")
+    try:
+        async for event in stream:
+            event_type = event.get("type")
 
-        if event_type == "assistant_text":
-            full_text += event.get("content", "")
+            if event_type == "assistant_text":
+                full_text += event.get("content", "")
 
-        if event_type == "tool_use":
-            tool_uses.append({
-                "tool_name": event.get("tool_name", ""),
-                "tool_input": event.get("tool_input", {}),
-            })
+            if event_type == "tool_use":
+                tool_uses.append({
+                    "tool_name": event.get("tool_name", ""),
+                    "tool_input": event.get("tool_input", {}),
+                })
 
-        await websocket.send_json(event)
+            await websocket.send_json(event)
+    except WebSocketDisconnect:
+        await stream.aclose()
+        raise
 
     if full_text or tool_uses:
         await add_message(
@@ -115,10 +125,13 @@ async def _stream_response(
             tool_uses=tool_uses if tool_uses else None,
         )
 
-    claude_sid = runtime.get_claude_session_id(session_id)
-    if claude_sid:
-        session = await get_session(db, session_id)
-        session.claude_session_id = claude_sid
-        await db.commit()
+    try:
+        claude_sid = runtime.get_claude_session_id(session_id)
+        if claude_sid:
+            session = await get_session(db, session_id)
+            session.claude_session_id = claude_sid
+            await db.commit()
+    except SessionNotFoundError:
+        logger.warning("Session %s deleted during streaming", session_id)
 
     await websocket.send_json({"type": "done"})
