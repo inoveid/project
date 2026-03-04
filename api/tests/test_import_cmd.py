@@ -11,7 +11,6 @@ from app.import_cmd import (
     import_team,
     parse_team_json,
     print_summary,
-    read_agent_prompt,
     run_import,
 )
 
@@ -69,20 +68,6 @@ def test_parse_team_json(teams_dir):
 def test_parse_team_json_missing(tmp_path):
     with pytest.raises(FileNotFoundError):
         parse_team_json(tmp_path / "nonexistent")
-
-
-# --- read_agent_prompt ---
-
-
-def test_read_agent_prompt(teams_dir):
-    agent_dir = teams_dir / "my-team" / "agents" / "coder"
-    prompt = read_agent_prompt(agent_dir)
-    assert prompt == "You are a coder agent."
-
-
-def test_read_agent_prompt_missing(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        read_agent_prompt(tmp_path)
 
 
 # --- discover_agents ---

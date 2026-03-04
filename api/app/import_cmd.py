@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import sys
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -40,14 +41,6 @@ def parse_team_json(team_dir: Path) -> dict:
         raise FileNotFoundError(f"team.json not found in {team_dir}")
     with open(team_json_path, encoding="utf-8") as f:
         return json.loads(f.read())
-
-
-def read_agent_prompt(agent_dir: Path) -> str:
-    """Read CLAUDE.md system prompt from an agent directory."""
-    claude_md = agent_dir / "CLAUDE.md"
-    if not claude_md.exists():
-        raise FileNotFoundError(f"CLAUDE.md not found in {agent_dir}")
-    return claude_md.read_text(encoding="utf-8")
 
 
 def discover_agents(team_dir: Path) -> list[dict]:
@@ -88,7 +81,7 @@ async def find_team_by_name(
 
 
 async def find_agent_by_name(
-    db: AsyncSession, team_id: "Team.id", name: str
+    db: AsyncSession, team_id: uuid.UUID, name: str
 ) -> Agent | None:
     """Find an agent by name within a team."""
     stmt = select(Agent).where(Agent.team_id == team_id, Agent.name == name)
