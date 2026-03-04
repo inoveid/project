@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { TeamCard } from "../components/TeamCard";
 import { TeamForm } from "../components/TeamForm";
 import { SessionList } from "../components/SessionList";
@@ -16,6 +17,7 @@ type FormMode =
   | { kind: "edit"; team: Team };
 
 export function Dashboard() {
+  const navigate = useNavigate();
   const { data: teams, isLoading, error } = useTeams();
   const createTeam = useCreateTeam();
   const updateTeam = useUpdateTeam();
@@ -46,7 +48,7 @@ export function Dashboard() {
 
   return (
     <div>
-      <SessionList />
+      <SessionList onSelectSession={(id) => navigate(`/chat/${id}`)} />
 
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Teams</h1>

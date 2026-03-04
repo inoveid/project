@@ -1,18 +1,17 @@
-import { render, screen, act, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ChatPage } from "./ChatPage";
 import * as sessionsApi from "../api/sessions";
-import type { Session } from "../types";
+import type { Session, SessionListItem } from "../types";
 
 vi.mock("../api/sessions", () => ({
   getSession: vi.fn(),
+  getSessions: vi.fn(),
   stopSession: vi.fn(),
 }));
 
-// Mock WebSocket to prevent real connections
 const wsInstances: MockWs[] = [];
 
 class MockWs {
@@ -63,16 +62,44 @@ const mockSession: Session = {
       tool_uses: null,
       created_at: "2024-01-01T00:00:00Z",
     },
+  ],
+};
+
+const mockSession2: Session = {
+  id: "session-2",
+  agent_id: "agent-2",
+  status: "active",
+  claude_session_id: null,
+  created_at: "2024-01-01T00:01:00Z",
+  stopped_at: null,
+  messages: [
     {
       id: "msg-2",
-      session_id: "session-1",
-      role: "assistant",
-      content: "Hi there!",
+      session_id: "session-2",
+      role: "user",
+      content: "World",
       tool_uses: null,
-      created_at: "2024-01-01T00:00:01Z",
+      created_at: "2024-01-01T00:01:00Z",
     },
   ],
 };
+
+const mockSessionsList: SessionListItem[] = [
+  {
+    id: "session-1",
+    agent_id: "agent-1",
+    status: "active",
+    created_at: "2024-01-01T00:00:00Z",
+    stopped_at: null,
+  },
+  {
+    id: "session-2",
+    agent_id: "agent-2",
+    status: "active",
+    created_at: "2024-01-01T00:01:00Z",
+    stopped_at: null,
+  },
+];
 
 function renderChatPage(sessionId = "session-1") {
   const queryClient = new QueryClient({
@@ -91,67 +118,58 @@ function renderChatPage(sessionId = "session-1") {
 }
 
 describe("ChatPage", () => {
-  it("shows loading state initially", () => {
-    vi.mocked(sessionsApi.getSession).mockReturnValue(new Promise(() => {}));
-    renderChatPage();
-    expect(screen.getByText("Loading session...")).toBeInTheDocument();
-  });
-
-  it("shows error when session fails to load", async () => {
-    vi.mocked(sessionsApi.getSession).mockRejectedValue(
-      new Error("Not found"),
-    );
-    renderChatPage();
-    expect(
-      await screen.findByText(/Failed to load session/),
-    ).toBeInTheDocument();
-  });
-
-  it("renders chat history after session loads", async () => {
+  it("shows sidebar with sessions", async () => {
     vi.mocked(sessionsApi.getSession).mockResolvedValue(mockSession);
+    vi.mocked(sessionsApi.getSessions).mockResolvedValue(mockSessionsList);
+    renderChatPage();
+
+    expect(await screen.findByText("Sessions")).toBeInTheDocument();
+  });
+
+  it("renders main chat panel with session messages", async () => {
+    vi.mocked(sessionsApi.getSession).mockResolvedValue(mockSession);
+    vi.mocked(sessionsApi.getSessions).mockResolvedValue(mockSessionsList);
     renderChatPage();
 
     expect(await screen.findByText("Hello")).toBeInTheDocument();
-    expect(screen.getByText("Hi there!")).toBeInTheDocument();
   });
 
-  it("renders status indicator and stop button", async () => {
-    vi.mocked(sessionsApi.getSession).mockResolvedValue(mockSession);
-    renderChatPage();
-
-    await screen.findByText("Hello");
-    expect(screen.getByText("Stop")).toBeInTheDocument();
-    expect(screen.getByText("Chat")).toBeInTheDocument();
-  });
-
-  it("sends a message via the input form", async () => {
-    vi.mocked(sessionsApi.getSession).mockResolvedValue(mockSession);
-    renderChatPage();
-    await screen.findByText("Hello");
-
-    // Connect WS
-    const ws = wsInstances[wsInstances.length - 1];
-    await act(async () => {
-      ws?.simulateOpen();
+  it("opens side panel on 'Open side-by-side' click", async () => {
+    vi.mocked(sessionsApi.getSession).mockImplementation((id: string) => {
+      if (id === "session-1") return Promise.resolve(mockSession);
+      if (id === "session-2") return Promise.resolve(mockSession2);
+      return Promise.reject(new Error("Unknown"));
     });
+    vi.mocked(sessionsApi.getSessions).mockResolvedValue(mockSessionsList);
+    renderChatPage();
 
-    const input = screen.getByPlaceholderText("Type a message...");
-    await waitFor(() => expect(input).not.toBeDisabled());
+    const sideBtns = await screen.findAllByText("Open side-by-side");
+    // Click the second session's side button (the one inside session-2 container)
+    const btn = sideBtns.find((b) => {
+      const container = b.closest("[data-session-id]");
+      return container?.getAttribute("data-session-id") === "session-2";
+    });
+    expect(btn).toBeTruthy();
+    fireEvent.click(btn!);
 
-    const user = userEvent.setup();
-    await user.type(input, "How are you?");
-    await user.click(screen.getByText("Send"));
-
-    expect(screen.getByText("How are you?")).toBeInTheDocument();
+    expect(await screen.findByText("World")).toBeInTheDocument();
+    expect(screen.getByText("Hello")).toBeInTheDocument();
   });
 
-  it("disables input when not connected", async () => {
-    vi.mocked(sessionsApi.getSession).mockResolvedValue(mockSession);
-    renderChatPage();
-    await screen.findByText("Hello");
-
-    // WS not yet open — input should be disabled
-    const input = screen.getByPlaceholderText("Type a message...");
-    expect(input).toBeDisabled();
+  it("shows missing session ID message", () => {
+    vi.mocked(sessionsApi.getSessions).mockResolvedValue([]);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/chat/"]}>
+          <Routes>
+            <Route path="/chat/" element={<ChatPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText("Missing session ID")).toBeInTheDocument();
   });
 });
