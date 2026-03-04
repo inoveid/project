@@ -33,17 +33,18 @@ export function TeamPage() {
     setFormMode({ kind: "edit", agent });
   }
 
-  function handleFormSubmit(data: AgentCreate | AgentUpdate) {
-    if (formMode.kind === "create") {
-      createAgent.mutate(data as AgentCreate, {
-        onSuccess: () => setFormMode({ kind: "closed" }),
-      });
-    } else if (formMode.kind === "edit") {
-      updateAgent.mutate(
-        { id: formMode.agent.id, data: data as AgentUpdate },
-        { onSuccess: () => setFormMode({ kind: "closed" }) },
-      );
-    }
+  function handleCreate(data: AgentCreate) {
+    createAgent.mutate(data, {
+      onSuccess: () => setFormMode({ kind: "closed" }),
+    });
+  }
+
+  function handleUpdate(data: AgentUpdate) {
+    if (formMode.kind !== "edit") return;
+    updateAgent.mutate(
+      { id: formMode.agent.id, data },
+      { onSuccess: () => setFormMode({ kind: "closed" }) },
+    );
   }
 
   if (teamLoading || agentsLoading) {
@@ -85,7 +86,8 @@ export function TeamPage() {
         <div className="mb-6">
           <AgentForm
             initial={formMode.kind === "edit" ? formMode.agent : undefined}
-            onSubmit={handleFormSubmit}
+            onCreate={handleCreate}
+            onUpdate={handleUpdate}
             onCancel={() => setFormMode({ kind: "closed" })}
             isLoading={activeMutation.isPending}
             error={activeMutation.error?.message ?? null}

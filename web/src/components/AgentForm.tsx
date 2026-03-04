@@ -3,7 +3,8 @@ import type { Agent, AgentCreate, AgentUpdate } from "../types";
 
 interface AgentFormProps {
   initial?: Agent;
-  onSubmit: (data: AgentCreate | AgentUpdate) => void;
+  onCreate?: (data: AgentCreate) => void;
+  onUpdate?: (data: AgentUpdate) => void;
   onCancel: () => void;
   isLoading: boolean;
   error: string | null;
@@ -11,7 +12,8 @@ interface AgentFormProps {
 
 export function AgentForm({
   initial,
-  onSubmit,
+  onCreate,
+  onUpdate,
   onCancel,
   isLoading,
   error,
@@ -47,7 +49,7 @@ export function AgentForm({
       .map((t) => t.trim())
       .filter(Boolean);
 
-    if (initial) {
+    if (initial && onUpdate) {
       const update: AgentUpdate = {};
       if (name !== initial.name) update.name = name;
       if (role !== initial.role) update.role = role;
@@ -59,9 +61,9 @@ export function AgentForm({
         update.allowed_tools = tools;
       if (configJson !== JSON.stringify(initial.config, null, 2))
         update.config = parsedConfig;
-      onSubmit(update);
-    } else {
-      onSubmit({
+      onUpdate(update);
+    } else if (onCreate) {
+      onCreate({
         name,
         role,
         description: description || null,

@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -11,7 +11,7 @@ class AgentCreate(BaseModel):
     description: Optional[str] = None
     system_prompt: str = Field(..., min_length=1)
     allowed_tools: list[str] = Field(default_factory=list)
-    config: dict[str, object] = Field(default_factory=dict)
+    config: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentUpdate(BaseModel):
@@ -20,7 +20,7 @@ class AgentUpdate(BaseModel):
     description: Optional[str] = None
     system_prompt: Optional[str] = Field(None, min_length=1)
     allowed_tools: Optional[list[str]] = None
-    config: Optional[dict[str, object]] = None
+    config: Optional[dict[str, Any]] = None
 
 
 class AgentRead(BaseModel):
@@ -31,7 +31,7 @@ class AgentRead(BaseModel):
     description: Optional[str]
     system_prompt: str
     allowed_tools: list[str]
-    config: dict[str, object]
+    config: dict[str, Any]
     created_at: datetime
     updated_at: datetime
 
