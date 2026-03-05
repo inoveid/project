@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import agents, agent_links, sessions, teams, ws
+from app.routers import agents, agent_links, auth, sessions, teams, ws
 
 
 @asynccontextmanager
@@ -22,6 +22,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(teams.router, prefix="/api/teams", tags=["teams"])
 app.include_router(agents.router, prefix="/api", tags=["agents"])
 app.include_router(agent_links.router, prefix="/api", tags=["agent_links"])

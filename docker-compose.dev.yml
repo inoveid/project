@@ -25,7 +25,8 @@ services:
     volumes:
       - ./api:/src
       - ${WORKSPACE_PATH:-../../workspace}:/workspace
-      - ${HOME}/.claude:/root/.claude:ro
+      - ${HOME}/.claude:/root/.claude
+      - ${HOME}/.claude.json:/root/.claude.json
     depends_on:
       db:
         condition: service_healthy

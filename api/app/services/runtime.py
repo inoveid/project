@@ -95,6 +95,7 @@ class AgentRuntime:
     def _build_command(self, running: RunningProcess) -> list[str]:
         cmd = [
             settings.claude_cli_path,
+            "-p",
             "--output-format", "stream-json",
             "--verbose",
         ]
