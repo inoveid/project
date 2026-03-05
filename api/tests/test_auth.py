@@ -56,7 +56,7 @@ async def test_auth_status_cli_error(client):
 @pytest.mark.asyncio
 async def test_auth_login_returns_url(client):
     with patch(
-        f"{ROUTER}.start_auth_login",
+        f"{ROUTER}.start_oauth_login",
         new_callable=AsyncMock,
         return_value="https://auth.example.com/oauth?code=abc123",
     ):
@@ -71,7 +71,7 @@ async def test_auth_login_returns_url(client):
 @pytest.mark.asyncio
 async def test_auth_login_no_url(client):
     with patch(
-        f"{ROUTER}.start_auth_login",
+        f"{ROUTER}.start_oauth_login",
         new_callable=AsyncMock,
         side_effect=AuthLoginError("OAuth URL not found"),
     ):
@@ -102,20 +102,20 @@ async def test_auth_logout_error(client):
 
 @pytest.mark.asyncio
 async def test_auth_callback_submits_code(client):
-    with patch(f"{ROUTER}.submit_auth_code", new_callable=AsyncMock):
+    with patch(f"{ROUTER}.exchange_code", new_callable=AsyncMock):
         resp = await client.post("/api/auth/callback", json={"code": "abc123"})
 
     assert resp.status_code == 200
     data = resp.json()
-    assert data["message"] == "Code submitted"
+    assert data["message"] == "Authenticated"
 
 
 @pytest.mark.asyncio
 async def test_auth_callback_no_process(client):
     with patch(
-        f"{ROUTER}.submit_auth_code",
+        f"{ROUTER}.exchange_code",
         new_callable=AsyncMock,
-        side_effect=AuthLoginError("No active login process"),
+        side_effect=AuthLoginError("No active login session"),
     ):
         resp = await client.post("/api/auth/callback", json={"code": "abc123"})
 
