@@ -25,7 +25,7 @@ services:
     volumes:
       - ./api:/src
       - ${WORKSPACE_PATH:-../../workspace}:/workspace
-      - ${CLAUDE_CLI_PATH:-/usr/local/bin/claude}:/usr/local/bin/claude:ro
+      - ${HOME}/.claude:/root/.claude:ro
     depends_on:
       db:
         condition: service_healthy
