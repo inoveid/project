@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAllAgents } from "../hooks/useAgents";
+import { useAuthStatus } from "../hooks/useAuth";
 import { useCreateSession } from "../hooks/useSessions";
 
 interface QuickStartChatProps {
@@ -9,7 +10,9 @@ interface QuickStartChatProps {
 export function QuickStartChat({ onSessionCreated }: QuickStartChatProps) {
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const { data: agents } = useAllAgents();
+  const { data: authStatus } = useAuthStatus();
   const createSession = useCreateSession();
+  const isAuthenticated = authStatus?.logged_in ?? false;
 
   function handleStart() {
     if (!selectedAgentId) return;
@@ -45,11 +48,15 @@ export function QuickStartChat({ onSessionCreated }: QuickStartChatProps) {
       </select>
       <button
         onClick={handleStart}
-        disabled={!selectedAgentId || createSession.isPending}
+        disabled={!selectedAgentId || createSession.isPending || !isAuthenticated}
+        title={!isAuthenticated ? "Claude authentication required" : undefined}
         className="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {createSession.isPending ? "Starting..." : "Start Chat"}
       </button>
+      {!isAuthenticated && (
+        <span className="text-xs text-red-500">Auth required</span>
+      )}
     </div>
   );
 }

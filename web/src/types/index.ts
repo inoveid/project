@@ -99,6 +99,19 @@ export type WsOutgoing =
   | { type: "message"; content: string }
   | { type: "stop" };
 
+export interface AuthStatus {
+  logged_in: boolean;
+  email: string | null;
+  org_name: string | null;
+  subscription_type: string | null;
+  auth_method: string | null;
+}
+
+export interface AuthLoginResponse {
+  auth_url: string;
+  message: string;
+}
+
 export type WsIncoming =
   | { type: "assistant_text"; content: string }
   | { type: "tool_use"; tool_name: string; tool_input: Record<string, unknown> }

@@ -20,6 +20,18 @@ vi.mock("../api/sessions", () => ({
   stopSession: vi.fn(),
 }));
 
+vi.mock("../api/auth", () => ({
+  getAuthStatus: vi.fn().mockResolvedValue({
+    logged_in: true,
+    email: "user@test.com",
+    org_name: null,
+    subscription_type: null,
+    auth_method: null,
+  }),
+  startAuthLogin: vi.fn(),
+  authLogout: vi.fn(),
+}));
+
 function renderComponent(onSessionCreated = vi.fn()) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
