@@ -5,9 +5,9 @@ from app.services.auth_service import (
     AuthCheckError,
     AuthLoginError,
     auth_logout,
+    exchange_code,
     get_auth_status,
-    start_auth_login,
-    submit_auth_code,
+    start_oauth_login,
 )
 
 router = APIRouter()
@@ -24,7 +24,7 @@ async def auth_status_endpoint():
 @router.post("/login", response_model=AuthLoginResponse)
 async def auth_login_endpoint():
     try:
-        url = await start_auth_login()
+        url = await start_oauth_login()
     except AuthLoginError as e:
         raise HTTPException(status_code=502, detail=str(e))
     return AuthLoginResponse(
@@ -36,10 +36,10 @@ async def auth_login_endpoint():
 @router.post("/callback")
 async def auth_callback_endpoint(body: AuthCodeSubmit):
     try:
-        await submit_auth_code(body.code)
+        await exchange_code(body.code)
     except AuthLoginError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {"message": "Code submitted"}
+    return {"message": "Authenticated"}
 
 
 @router.post("/logout", status_code=204)

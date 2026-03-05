@@ -1,19 +1,24 @@
 from __future__ import annotations
 
-import asyncio
-import json
+import base64
+import hashlib
 import logging
-import re
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import urlencode
+
+import httpx
+from sqlalchemy import delete, select
 
 from app.config import settings
+from app.database import async_session
+from app.models.oauth_token import OAuthToken
 from app.schemas.auth import AuthStatusRead
 
 logger = logging.getLogger(__name__)
 
-_login_process: Optional[asyncio.subprocess.Process] = None
-
-URL_PATTERN = re.compile(r"https://\S+")
+_code_verifier: Optional[str] = None
 
 
 class AuthCheckError(Exception):
@@ -24,128 +29,168 @@ class AuthLoginError(Exception):
     pass
 
 
-async def get_auth_status() -> AuthStatusRead:
-    try:
-        process = await asyncio.create_subprocess_exec(
-            settings.claude_cli_path, "auth", "status", "--json",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+def _generate_pkce() -> tuple[str, str]:
+    """Generate (code_verifier, code_challenge) for OAuth PKCE S256."""
+    verifier_bytes = secrets.token_bytes(32)
+    code_verifier = base64.urlsafe_b64encode(verifier_bytes).rstrip(b"=").decode()
+    digest = hashlib.sha256(code_verifier.encode()).digest()
+    code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+    return code_verifier, code_challenge
+
+
+async def start_oauth_login() -> str:
+    """Generate OAuth URL with PKCE. Stores code_verifier at module level."""
+    global _code_verifier
+
+    code_verifier, code_challenge = _generate_pkce()
+    _code_verifier = code_verifier
+
+    params = {
+        "response_type": "code",
+        "client_id": settings.oauth_client_id,
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
+        "redirect_uri": settings.oauth_redirect_uri,
+        "scope": settings.oauth_scopes,
+    }
+    url = f"{settings.oauth_authorize_url}?{urlencode(params)}"
+    return url
+
+
+async def exchange_code(code: str) -> None:
+    """Exchange authorization code for tokens. Save to DB."""
+    global _code_verifier
+
+    if _code_verifier is None:
+        raise AuthLoginError("No active login session. Call /login first.")
+
+    verifier = _code_verifier
+    _code_verifier = None
+
+    data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "code_verifier": verifier,
+        "redirect_uri": settings.oauth_redirect_uri,
+        "client_id": settings.oauth_client_id,
+    }
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            settings.oauth_token_url,
+            data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30.0,
         )
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=15.0)
-    except (OSError, asyncio.TimeoutError) as exc:
-        raise AuthCheckError(f"Failed to run claude auth status: {exc}")
 
-    raw = stdout.decode().strip() if stdout else ""
-    if not raw and process.returncode != 0:
-        error_text = stderr.decode().strip() if stderr else "unknown error"
-        raise AuthCheckError(f"claude auth status failed: {error_text}")
+    if resp.status_code != 200:
+        logger.error("OAuth token exchange failed: %s %s", resp.status_code, resp.text)
+        raise AuthLoginError(f"Token exchange failed: {resp.status_code} {resp.text}")
 
-    try:
-        data = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise AuthCheckError(f"Invalid JSON from claude auth status: {exc}")
+    body = resp.json()
+    access_token = body["access_token"]
+    refresh_token = body.get("refresh_token")
+    expires_in = body.get("expires_in")
+
+    expires_at = None
+    if expires_in:
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
+
+    async with async_session() as db:
+        await db.execute(delete(OAuthToken))
+        token = OAuthToken(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_at=expires_at,
+        )
+        db.add(token)
+        await db.commit()
+
+
+async def get_auth_status() -> AuthStatusRead:
+    """Read token from DB, check expires_at."""
+    async with async_session() as db:
+        result = await db.execute(select(OAuthToken).limit(1))
+        token = result.scalar_one_or_none()
+
+    if not token:
+        return AuthStatusRead(logged_in=False)
+
+    expired = False
+    if token.expires_at:
+        expired = datetime.now(timezone.utc) >= token.expires_at
 
     return AuthStatusRead(
-        logged_in=data.get("loggedIn", False),
-        email=data.get("email"),
-        org_name=data.get("orgName"),
-        subscription_type=data.get("subscriptionType"),
-        auth_method=data.get("authMethod"),
+        logged_in=not expired,
+        email=token.email,
+        subscription_type=token.subscription_type,
     )
 
 
-async def _kill_login_process() -> None:
-    global _login_process
-    if _login_process is not None and _login_process.returncode is None:
+async def get_current_access_token() -> Optional[str]:
+    """Return valid access_token. Refresh if expired. Return None if unavailable."""
+    async with async_session() as db:
+        result = await db.execute(select(OAuthToken).limit(1))
+        token = result.scalar_one_or_none()
+
+    if not token:
+        return None
+
+    if token.expires_at and datetime.now(timezone.utc) >= token.expires_at:
+        if not token.refresh_token:
+            return None
         try:
-            _login_process.terminate()
-            await asyncio.wait_for(_login_process.wait(), timeout=3.0)
-        except (asyncio.TimeoutError, ProcessLookupError):
-            _login_process.kill()
-    _login_process = None
+            new_data = await _refresh_access_token(token.refresh_token)
+        except AuthLoginError:
+            return None
+
+        new_expires_at = None
+        if new_data.get("expires_in"):
+            new_expires_at = datetime.now(timezone.utc) + timedelta(
+                seconds=int(new_data["expires_in"])
+            )
+
+        async with async_session() as db:
+            await db.execute(delete(OAuthToken))
+            refreshed = OAuthToken(
+                access_token=new_data["access_token"],
+                refresh_token=new_data.get("refresh_token", token.refresh_token),
+                expires_at=new_expires_at,
+                email=token.email,
+                subscription_type=token.subscription_type,
+            )
+            db.add(refreshed)
+            await db.commit()
+        return new_data["access_token"]
+
+    return token.access_token
 
 
-async def _read_stream_for_url(
-    stream: asyncio.StreamReader,
-) -> tuple[str, Optional[str]]:
-    """Read lines from stream, return (collected_text, url_or_none)."""
-    collected = ""
-    while True:
-        line = await stream.readline()
-        if not line:
-            break
-        text = line.decode()
-        collected += text
-        match = URL_PATTERN.search(text)
-        if match:
-            return collected, match.group(0)
-    return collected, None
+async def _refresh_access_token(refresh_token: str) -> dict:
+    """POST token_url with grant_type=refresh_token."""
+    data = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": settings.oauth_client_id,
+    }
 
-
-async def start_auth_login() -> str:
-    global _login_process
-
-    await _kill_login_process()
-
-    try:
-        # Use 'script' to allocate a PTY — Claude CLI only reads stdin when isTTY=true
-        _login_process = await asyncio.create_subprocess_exec(
-            "script", "-q", "-c", f"{settings.claude_cli_path} auth login", "/dev/null",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-    except OSError as exc:
-        raise AuthLoginError(f"Failed to run claude auth login: {exc}")
-
-    async def _scan_streams() -> str:
-        tasks = []
-        if _login_process.stdout:
-            tasks.append(asyncio.ensure_future(
-                _read_stream_for_url(_login_process.stdout)
-            ))
-        if _login_process.stderr:
-            tasks.append(asyncio.ensure_future(
-                _read_stream_for_url(_login_process.stderr)
-            ))
-
-        collected = ""
-        for coro in asyncio.as_completed(tasks):
-            text, url = await coro
-            collected += text
-            if url:
-                for t in tasks:
-                    t.cancel()
-                return url
-
-        raise AuthLoginError(
-            f"OAuth URL not found in claude auth login output. "
-            f"Collected: {collected[:200]}"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            settings.oauth_token_url,
+            data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30.0,
         )
 
-    try:
-        return await asyncio.wait_for(_scan_streams(), timeout=15.0)
-    except asyncio.TimeoutError:
-        raise AuthLoginError("Timed out waiting for OAuth URL from claude auth login")
+    if resp.status_code != 200:
+        logger.error("OAuth refresh failed: %s %s", resp.status_code, resp.text)
+        raise AuthLoginError(f"Token refresh failed: {resp.status_code}")
 
-
-async def submit_auth_code(code: str) -> None:
-    if _login_process is None or _login_process.returncode is not None:
-        raise AuthLoginError("No active login process")
-    if _login_process.stdin is None:
-        raise AuthLoginError("Login process has no stdin pipe")
-    _login_process.stdin.write((code + "\n").encode())
-    await _login_process.stdin.drain()
-    _login_process.stdin.close()
+    return resp.json()
 
 
 async def auth_logout() -> None:
-    try:
-        process = await asyncio.create_subprocess_exec(
-            settings.claude_cli_path, "auth", "logout",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await asyncio.wait_for(process.communicate(), timeout=15.0)
-    except (OSError, asyncio.TimeoutError) as exc:
-        raise AuthCheckError(f"Failed to run claude auth logout: {exc}")
+    """Delete all tokens from DB."""
+    async with async_session() as db:
+        await db.execute(delete(OAuthToken))
+        await db.commit()

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -57,6 +58,14 @@ class AgentRuntime:
         if not running:
             raise AgentRuntimeError(f"Session {session_id} not running")
 
+        from app.services.auth_service import get_current_access_token
+
+        token = await get_current_access_token()
+        if not token:
+            raise AgentRuntimeError("Not authenticated. Please login first.")
+
+        env = {**os.environ, "CLAUDE_CODE_OAUTH_TOKEN": token}
+
         cmd = self._build_command(running)
         process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -64,6 +73,7 @@ class AgentRuntime:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=running.workdir,
+            env=env,
         )
         running.process = process
 
