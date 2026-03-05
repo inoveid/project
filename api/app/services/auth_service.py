@@ -19,6 +19,7 @@ from app.schemas.auth import AuthStatusRead
 logger = logging.getLogger(__name__)
 
 _code_verifier: Optional[str] = None
+_oauth_state: Optional[str] = None
 
 
 class AuthCheckError(Exception):
@@ -40,18 +41,23 @@ def _generate_pkce() -> tuple[str, str]:
 
 async def start_oauth_login() -> str:
     """Generate OAuth URL with PKCE. Stores code_verifier at module level."""
-    global _code_verifier
+    global _code_verifier, _oauth_state
 
     code_verifier, code_challenge = _generate_pkce()
     _code_verifier = code_verifier
 
+    state = secrets.token_urlsafe(32)
+    _oauth_state = state
+
     params = {
-        "response_type": "code",
+        "code": "true",
         "client_id": settings.oauth_client_id,
-        "code_challenge": code_challenge,
-        "code_challenge_method": "S256",
+        "response_type": "code",
         "redirect_uri": settings.oauth_redirect_uri,
         "scope": settings.oauth_scopes,
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
+        "state": state,
     }
     url = f"{settings.oauth_authorize_url}?{urlencode(params)}"
     return url
@@ -59,27 +65,34 @@ async def start_oauth_login() -> str:
 
 async def exchange_code(code: str) -> None:
     """Exchange authorization code for tokens. Save to DB."""
-    global _code_verifier
+    global _code_verifier, _oauth_state
 
     if _code_verifier is None:
         raise AuthLoginError("No active login session. Call /login first.")
 
     verifier = _code_verifier
+    state = _oauth_state
     _code_verifier = None
+    _oauth_state = None
+
+    code = code.strip()
+    if "#" in code:
+        code = code.split("#")[0]
 
     data = {
         "grant_type": "authorization_code",
         "code": code,
-        "code_verifier": verifier,
         "redirect_uri": settings.oauth_redirect_uri,
         "client_id": settings.oauth_client_id,
+        "code_verifier": verifier,
+        "state": state,
     }
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             settings.oauth_token_url,
-            data=data,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            json=data,
+            headers={"Content-Type": "application/json"},
             timeout=30.0,
         )
 
@@ -177,8 +190,8 @@ async def _refresh_access_token(refresh_token: str) -> dict:
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             settings.oauth_token_url,
-            data=data,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            json=data,
+            headers={"Content-Type": "application/json"},
             timeout=30.0,
         )
 

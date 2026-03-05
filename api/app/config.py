@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     oauth_authorize_url: str = "https://claude.ai/oauth/authorize"
     oauth_token_url: str = "https://platform.claude.com/v1/oauth/token"
     oauth_redirect_uri: str = "https://platform.claude.com/oauth/code/callback"
-    oauth_scopes: str = "user:inference user:profile user:sessions:claude_code"
+    oauth_scopes: str = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers"
 
     model_config = {"env_prefix": "AC_", "env_file": ".env"}
 
