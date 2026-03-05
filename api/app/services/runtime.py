@@ -115,7 +115,7 @@ class AgentRuntime:
 
         if running.claude_session_id:
             cmd.extend(["--session-id", running.claude_session_id])
-            cmd.append("--resume")
+            cmd.extend(["--resume", "--fork-session"])
 
         return cmd
 
@@ -163,6 +163,11 @@ class AgentRuntime:
             return None
 
         if event_type == "assistant":
+            message = event.get("message")
+            if isinstance(message, dict):
+                for block in message.get("content", []):
+                    if block.get("type") == "text":
+                        return {"type": "assistant_text", "content": block.get("text", "")}
             subtype = event.get("subtype")
             if subtype == "text":
                 return {"type": "assistant_text", "content": event.get("text", "")}
@@ -175,7 +180,10 @@ class AgentRuntime:
                 "tool_input": event.get("input", {}),
             }
 
-        if event_type == "tool_result" or event_type == "result":
+        if event_type == "result":
+            return None
+
+        if event_type == "tool_result":
             content = event.get("output", event.get("content", ""))
             return {"type": "tool_result", "content": str(content)}
 
