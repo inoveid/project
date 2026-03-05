@@ -14,3 +14,7 @@ class AuthStatusRead(BaseModel):
 class AuthLoginResponse(BaseModel):
     auth_url: str
     message: str
+
+
+class AuthCodeSubmit(BaseModel):
+    code: str

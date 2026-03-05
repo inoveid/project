@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { useAuthLogin, useAuthStatus } from "../hooks/useAuth";
+import { useEffect, useState } from "react";
+import { useAuthCallback, useAuthLogin, useAuthStatus } from "../hooks/useAuth";
 
 interface AuthLoginModalProps {
   onClose: () => void;
@@ -7,7 +7,9 @@ interface AuthLoginModalProps {
 
 export function AuthLoginModal({ onClose }: AuthLoginModalProps) {
   const login = useAuthLogin();
+  const callback = useAuthCallback();
   const { data: authStatus } = useAuthStatus(true);
+  const [code, setCode] = useState("");
 
   useEffect(() => {
     login.mutate();
@@ -42,9 +44,38 @@ export function AuthLoginModal({ onClose }: AuthLoginModalProps) {
             >
               Authorize
             </button>
-            <p className="text-xs text-gray-400 text-center">
-              Waiting for authorization...
-            </p>
+            <div className="border-t pt-3 mt-3">
+              <p className="text-sm text-gray-600 mb-2">
+                After authorizing in the browser, paste the code below:
+              </p>
+              <input
+                type="text"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder="Enter OAuth code"
+                className="w-full border border-gray-300 rounded px-3 py-2 text-sm mb-2"
+              />
+              {callback.isSuccess ? (
+                <p className="text-sm text-green-600 text-center">
+                  Code submitted, waiting...
+                </p>
+              ) : (
+                <button
+                  onClick={() => callback.mutate(code)}
+                  disabled={!code.trim() || callback.isPending}
+                  className="w-full bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700 disabled:opacity-50"
+                >
+                  {callback.isPending ? "Submitting..." : "Submit code"}
+                </button>
+              )}
+              {callback.isError && (
+                <p className="text-sm text-red-600 mt-1">
+                  {callback.error instanceof Error
+                    ? callback.error.message
+                    : "Failed to submit code"}
+                </p>
+              )}
+            </div>
           </div>
         )}
 

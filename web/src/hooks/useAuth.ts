@@ -1,5 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { authLogout, getAuthStatus, startAuthLogin } from "../api/auth";
+import {
+  authLogout,
+  getAuthStatus,
+  startAuthLogin,
+  submitAuthCode,
+} from "../api/auth";
 
 const AUTH_KEY = ["auth", "status"] as const;
 
@@ -15,6 +20,12 @@ export function useAuthStatus(polling = false) {
 export function useAuthLogin() {
   return useMutation({
     mutationFn: startAuthLogin,
+  });
+}
+
+export function useAuthCallback() {
+  return useMutation({
+    mutationFn: (code: string) => submitAuthCode(code),
   });
 }
 

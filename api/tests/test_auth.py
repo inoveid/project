@@ -98,3 +98,25 @@ async def test_auth_logout_error(client):
         resp = await client.post("/api/auth/logout")
 
     assert resp.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_auth_callback_submits_code(client):
+    with patch(f"{ROUTER}.submit_auth_code", new_callable=AsyncMock):
+        resp = await client.post("/api/auth/callback", json={"code": "abc123"})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["message"] == "Code submitted"
+
+
+@pytest.mark.asyncio
+async def test_auth_callback_no_process(client):
+    with patch(
+        f"{ROUTER}.submit_auth_code",
+        new_callable=AsyncMock,
+        side_effect=AuthLoginError("No active login process"),
+    ):
+        resp = await client.post("/api/auth/callback", json={"code": "abc123"})
+
+    assert resp.status_code == 400

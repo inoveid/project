@@ -112,6 +112,10 @@ export interface AuthLoginResponse {
   message: string;
 }
 
+export interface AuthCodeSubmit {
+  code: string;
+}
+
 export type WsIncoming =
   | { type: "assistant_text"; content: string }
   | { type: "tool_use"; tool_name: string; tool_input: Record<string, unknown> }

@@ -7,6 +7,7 @@ import * as authApi from "../api/auth";
 vi.mock("../api/auth", () => ({
   getAuthStatus: vi.fn(),
   startAuthLogin: vi.fn(),
+  submitAuthCode: vi.fn(),
   authLogout: vi.fn(),
 }));
 
@@ -121,6 +122,47 @@ describe("AuthLoginModal", () => {
     renderComponent();
     expect(await screen.findByText("Network error")).toBeInTheDocument();
     expect(screen.getByText("Retry")).toBeInTheDocument();
+  });
+
+  it("renders code input and submit button after login", async () => {
+    vi.mocked(authApi.startAuthLogin).mockResolvedValue({
+      auth_url: "https://auth.example.com/oauth",
+      message: "Open the URL",
+    });
+    vi.mocked(authApi.getAuthStatus).mockResolvedValue({
+      logged_in: false,
+      email: null,
+      org_name: null,
+      subscription_type: null,
+      auth_method: null,
+    });
+    renderComponent();
+    expect(
+      await screen.findByPlaceholderText("Enter OAuth code"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Submit code")).toBeInTheDocument();
+  });
+
+  it("submits auth code when button clicked", async () => {
+    vi.mocked(authApi.startAuthLogin).mockResolvedValue({
+      auth_url: "https://auth.example.com/oauth",
+      message: "Open the URL",
+    });
+    vi.mocked(authApi.getAuthStatus).mockResolvedValue({
+      logged_in: false,
+      email: null,
+      org_name: null,
+      subscription_type: null,
+      auth_method: null,
+    });
+    vi.mocked(authApi.submitAuthCode).mockResolvedValue(undefined);
+    renderComponent();
+    const input = await screen.findByPlaceholderText("Enter OAuth code");
+    fireEvent.change(input, { target: { value: "my-code-123" } });
+    fireEvent.click(screen.getByText("Submit code"));
+    await waitFor(() => {
+      expect(authApi.submitAuthCode).toHaveBeenCalledWith("my-code-123");
+    });
   });
 
   it("calls onClose when Cancel is clicked", async () => {

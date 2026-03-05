@@ -35,12 +35,13 @@ async def get_auth_status() -> AuthStatusRead:
     except (OSError, asyncio.TimeoutError) as exc:
         raise AuthCheckError(f"Failed to run claude auth status: {exc}")
 
-    if process.returncode != 0:
+    raw = stdout.decode().strip() if stdout else ""
+    if not raw and process.returncode != 0:
         error_text = stderr.decode().strip() if stderr else "unknown error"
         raise AuthCheckError(f"claude auth status failed: {error_text}")
 
     try:
-        data = json.loads(stdout.decode())
+        data = json.loads(raw)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise AuthCheckError(f"Invalid JSON from claude auth status: {exc}")
 
@@ -89,6 +90,7 @@ async def start_auth_login() -> str:
     try:
         _login_process = await asyncio.create_subprocess_exec(
             settings.claude_cli_path, "auth", "login",
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -124,6 +126,16 @@ async def start_auth_login() -> str:
         return await asyncio.wait_for(_scan_streams(), timeout=15.0)
     except asyncio.TimeoutError:
         raise AuthLoginError("Timed out waiting for OAuth URL from claude auth login")
+
+
+async def submit_auth_code(code: str) -> None:
+    if _login_process is None or _login_process.returncode is not None:
+        raise AuthLoginError("No active login process")
+    if _login_process.stdin is None:
+        raise AuthLoginError("Login process has no stdin pipe")
+    _login_process.stdin.write((code + "\n").encode())
+    await _login_process.stdin.drain()
+    _login_process.stdin.close()
 
 
 async def auth_logout() -> None:

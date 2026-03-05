@@ -1,12 +1,13 @@
 from fastapi import APIRouter, HTTPException
 
-from app.schemas.auth import AuthLoginResponse, AuthStatusRead
+from app.schemas.auth import AuthCodeSubmit, AuthLoginResponse, AuthStatusRead
 from app.services.auth_service import (
     AuthCheckError,
     AuthLoginError,
     auth_logout,
     get_auth_status,
     start_auth_login,
+    submit_auth_code,
 )
 
 router = APIRouter()
@@ -30,6 +31,15 @@ async def auth_login_endpoint():
         auth_url=url,
         message="Open the URL in a browser to complete authentication",
     )
+
+
+@router.post("/callback")
+async def auth_callback_endpoint(body: AuthCodeSubmit):
+    try:
+        await submit_auth_code(body.code)
+    except AuthLoginError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"message": "Code submitted"}
 
 
 @router.post("/logout", status_code=204)
