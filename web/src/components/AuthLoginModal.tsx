@@ -1,25 +1,47 @@
-import { useEffect, useState } from "react";
-import { useAuthCallback, useAuthLogin, useAuthStatus } from "../hooks/useAuth";
+import { useEffect, useRef, useState } from "react";
+import { startAuthLogin, submitAuthCode } from "../api/auth";
+import { useAuthStatus } from "../hooks/useAuth";
 
 interface AuthLoginModalProps {
   onClose: () => void;
 }
 
 export function AuthLoginModal({ onClose }: AuthLoginModalProps) {
-  const login = useAuthLogin();
-  const callback = useAuthCallback();
   const { data: authStatus } = useAuthStatus(true);
+  const [authUrl, setAuthUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [code, setCode] = useState("");
+  const [codeSubmitted, setCodeSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const loginCalled = useRef(false);
 
   useEffect(() => {
-    login.mutate();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    if (loginCalled.current) return;
+    loginCalled.current = true;
+
+    startAuthLogin()
+      .then((data) => setAuthUrl(data.auth_url))
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to start login"));
+  }, []);
 
   useEffect(() => {
     if (authStatus?.logged_in) {
       onClose();
     }
   }, [authStatus?.logged_in, onClose]);
+
+  async function handleSubmitCode() {
+    if (!code.trim()) return;
+    setSubmitting(true);
+    try {
+      await submitAuthCode(code);
+      setCodeSubmitted(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to submit code");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -28,18 +50,18 @@ export function AuthLoginModal({ onClose }: AuthLoginModalProps) {
           Claude Authentication
         </h2>
 
-        {login.isPending && (
+        {!authUrl && !error && (
           <p className="text-sm text-gray-600">Starting authentication...</p>
         )}
 
-        {login.isSuccess && login.data && (
+        {authUrl && (
           <div className="space-y-3">
-            <p className="text-sm text-gray-600">{login.data.message}</p>
-            <p className="text-xs text-gray-400 break-all">
-              {login.data.auth_url}
+            <p className="text-sm text-gray-600">
+              Open the URL in a browser to complete authentication
             </p>
+            <p className="text-xs text-gray-400 break-all">{authUrl}</p>
             <button
-              onClick={() => window.open(login.data.auth_url, "_blank")}
+              onClick={() => window.open(authUrl, "_blank")}
               className="w-full bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700"
             >
               Authorize
@@ -55,39 +77,40 @@ export function AuthLoginModal({ onClose }: AuthLoginModalProps) {
                 placeholder="Enter OAuth code"
                 className="w-full border border-gray-300 rounded px-3 py-2 text-sm mb-2"
               />
-              {callback.isSuccess ? (
+              {codeSubmitted ? (
                 <p className="text-sm text-green-600 text-center">
                   Code submitted, waiting...
                 </p>
               ) : (
                 <button
-                  onClick={() => callback.mutate(code)}
-                  disabled={!code.trim() || callback.isPending}
+                  onClick={handleSubmitCode}
+                  disabled={!code.trim() || submitting}
                   className="w-full bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700 disabled:opacity-50"
                 >
-                  {callback.isPending ? "Submitting..." : "Submit code"}
+                  {submitting ? "Submitting..." : "Submit code"}
                 </button>
-              )}
-              {callback.isError && (
-                <p className="text-sm text-red-600 mt-1">
-                  {callback.error instanceof Error
-                    ? callback.error.message
-                    : "Failed to submit code"}
-                </p>
               )}
             </div>
           </div>
         )}
 
-        {login.isError && (
+        {error && (
           <div className="space-y-3">
-            <p className="text-sm text-red-600">
-              {login.error instanceof Error
-                ? login.error.message
-                : "Authentication failed"}
-            </p>
+            <p className="text-sm text-red-600">{error}</p>
             <button
-              onClick={() => login.mutate()}
+              onClick={() => {
+                setError(null);
+                setAuthUrl(null);
+                loginCalled.current = false;
+                startAuthLogin()
+                  .then((data) => {
+                    loginCalled.current = true;
+                    setAuthUrl(data.auth_url);
+                  })
+                  .catch((err) =>
+                    setError(err instanceof Error ? err.message : "Failed to start login")
+                  );
+              }}
               className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700"
             >
               Retry

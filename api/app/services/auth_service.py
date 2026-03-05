@@ -88,8 +88,9 @@ async def start_auth_login() -> str:
     await _kill_login_process()
 
     try:
+        # Use 'script' to allocate a PTY — Claude CLI only reads stdin when isTTY=true
         _login_process = await asyncio.create_subprocess_exec(
-            settings.claude_cli_path, "auth", "login",
+            "script", "-q", "-c", f"{settings.claude_cli_path} auth login", "/dev/null",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
