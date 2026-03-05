@@ -145,12 +145,13 @@ export function useChat(
     };
   }, [sessionId, handleEvent]);
 
-  // Set initial messages once when session loads
+  // Set initial messages when session loads or API data refreshes
   useEffect(() => {
-    if (!enabled || initializedRef.current) return;
+    if (!enabled) return;
+    if (initializedRef.current && initialMessagesRef.current.length === 0) return;
     initializedRef.current = true;
     setMessages(initialMessagesRef.current);
-  }, [enabled]);
+  }, [enabled, initialMessages.length]);
 
   // Connect/disconnect WS
   useEffect(() => {

@@ -58,6 +58,10 @@ class AgentRuntime:
         if not running:
             raise AgentRuntimeError(f"Session {session_id} not running")
 
+        # Kill ALL stale CLI processes (any session may lock the workdir)
+        for r in self._processes.values():
+            await self._kill_process(r)
+
         from app.services.auth_service import get_current_access_token
 
         token = await get_current_access_token()
@@ -67,6 +71,7 @@ class AgentRuntime:
         env = {**os.environ, "CLAUDE_CODE_OAUTH_TOKEN": token}
 
         cmd = self._build_command(running)
+        logger.warning("CLI command: %s", " ".join(cmd))
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE,
@@ -84,14 +89,29 @@ class AgentRuntime:
         async for event in self._read_stream(session_id, process):
             yield event
 
+    async def _kill_process(self, running: RunningProcess) -> None:
+        proc = running.process
+        if not proc or proc.returncode is not None:
+            return
+        try:
+            proc.terminate()
+            await asyncio.wait_for(proc.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+        except ProcessLookupError:
+            pass
+
+    async def kill_active_process(self, session_id: uuid.UUID) -> None:
+        """Kill the CLI process without removing the session from runtime."""
+        running = self._processes.get(session_id)
+        if running:
+            await self._kill_process(running)
+
     async def stop_session(self, session_id: uuid.UUID) -> None:
         running = self._processes.pop(session_id, None)
-        if running and running.process and running.process.returncode is None:
-            try:
-                running.process.terminate()
-                await asyncio.wait_for(running.process.wait(), timeout=5.0)
-            except (asyncio.TimeoutError, ProcessLookupError):
-                running.process.kill()
+        if running:
+            await self._kill_process(running)
 
     def is_running(self, session_id: uuid.UUID) -> bool:
         return session_id in self._processes
@@ -114,8 +134,12 @@ class AgentRuntime:
             cmd.extend(["--system-prompt", running.system_prompt])
 
         if running.claude_session_id:
-            cmd.extend(["--session-id", running.claude_session_id])
-            cmd.extend(["--resume", "--fork-session"])
+            # --continue picks up the last session in the project dir;
+            # --session-id can NOT be reused (CLI rejects existing session files)
+            cmd.append("--continue")
+        else:
+            # Fresh session with unique ID
+            cmd.extend(["--session-id", str(uuid.uuid4())])
 
         return cmd
 
@@ -144,12 +168,15 @@ class AgentRuntime:
 
         await process.wait()
 
-        if process.returncode != 0 and process.stderr:
+        if process.stderr:
             stderr = await process.stderr.read()
             error_text = stderr.decode().strip()
             if error_text:
-                logger.error("Claude CLI error: %s", error_text)
-                yield {"type": "error", "error": error_text}
+                if process.returncode != 0:
+                    logger.error("Claude CLI error (rc=%s): %s", process.returncode, error_text)
+                    yield {"type": "error", "error": error_text}
+                else:
+                    logger.info("Claude CLI stderr: %s", error_text[:500])
 
     def _parse_event(
         self, session_id: uuid.UUID, event: dict[str, Any]
