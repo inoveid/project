@@ -84,7 +84,7 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
   const sessionLoaded = Boolean(session);
 
   const {
-    messages,
+    items,
     status,
     error: chatError,
     sendMessage,
@@ -145,7 +145,7 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
         </div>
       )}
 
-      <ChatWindow messages={messages} />
+      <ChatWindow items={items} />
 
       <ChatInput onSend={sendMessage} disabled={!canSend} />
     </div>
