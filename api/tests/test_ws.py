@@ -6,6 +6,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from app.main import app
+from app.routers.ws import _parse_handoff_block
 from app.services.session_service import SessionNotFoundError
 
 
@@ -28,6 +29,14 @@ def _make_session_mock(session_id, agent_id=None):
 WS_SERVICE = "app.routers.ws"
 
 
+def _default_patches(session):
+    """Return common patches for WS tests (session + handoff_targets)."""
+    return [
+        patch(f"{WS_SERVICE}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS_SERVICE}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+    ]
+
+
 def test_ws_session_not_found():
     with (
         patch(
@@ -35,6 +44,7 @@ def test_ws_session_not_found():
             new_callable=AsyncMock,
             side_effect=SessionNotFoundError("not found"),
         ),
+        patch(f"{WS_SERVICE}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
     ):
         client = TestClient(app)
         with client.websocket_connect(f"/api/ws/sessions/{uuid.uuid4()}") as ws:
@@ -49,6 +59,7 @@ def test_ws_invalid_json():
 
     with (
         patch(f"{WS_SERVICE}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS_SERVICE}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS_SERVICE}.runtime") as mock_runtime,
     ):
         mock_runtime.is_running.return_value = True
@@ -67,6 +78,7 @@ def test_ws_unknown_message_type():
 
     with (
         patch(f"{WS_SERVICE}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS_SERVICE}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS_SERVICE}.runtime") as mock_runtime,
     ):
         mock_runtime.is_running.return_value = True
@@ -85,6 +97,7 @@ def test_ws_empty_message_content():
 
     with (
         patch(f"{WS_SERVICE}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS_SERVICE}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS_SERVICE}.runtime") as mock_runtime,
     ):
         mock_runtime.is_running.return_value = True
@@ -103,6 +116,7 @@ def test_ws_stop_message():
 
     with (
         patch(f"{WS_SERVICE}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS_SERVICE}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS_SERVICE}.runtime") as mock_runtime,
     ):
         mock_runtime.is_running.return_value = True
@@ -121,13 +135,14 @@ def test_ws_message_streams_response():
     session_id = uuid.uuid4()
     session = _make_session_mock(session_id)
 
-    async def mock_stream_response(websocket, db, sid, content):
+    async def mock_stream_response(websocket, db, sid, content, agent, targets, chain=None):
         await websocket.send_json({"type": "assistant_text", "content": "Hello"})
         await websocket.send_json({"type": "tool_use", "tool_name": "read", "tool_input": {}})
         await websocket.send_json({"type": "done"})
 
     with (
         patch(f"{WS_SERVICE}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS_SERVICE}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS_SERVICE}.runtime") as mock_runtime,
         patch(f"{WS_SERVICE}.add_message", new_callable=AsyncMock) as mock_add_msg,
         patch(f"{WS_SERVICE}._stream_response", side_effect=mock_stream_response),
@@ -158,6 +173,7 @@ def test_ws_starts_runtime_if_not_running():
 
     with (
         patch(f"{WS_SERVICE}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS_SERVICE}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS_SERVICE}.runtime") as mock_runtime,
     ):
         mock_runtime.is_running.return_value = False
@@ -174,3 +190,44 @@ def test_ws_starts_runtime_if_not_running():
         assert call_kwargs["session_id"] == session_id
         assert call_kwargs["workdir"] == "/tmp/project"
         assert call_kwargs["system_prompt"] == "You are helpful"
+
+
+# --- Handoff parsing tests ---
+
+
+def test_parse_handoff_block_valid():
+    text = 'Some response text\n```handoff\n{"to": "Reviewer", "message": "Please review"}\n```'
+    result = _parse_handoff_block(text)
+    assert result == {"to": "Reviewer", "message": "Please review"}
+
+
+def test_parse_handoff_block_invalid_json():
+    text = '```handoff\n{not valid json}\n```'
+    result = _parse_handoff_block(text)
+    assert result is None
+
+
+def test_parse_handoff_block_missing_fields():
+    text = '```handoff\n{"to": "Reviewer"}\n```'
+    result = _parse_handoff_block(text)
+    assert result is None
+
+    text2 = '```handoff\n{"message": "do stuff"}\n```'
+    result2 = _parse_handoff_block(text2)
+    assert result2 is None
+
+
+def test_parse_handoff_block_no_block():
+    text = "Just a regular response with no handoff block at all."
+    result = _parse_handoff_block(text)
+    assert result is None
+
+
+def test_parse_handoff_block_in_middle_of_text():
+    text = (
+        "I have completed the implementation.\n\n"
+        "Here is a summary of changes.\n\n"
+        '```handoff\n{"to": "QA", "message": "Please run tests"}\n```\n'
+    )
+    result = _parse_handoff_block(text)
+    assert result == {"to": "QA", "message": "Please run tests"}
