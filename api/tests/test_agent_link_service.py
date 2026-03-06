@@ -12,6 +12,7 @@ from app.services.agent_link_service import (
     TeamNotFoundError,
     create_link,
     delete_link,
+    get_agent_handoff_targets,
     get_links,
 )
 
@@ -174,3 +175,35 @@ async def test_delete_link_success():
     await delete_link(db, uuid.uuid4())
     db.delete.assert_awaited_once_with(fake_link)
     db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_agent_handoff_targets_returns_linked_agents():
+    db = _make_db()
+    agent_a = MagicMock(name="agent_a")
+    agent_b = MagicMock(name="agent_b")
+    db.execute.return_value = _mock_db_result([agent_a, agent_b])
+
+    result = await get_agent_handoff_targets(db, uuid.uuid4())
+    assert result == [agent_a, agent_b]
+    db.execute.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_agent_handoff_targets_ignores_other_link_types():
+    """When no handoff links exist, result should be empty."""
+    db = _make_db()
+    db.execute.return_value = _mock_db_result([])
+
+    result = await get_agent_handoff_targets(db, uuid.uuid4())
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_get_agent_handoff_targets_empty_when_no_links():
+    db = _make_db()
+    db.execute.return_value = _mock_db_result([])
+
+    result = await get_agent_handoff_targets(db, uuid.uuid4())
+    assert result == []
+    db.execute.assert_awaited_once()

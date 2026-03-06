@@ -70,6 +70,22 @@ async def delete_link(db: AsyncSession, link_id: uuid.UUID) -> None:
     await db.commit()
 
 
+async def get_agent_handoff_targets(
+    db: AsyncSession, agent_id: uuid.UUID
+) -> list[Agent]:
+    """Return all agents this agent can hand off to (link_type='handoff')."""
+    stmt = (
+        select(Agent)
+        .join(AgentLink, AgentLink.to_agent_id == Agent.id)
+        .where(
+            AgentLink.from_agent_id == agent_id,
+            AgentLink.link_type == "handoff",
+        )
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
 async def _ensure_team_exists(db: AsyncSession, team_id: uuid.UUID) -> None:
     stmt = select(Team.id).where(Team.id == team_id)
     result = await db.execute(stmt)

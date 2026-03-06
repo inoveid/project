@@ -113,6 +113,37 @@ class AgentRuntime:
         if running:
             await self._kill_process(running)
 
+    async def run_task(
+        self,
+        workdir: str,
+        system_prompt: str,
+        task: str,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """
+        Run an ephemeral sub-agent task with an isolated CWD.
+
+        Uses a unique subdirectory as subprocess CWD so that Claude CLI
+        stores its session file there — not in the main agent's workdir.
+        This prevents --continue from picking up the sub-agent's session
+        when the main agent resumes.
+        """
+        from pathlib import Path
+
+        temp_id = uuid.uuid4()
+        isolated_dir = Path(workdir) / ".handoff_sessions" / str(temp_id)
+        isolated_dir.mkdir(parents=True, exist_ok=True)
+
+        await self.start_session(
+            session_id=temp_id,
+            workdir=str(isolated_dir),
+            system_prompt=system_prompt,
+        )
+        try:
+            async for event in self.send_message(temp_id, task):
+                yield event
+        finally:
+            await self.stop_session(temp_id)
+
     def is_running(self, session_id: uuid.UUID) -> bool:
         return session_id in self._processes
 
