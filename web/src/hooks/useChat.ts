@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Message, ToolUse, WsIncoming } from "../types";
+import type { ChatItem, HandoffItem, Message, ToolUse, WsIncoming } from "../types";
+import { isHandoffItem } from "../types";
 
 export type ChatStatus = "idle" | "connecting" | "connected" | "typing" | "tool" | "disconnected";
 
 interface UseChatResult {
+  items: ChatItem[];
   messages: Message[];
   status: ChatStatus;
   error: string | null;
@@ -30,7 +32,7 @@ export function useChat(
   initialMessages: Message[],
   enabled: boolean,
 ): UseChatResult {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [items, setItems] = useState<ChatItem[]>([]);
   const [status, setStatus] = useState<ChatStatus>("idle");
   const [error, setError] = useState<string | null>(null);
 
@@ -39,6 +41,7 @@ export function useChat(
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingTextRef = useRef("");
   const pendingToolsRef = useRef<ToolUse[]>([]);
+  const pendingSubAgentRef = useRef<HandoffItem | null>(null);
   const initializedRef = useRef(false);
   const stoppedRef = useRef(false);
   const initialMessagesRef = useRef(initialMessages);
@@ -50,9 +53,9 @@ export function useChat(
         case "assistant_text":
           setStatus("typing");
           pendingTextRef.current += event.content;
-          setMessages((prev) => {
+          setItems((prev) => {
             const last = prev[prev.length - 1];
-            if (last && last.role === "assistant" && last.id === "__streaming__") {
+            if (last && !isHandoffItem(last) && last.role === "assistant" && last.id === "__streaming__") {
               return [
                 ...prev.slice(0, -1),
                 { ...last, content: pendingTextRef.current },
@@ -86,8 +89,10 @@ export function useChat(
           pendingTextRef.current = "";
           pendingToolsRef.current = [];
 
-          setMessages((prev) => {
-            const withoutStreaming = prev.filter((m) => m.id !== "__streaming__");
+          setItems((prev) => {
+            const withoutStreaming = prev.filter(
+              (i) => !(!isHandoffItem(i) && i.id === "__streaming__"),
+            );
             if (!text && tools.length === 0) return withoutStreaming;
 
             const msg = makeLocalMessage("assistant", text);
@@ -102,6 +107,91 @@ export function useChat(
           setError(event.error);
           setStatus("connected");
           break;
+
+        case "handoff_start": {
+          const item: HandoffItem = {
+            id: crypto.randomUUID(),
+            itemType: "handoff_start",
+            agentName: event.to_agent,
+            fromAgent: event.from_agent,
+            toAgent: event.to_agent,
+            content: event.task,
+            created_at: new Date().toISOString(),
+          };
+          setItems((prev) => [...prev, item]);
+          break;
+        }
+
+        case "sub_agent_assistant_text": {
+          if (!pendingSubAgentRef.current) {
+            pendingSubAgentRef.current = {
+              id: "__sub_agent_streaming__",
+              itemType: "sub_agent_turn",
+              agentName: event.agent_name,
+              content: "",
+              toolUses: [],
+              created_at: new Date().toISOString(),
+            };
+          }
+          pendingSubAgentRef.current.content += event.content;
+          const snapshot = { ...pendingSubAgentRef.current };
+          setItems((prev) => {
+            const withoutPending = prev.filter((i) => i.id !== "__sub_agent_streaming__");
+            return [...withoutPending, snapshot];
+          });
+          break;
+        }
+
+        case "sub_agent_tool_use": {
+          if (pendingSubAgentRef.current) {
+            pendingSubAgentRef.current.toolUses = [
+              ...(pendingSubAgentRef.current.toolUses ?? []),
+              { tool_name: event.tool_name, tool_input: event.tool_input },
+            ];
+          }
+          break;
+        }
+
+        case "sub_agent_tool_result": {
+          if (pendingSubAgentRef.current) {
+            const tools = pendingSubAgentRef.current.toolUses ?? [];
+            const last = tools[tools.length - 1];
+            if (last) last.result = event.content;
+          }
+          break;
+        }
+
+        case "sub_agent_error":
+          setError(`[${event.agent_name}] ${event.error}`);
+          break;
+
+        case "handoff_done": {
+          if (pendingSubAgentRef.current) {
+            const final: HandoffItem = {
+              ...pendingSubAgentRef.current,
+              id: crypto.randomUUID(),
+              itemType: "handoff_done",
+            };
+            pendingSubAgentRef.current = null;
+            setItems((prev) => {
+              const withoutPending = prev.filter((i) => i.id !== "__sub_agent_streaming__");
+              return [...withoutPending, final];
+            });
+          }
+          break;
+        }
+
+        case "handoff_cycle_detected": {
+          const item: HandoffItem = {
+            id: crypto.randomUUID(),
+            itemType: "handoff_cycle",
+            agentName: "system",
+            content: event.message,
+            created_at: new Date().toISOString(),
+          };
+          setItems((prev) => [...prev, item]);
+          break;
+        }
       }
     },
     [],
@@ -150,7 +240,7 @@ export function useChat(
     if (!enabled) return;
     if (initializedRef.current && initialMessagesRef.current.length === 0) return;
     initializedRef.current = true;
-    setMessages(initialMessagesRef.current);
+    setItems(initialMessagesRef.current);
   }, [enabled, initialMessages.length]);
 
   // Connect/disconnect WS
@@ -177,7 +267,7 @@ export function useChat(
         return;
       }
       setError(null);
-      setMessages((prev) => [...prev, makeLocalMessage("user", content)]);
+      setItems((prev) => [...prev, makeLocalMessage("user", content)]);
       wsRef.current.send(JSON.stringify({ type: "message", content }));
       setStatus("typing");
     },
@@ -194,5 +284,7 @@ export function useChat(
     wsRef.current.send(JSON.stringify({ type: "stop" }));
   }, []);
 
-  return { messages, status, error, sendMessage, stopAgent };
+  const messages = items.filter((i): i is Message => !isHandoffItem(i));
+
+  return { items, messages, status, error, sendMessage, stopAgent };
 }

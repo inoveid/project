@@ -2,6 +2,7 @@ import { renderHook, act } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { useChat } from "./useChat";
 import type { Message } from "../types";
+import { isHandoffItem } from "../types";
 
 // Mock WebSocket
 class MockWebSocket {
@@ -206,5 +207,143 @@ describe("useChat", () => {
     act(() => vi.advanceTimersByTime(2000));
     // Should NOT have created a new WS instance
     expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
+  it("handoff_start adds HandoffItem to items", () => {
+    const { result } = renderHook(() => useChat("s-1", [], true));
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.simulateOpen());
+
+    act(() =>
+      ws.simulateMessage({
+        type: "handoff_start",
+        from_agent: "orchestrator",
+        to_agent: "coder",
+        task: "Write tests",
+      }),
+    );
+
+    expect(result.current.items).toHaveLength(1);
+    const item = result.current.items[0]!;
+    expect(isHandoffItem(item)).toBe(true);
+    if (isHandoffItem(item)) {
+      expect(item.itemType).toBe("handoff_start");
+      expect(item.agentName).toBe("coder");
+      expect(item.fromAgent).toBe("orchestrator");
+      expect(item.toAgent).toBe("coder");
+      expect(item.content).toBe("Write tests");
+    }
+    // messages should not include handoff items
+    expect(result.current.messages).toHaveLength(0);
+  });
+
+  it("sub_agent_assistant_text accumulates content", () => {
+    const { result } = renderHook(() => useChat("s-1", [], true));
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.simulateOpen());
+
+    act(() =>
+      ws.simulateMessage({
+        type: "sub_agent_assistant_text",
+        agent_name: "coder",
+        content: "Hello ",
+      }),
+    );
+    expect(result.current.items).toHaveLength(1);
+    const item1 = result.current.items[0]!;
+    expect(isHandoffItem(item1)).toBe(true);
+    if (isHandoffItem(item1)) {
+      expect(item1.content).toBe("Hello ");
+      expect(item1.itemType).toBe("sub_agent_turn");
+    }
+
+    act(() =>
+      ws.simulateMessage({
+        type: "sub_agent_assistant_text",
+        agent_name: "coder",
+        content: "world",
+      }),
+    );
+    expect(result.current.items).toHaveLength(1);
+    const item2 = result.current.items[0]!;
+    if (isHandoffItem(item2)) {
+      expect(item2.content).toBe("Hello world");
+    }
+  });
+
+  it("handoff_done finalizes sub_agent_turn item", () => {
+    const { result } = renderHook(() => useChat("s-1", [], true));
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.simulateOpen());
+
+    act(() =>
+      ws.simulateMessage({
+        type: "sub_agent_assistant_text",
+        agent_name: "coder",
+        content: "Done!",
+      }),
+    );
+    act(() =>
+      ws.simulateMessage({
+        type: "handoff_done",
+        agent_name: "coder",
+      }),
+    );
+
+    expect(result.current.items).toHaveLength(1);
+    const item = result.current.items[0]!;
+    expect(isHandoffItem(item)).toBe(true);
+    if (isHandoffItem(item)) {
+      expect(item.itemType).toBe("handoff_done");
+      expect(item.content).toBe("Done!");
+      expect(item.id).not.toBe("__sub_agent_streaming__");
+    }
+  });
+
+  it("messages filters only Message items", () => {
+    const { result } = renderHook(() => useChat("s-1", [], true));
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.simulateOpen());
+
+    // Add a handoff item
+    act(() =>
+      ws.simulateMessage({
+        type: "handoff_start",
+        from_agent: "orchestrator",
+        to_agent: "coder",
+        task: "Do work",
+      }),
+    );
+
+    // Add a regular message
+    act(() => ws.simulateMessage({ type: "assistant_text", content: "Hi" }));
+    act(() => ws.simulateMessage({ type: "done" }));
+
+    // items should have both
+    expect(result.current.items).toHaveLength(2);
+    // messages should only have the Message
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]?.content).toBe("Hi");
+  });
+
+  it("handoff_cycle_detected adds cycle item", () => {
+    const { result } = renderHook(() => useChat("s-1", [], true));
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.simulateOpen());
+
+    act(() =>
+      ws.simulateMessage({
+        type: "handoff_cycle_detected",
+        message: "Cycle detected: A -> B -> A",
+      }),
+    );
+
+    expect(result.current.items).toHaveLength(1);
+    const item = result.current.items[0]!;
+    expect(isHandoffItem(item)).toBe(true);
+    if (isHandoffItem(item)) {
+      expect(item.itemType).toBe("handoff_cycle");
+      expect(item.content).toBe("Cycle detected: A -> B -> A");
+    }
   });
 });
