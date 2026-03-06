@@ -172,7 +172,11 @@ export function useChat(
 
   const sendMessage = useCallback(
     (content: string) => {
-      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        setError("Connection not ready. Please wait and try again.");
+        return;
+      }
+      setError(null);
       setMessages((prev) => [...prev, makeLocalMessage("user", content)]);
       wsRef.current.send(JSON.stringify({ type: "message", content }));
       setStatus("typing");

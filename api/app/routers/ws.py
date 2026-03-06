@@ -116,6 +116,11 @@ async def _stream_response(
     except WebSocketDisconnect:
         await stream.aclose()
         raise
+    except Exception as exc:
+        logger.error("Error streaming agent response for session %s: %s", session_id, exc)
+        await websocket.send_json({"type": "error", "error": str(exc)})
+        await websocket.send_json({"type": "done"})
+        return
 
     if full_text or tool_uses:
         await add_message(

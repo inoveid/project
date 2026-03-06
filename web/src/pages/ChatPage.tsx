@@ -47,12 +47,13 @@ export function ChatPage() {
 
       <div className="flex flex-1 min-w-0">
         <div className={sidePanelId ? "w-1/2" : "w-full"}>
-          <ChatPanel sessionId={sessionId} />
+          <ChatPanel key={sessionId} sessionId={sessionId} />
         </div>
 
         {sidePanelId && (
           <div className="w-1/2">
             <ChatPanel
+              key={sidePanelId}
               sessionId={sidePanelId}
               onClose={handleCloseSide}
               showClose
