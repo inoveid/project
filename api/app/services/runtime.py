@@ -181,6 +181,8 @@ class AgentRuntime:
     ) -> AsyncIterator[dict[str, Any]]:
         if not process.stdout:
             return
+        
+        stderr_task = asyncio.create_task(process.stderr.read()) if process.stderr else None
 
         async for line in process.stdout:
             text = line.decode().strip()
@@ -199,8 +201,8 @@ class AgentRuntime:
 
         await process.wait()
 
-        if process.stderr:
-            stderr = await process.stderr.read()
+        if stderr_task:
+            stderr = await stderr_task 
             error_text = stderr.decode().strip()
             if error_text:
                 if process.returncode != 0:
