@@ -59,6 +59,7 @@ async def websocket_session(
                 workdir=agent.config.get("workdir", "") if agent.config else "",
                 system_prompt=system_prompt,
                 claude_session_id=session.claude_session_id,
+                allowed_tools=agent.allowed_tools or [],
             )
         except Exception as exc:
             await websocket.send_json({"type": "error", "error": str(exc)})

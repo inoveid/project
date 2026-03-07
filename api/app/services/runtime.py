@@ -22,6 +22,11 @@ class RunningProcess:
     workdir: str
     system_prompt: str
     claude_session_id: Optional[str] = None
+    allowed_tools: list[str] = None
+
+    def __post_init__(self):
+        if self.allowed_tools is None:
+            self.allowed_tools = []
 
 class TransientAgentError(Exception):
     """Временная ошибка — можно повторить (rate limit, timeout, сеть)."""
@@ -43,6 +48,7 @@ class AgentRuntime:
         workdir: str,
         system_prompt: str,
         claude_session_id: Optional[str] = None,
+        allowed_tools: list[str] = None,
     ) -> None:
         if session_id in self._processes:
             raise AgentRuntimeError(f"Session {session_id} already running")
@@ -53,6 +59,7 @@ class AgentRuntime:
             workdir=workdir or settings.workspace_path,
             system_prompt=system_prompt,
             claude_session_id=claude_session_id,
+            allowed_tools=allowed_tools or [],
         )
 
     async def send_message(
@@ -228,6 +235,9 @@ class AgentRuntime:
         else:
             # Fresh session with unique ID
             cmd.extend(["--session-id", str(uuid.uuid4())])
+
+        if running.allowed_tools:
+            cmd.extend(["--allowedTools", ",".join(running.allowed_tools)])
 
         return cmd
 

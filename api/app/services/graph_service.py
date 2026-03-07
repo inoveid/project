@@ -221,7 +221,7 @@ async def gate_node(state: WorkflowState, config: RunnableConfig) -> dict:
 
     # Запустить runtime sub-агента
     workdir = (target.config.get("workdir") or settings.workspace_path) if target.config else settings.workspace_path
-    await runtime.start_session(sub_session.id, workdir, system_prompt)
+    await runtime.start_session(sub_session.id, workdir, system_prompt, allowed_tools=target.allowed_tools or [])
 
     # Уведомить UI о начале handoff
     await ws.send_json({

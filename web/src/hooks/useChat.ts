@@ -94,6 +94,9 @@ export function useChat(
           pendingToolsRef.current = [];
 
           setItems((prev) => {
+            const streamingIdx = prev.findIndex(
+              (i) => !isHandoffItem(i) && i.id === "__streaming__",
+            );
             const withoutStreaming = prev.filter(
               (i) => !(!isHandoffItem(i) && i.id === "__streaming__"),
             );
@@ -101,6 +104,11 @@ export function useChat(
 
             const msg = makeLocalMessage("assistant", text);
             msg.tool_uses = tools.length > 0 ? tools : null;
+            if (streamingIdx !== -1) {
+              const result = [...withoutStreaming];
+              result.splice(streamingIdx, 0, msg);
+              return result;
+            }
             return [...withoutStreaming, msg];
           });
           setStatus("connected");
