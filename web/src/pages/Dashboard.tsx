@@ -5,6 +5,7 @@ import { QuickStartChat } from "../components/QuickStartChat";
 import { SummaryCards } from "../components/SummaryCards";
 import { TeamCard } from "../components/TeamCard";
 import { TeamForm } from "../components/TeamForm";
+import { WorkspacePanel } from "../components/WorkspacePanel";
 import {
   useCreateTeam,
   useDeleteTeam,
@@ -78,6 +79,10 @@ export function Dashboard() {
           sessions={activeSessions}
           onOpenChat={(id) => navigate(`/chat/${id}`)}
         />
+      </section>
+
+      <section className="mb-8">
+        <WorkspacePanel />
       </section>
 
       <div className="flex items-center justify-between mb-6">
