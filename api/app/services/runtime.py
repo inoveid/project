@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import json
 import logging
 import os
@@ -22,6 +23,9 @@ class RunningProcess:
     system_prompt: str
     claude_session_id: Optional[str] = None
 
+class TransientAgentError(Exception):
+    """Временная ошибка — можно повторить (rate limit, timeout, сеть)."""
+    pass
 
 class AgentRuntimeError(Exception):
     pass
@@ -72,14 +76,7 @@ class AgentRuntime:
 
         cmd = self._build_command(running)
         logger.warning("CLI command: %s", " ".join(cmd))
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=running.workdir,
-            env=env,
-        )
+        process = await self._launch_process(cmd, env, running.workdir)
         running.process = process
 
         if process.stdin:
@@ -152,6 +149,24 @@ class AgentRuntime:
         if running:
             return running.claude_session_id
         return None
+        
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(TransientAgentError),
+    )
+    async def _launch_process(
+        self, cmd: list[str], env: dict, cwd: str
+    ) -> asyncio.subprocess.Process:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
+            env=env,
+        )
+        return process
 
     def _build_command(self, running: RunningProcess) -> list[str]:
         cmd = [
@@ -207,6 +222,9 @@ class AgentRuntime:
             if error_text:
                 if process.returncode != 0:
                     logger.error("Claude CLI error (rc=%s): %s", process.returncode, error_text)
+                    error_lower = error_text.lower()
+                    if any(word in error_lower for word in ["rate limit", "timeout", "connection"]):
+                        raise TransientAgentError(error_text)
                     yield {"type": "error", "error": error_text}
                 else:
                     logger.info("Claude CLI stderr: %s", error_text[:500])
