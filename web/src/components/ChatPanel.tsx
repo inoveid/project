@@ -13,6 +13,7 @@ function StatusIndicator({ status }: { status: ChatStatus }) {
     typing: "Agent is typing...",
     tool: "Using tool...",
     disconnected: "Disconnected",
+    awaiting_approval: "Waiting for approval...",
   };
 
   const colors: Record<ChatStatus, string> = {
@@ -22,6 +23,7 @@ function StatusIndicator({ status }: { status: ChatStatus }) {
     typing: "text-blue-600",
     tool: "text-purple-600",
     disconnected: "text-red-600",
+    awaiting_approval: "text-amber-600",
   };
 
   return (
@@ -67,6 +69,41 @@ function ChatInput({
   );
 }
 
+function ApprovalBanner({
+  fromAgent,
+  toAgent,
+  onApprove,
+  onReject,
+}: {
+  fromAgent: string;
+  toAgent: string;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  return (
+    <div className="border-t border-amber-200 bg-amber-50 px-4 py-3">
+      <p className="text-sm text-amber-800 mb-2">
+        <span className="font-medium">{fromAgent}</span> wants to hand off to{" "}
+        <span className="font-medium">{toAgent}</span>. Approve?
+      </p>
+      <div className="flex gap-2">
+        <button
+          onClick={onApprove}
+          className="rounded bg-green-600 px-4 py-1.5 text-sm text-white hover:bg-green-700"
+        >
+          Approve
+        </button>
+        <button
+          onClick={onReject}
+          className="rounded border border-gray-300 px-4 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+        >
+          Reject
+        </button>
+      </div>
+    </div>
+  );
+}
+
 interface ChatPanelProps {
   sessionId: string;
   onClose?: () => void;
@@ -87,8 +124,11 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
     items,
     status,
     error: chatError,
+    pendingApproval,
     sendMessage,
     stopAgent,
+    approveHandoff,
+    rejectHandoff,
   } = useChat(sessionId, session?.messages ?? [], sessionLoaded);
 
   async function handleStop() {
@@ -147,7 +187,16 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
 
       <ChatWindow items={items} />
 
-      <ChatInput onSend={sendMessage} disabled={!canSend} />
+      {pendingApproval ? (
+        <ApprovalBanner
+          fromAgent={pendingApproval.fromAgent}
+          toAgent={pendingApproval.toAgent}
+          onApprove={approveHandoff}
+          onReject={rejectHandoff}
+        />
+      ) : (
+        <ChatInput onSend={sendMessage} disabled={!canSend} />
+      )}
     </div>
   );
 }

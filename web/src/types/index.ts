@@ -97,7 +97,9 @@ export interface SessionListItem {
 
 export type WsOutgoing =
   | { type: "message"; content: string }
-  | { type: "stop" };
+  | { type: "stop" }
+  | { type: "approve" }
+  | { type: "reject" };
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -128,11 +130,12 @@ export type WsIncoming =
   | { type: "sub_agent_tool_result"; agent_name: string; content: string }
   | { type: "sub_agent_error"; agent_name: string; error: string }
   | { type: "handoff_done"; agent_name: string }
-  | { type: "handoff_cycle_detected"; message: string };
+  | { type: "handoff_cycle_detected"; message: string }
+  | { type: "approval_required"; from_agent: string; to_agent: string; task: string };
 
 export interface HandoffItem {
   id: string;
-  itemType: "handoff_start" | "sub_agent_turn" | "handoff_done" | "handoff_cycle";
+  itemType: "handoff_start" | "sub_agent_turn" | "handoff_done" | "handoff_cycle" | "approval_required";
   agentName: string;
   fromAgent?: string;
   toAgent?: string;
@@ -145,4 +148,10 @@ export type ChatItem = Message | HandoffItem;
 
 export function isHandoffItem(item: ChatItem): item is HandoffItem {
   return "itemType" in item;
+}
+
+export interface ApprovalRequest {
+  fromAgent: string;
+  toAgent: string;
+  task: string;
 }

@@ -15,6 +15,18 @@ export function HandoffBlock({ item }: HandoffBlockProps) {
     );
   }
 
+  if (item.itemType === "approval_required") {
+    return (
+      <div className="my-3">
+        <div className="flex items-center gap-2 text-xs text-amber-600 uppercase tracking-wide">
+          <div className="flex-1 h-px bg-amber-200" />
+          <span>⏸ {item.fromAgent} → {item.toAgent} (awaiting approval)</span>
+          <div className="flex-1 h-px bg-amber-200" />
+        </div>
+      </div>
+    );
+  }
+
   if (item.itemType === "handoff_start") {
     return (
       <div className="my-3">

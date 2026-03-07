@@ -2,14 +2,25 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from app.config import settings
 from app.routers import agents, agent_links, auth, sessions, teams, ws
+import app.services.graph_service as graph_svc
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    yield
+    # Преобразовать asyncpg URL → psycopg3 URL для AsyncPostgresSaver
+    postgres_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+
+    # async with держит connection pool живым на время работы приложения
+    async with AsyncPostgresSaver.from_conn_string(postgres_url) as checkpointer:
+        # Создать таблицы checkpointer (langgraph_checkpoints, langgraph_writes, ...)
+        await checkpointer.setup()
+        # Скомпилировать граф с checkpointer и сохранить в module-level singleton
+        graph_svc._compiled_graph = graph_svc.build_graph(checkpointer)
+        yield
 
 
 app = FastAPI(title="Agent Console API", version="0.1.0", lifespan=lifespan)

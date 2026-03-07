@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChatItem, HandoffItem, Message, ToolUse, WsIncoming } from "../types";
+import type { ApprovalRequest, ChatItem, HandoffItem, Message, ToolUse, WsIncoming } from "../types";
 import { isHandoffItem } from "../types";
 
-export type ChatStatus = "idle" | "connecting" | "connected" | "typing" | "tool" | "disconnected";
+export type ChatStatus = "idle" | "connecting" | "connected" | "typing" | "tool" | "disconnected" | "awaiting_approval";
 
 interface UseChatResult {
   items: ChatItem[];
   messages: Message[];
   status: ChatStatus;
   error: string | null;
+  pendingApproval: ApprovalRequest | null;
   sendMessage: (content: string) => void;
   stopAgent: () => void;
+  approveHandoff: () => void;
+  rejectHandoff: () => void;
 }
 
 function makeLocalMessage(role: "user" | "assistant", content: string): Message {
@@ -35,6 +38,7 @@ export function useChat(
   const [items, setItems] = useState<ChatItem[]>([]);
   const [status, setStatus] = useState<ChatStatus>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectCount = useRef(0);
@@ -107,6 +111,28 @@ export function useChat(
           setError(event.error);
           setStatus("connected");
           break;
+
+        case "approval_required": {
+          // HITL gate: граф паузирован, ждём решения пользователя
+          setPendingApproval({
+            fromAgent: event.from_agent,
+            toAgent: event.to_agent,
+            task: event.task,
+          });
+          setStatus("awaiting_approval");
+          // Добавить визуальный маркер в чат
+          const item: HandoffItem = {
+            id: crypto.randomUUID(),
+            itemType: "approval_required",
+            agentName: event.to_agent,
+            fromAgent: event.from_agent,
+            toAgent: event.to_agent,
+            content: event.task,
+            created_at: new Date().toISOString(),
+          };
+          setItems((prev) => [...prev, item]);
+          break;
+        }
 
         case "handoff_start": {
           const item: HandoffItem = {
@@ -284,7 +310,21 @@ export function useChat(
     wsRef.current.send(JSON.stringify({ type: "stop" }));
   }, []);
 
+  const approveHandoff = useCallback(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    setPendingApproval(null);
+    setStatus("typing");
+    wsRef.current.send(JSON.stringify({ type: "approve" }));
+  }, []);
+
+  const rejectHandoff = useCallback(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    setPendingApproval(null);
+    setStatus("connected");
+    wsRef.current.send(JSON.stringify({ type: "reject" }));
+  }, []);
+
   const messages = items.filter((i): i is Message => !isHandoffItem(i));
 
-  return { items, messages, status, error, sendMessage, stopAgent };
+  return { items, messages, status, error, pendingApproval, sendMessage, stopAgent, approveHandoff, rejectHandoff };
 }
