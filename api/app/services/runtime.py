@@ -83,8 +83,50 @@ class AgentRuntime:
             process.stdin.write(content.encode())
             process.stdin.write_eof()
 
-        async for event in self._read_stream(session_id, process):
-            yield event
+        from app.services.telemetry import get_langfuse
+        lf = get_langfuse()
+        trace = lf.trace(
+            name="agent.send_message",
+            session_id=str(session_id),
+            input=content,
+        ) if lf else None
+        generation = trace.generation(
+            name="claude_cli",
+            input=content,
+        ) if trace else None
+
+        output_parts: list[str] = []
+        input_tokens = 0
+        output_tokens = 0
+        cost_usd = None
+
+        try:
+            async for event in self._read_stream(session_id, process):
+                if event["type"] == "assistant_text":
+                    output_parts.append(event["content"])
+                elif event["type"] == "result":
+                    usage = event.get("usage", {})
+                    input_tokens = usage.get("input_tokens", 0)
+                    output_tokens = usage.get("output_tokens", 0)
+                    cost_usd = event.get("cost_usd")
+                    continue  # не отправляем result на фронтенд
+                yield event
+        finally:
+            output_text = "".join(output_parts)
+            if generation:
+                generation.end(
+                    output=output_text,
+                    usage={
+                        "input": input_tokens,
+                        "output": output_tokens,
+                        "unit": "TOKENS",
+                    },
+                    metadata={"cost_usd": cost_usd},
+                )
+            if trace:
+                trace.update(output=output_text)
+            if lf:
+                lf.flush()
 
     async def _kill_process(self, running: RunningProcess) -> None:
         proc = running.process
@@ -259,7 +301,11 @@ class AgentRuntime:
             }
 
         if event_type == "result":
-            return None
+            return {
+                "type": "result",
+                "cost_usd": event.get("cost_usd"),
+                "usage": event.get("usage", {}),
+            }
 
         if event_type == "tool_result":
             content = event.get("output", event.get("content", ""))

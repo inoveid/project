@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5432:5432"
+      - "5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -22,6 +22,10 @@ services:
     environment:
       AC_DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/agent_console
       AC_WORKSPACE_PATH: /workspace
+      AC_CORS_ORIGINS: '["http://localhost:3002"]'
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_HOST: http://host.docker.internal:3001
     volumes:
       - ./api:/src
       - ${WORKSPACE_PATH:-../../workspace}:/workspace
@@ -32,7 +36,7 @@ services:
   web:
     build: ./web
     ports:
-      - "3000:3000"
+      - "3002:3000"
     volumes:
       - ./web:/app
       - /app/node_modules
