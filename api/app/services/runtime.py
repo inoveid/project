@@ -211,11 +211,24 @@ class AgentRuntime:
         return process
 
     def _build_command(self, running: RunningProcess) -> list[str]:
+        # TODO: БЕЗОПАСНОСТЬ — флаг --dangerously-skip-permissions отключает все
+        # проверки разрешений Claude Code: агент может читать и писать любые файлы
+        # без подтверждения пользователя.
+        #
+        # Как исправить: реализовать интерактивный approve/deny прямо в UI:
+        # 1. Перехватывать события tool_use из стрима (агент хочет выполнить действие)
+        # 2. Приостанавливать выполнение, отправлять WS-событие permission_request на фронтенд
+        # 3. Пользователь нажимает "Разрешить" / "Запретить" в чате
+        # 4. Ответ записывается в stdin процесса — выполнение продолжается
+        #
+        # Требует: держать stdin открытым после первого сообщения и переписать
+        # _read_stream как двунаправленный цикл. Протокол WS-сообщений — в ws.py.
         cmd = [
             settings.claude_cli_path,
             "-p",
             "--output-format", "stream-json",
             "--verbose",
+            "--dangerously-skip-permissions",
         ]
 
         if running.system_prompt:
