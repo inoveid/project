@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     oauth_redirect_uri: str = "https://platform.claude.com/oauth/code/callback"
     oauth_scopes: str = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers"
 
+    voyage_api_key: str = ""
+
     model_config = {"env_prefix": "AC_", "env_file": ".env"}
 
 

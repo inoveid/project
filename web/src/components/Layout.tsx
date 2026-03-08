@@ -3,6 +3,7 @@ import { AuthStatusBadge } from "./AuthStatusBadge";
 
 const NAV_ITEMS = [
   { path: "/", label: "Teams" },
+  { path: "/eval", label: "Evaluations" },
 ] as const;
 
 export function Layout() {

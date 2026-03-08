@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from app.config import settings
-from app.routers import agents, agent_links, auth, sessions, teams, workspaces, ws
+from app.routers import agents, agent_links, auth, evaluations, memory, sessions, teams, workspaces, ws
 import app.services.graph_service as graph_svc
 
 
@@ -40,3 +40,5 @@ app.include_router(agent_links.router, prefix="/api", tags=["agent_links"])
 app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(workspaces.router, prefix="/api", tags=["workspaces"])
 app.include_router(ws.router, prefix="/api/ws", tags=["websocket"])
+app.include_router(memory.router, prefix="/api", tags=["memory"])
+app.include_router(evaluations.router, prefix="/api", tags=["evaluations"])

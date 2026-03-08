@@ -1,0 +1,384 @@
+[
+  {
+    "name": "crud-endpoint-basic",
+    "description": "Создание базового CRUD endpoint для ресурса. Проверяет способность агента создать полный REST API.",
+    "agent_role": "developer",
+    "task_prompt": "Создай CRUD API для ресурса Product: модель SQLAlchemy (id, name, price, description, created_at), Pydantic схемы (ProductCreate, ProductRead), роутер с GET /products, GET /products/{id}, POST /products, PATCH /products/{id}, DELETE /products/{id}. Используй паттерны проекта: async session, UUID primary keys.",
+    "context_files": {
+      "app/models/team.py": "class Team(Base):\n    __tablename__ = 'teams'\n    id = mapped_column(UUID, primary_key=True, default=uuid4)\n    name = mapped_column(String(100), nullable=False, unique=True)\n    created_at = mapped_column(DateTime(timezone=True), server_default=func.now())",
+      "app/schemas/team.py": "class TeamCreate(BaseModel):\n    name: str = Field(..., min_length=1)\n\nclass TeamRead(BaseModel):\n    id: uuid.UUID\n    name: str\n    created_at: datetime\n    model_config = {'from_attributes': True}"
+    },
+    "rubric": [
+      {
+        "name": "model_correctness",
+        "description": "SQLAlchemy модель Product корректна: UUID pk, все поля с правильными типами, tablename plural",
+        "weight": 2.0,
+        "pass_threshold": 0.8
+      },
+      {
+        "name": "schema_correctness",
+        "description": "Pydantic схемы ProductCreate и ProductRead корректны, from_attributes=True, правильная валидация",
+        "weight": 1.5,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "router_completeness",
+        "description": "Все 5 CRUD endpoints реализованы с правильными HTTP methods и status codes",
+        "weight": 2.0,
+        "pass_threshold": 0.8
+      },
+      {
+        "name": "async_patterns",
+        "description": "Используются async/await, AsyncSession, правильная работа с БД",
+        "weight": 1.5,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "error_handling",
+        "description": "404 для несуществующих ресурсов, корректные HTTP status codes",
+        "weight": 1.0,
+        "pass_threshold": 0.6
+      }
+    ],
+    "expected_artifacts": ["app/models/product.py", "app/schemas/product.py", "app/routers/products.py"],
+    "tags": ["crud", "backend", "basic"]
+  },
+  {
+    "name": "react-list-page",
+    "description": "Создание React страницы со списком и CRUD операциями. Проверяет frontend навыки.",
+    "agent_role": "developer",
+    "task_prompt": "Создай React страницу ProductsPage для отображения списка продуктов. Используй TanStack Query для data fetching (useQuery/useMutation), Tailwind CSS для стилей. Страница должна: загружать список через GET /api/products, показывать карточки с name и price, иметь кнопку 'Add Product' открывающую форму, поддерживать удаление через кнопку на карточке.",
+    "context_files": {
+      "src/hooks/useTeams.ts": "export function useTeams() {\n  return useQuery({ queryKey: ['teams'], queryFn: getTeams });\n}\nexport function useCreateTeam() {\n  const qc = useQueryClient();\n  return useMutation({ mutationFn: createTeam, onSuccess: () => qc.invalidateQueries({ queryKey: ['teams'] }) });\n}",
+      "src/api/teams.ts": "export async function getTeams(): Promise<Team[]> {\n  const res = await fetch('/api/teams');\n  if (!res.ok) throw new Error('Failed');\n  return res.json();\n}"
+    },
+    "rubric": [
+      {
+        "name": "data_fetching",
+        "description": "Используется useQuery для загрузки данных, правильные queryKey, loading и error состояния обрабатываются",
+        "weight": 2.0,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "component_structure",
+        "description": "Компонент структурирован: именованный экспорт, типизированные props, разделение ответственности",
+        "weight": 1.5,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "mutation_handling",
+        "description": "useMutation для создания/удаления с invalidation кеша после успеха",
+        "weight": 2.0,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "typescript_strict",
+        "description": "Нет any, as, @ts-ignore. Все типы определены явно.",
+        "weight": 1.5,
+        "pass_threshold": 0.8
+      },
+      {
+        "name": "ui_completeness",
+        "description": "Список карточек, кнопка добавления, кнопка удаления, форма — все присутствуют",
+        "weight": 1.0,
+        "pass_threshold": 0.6
+      }
+    ],
+    "expected_artifacts": ["src/pages/ProductsPage.tsx", "src/hooks/useProducts.ts", "src/api/products.ts"],
+    "tags": ["frontend", "react", "basic"]
+  },
+  {
+    "name": "db-migration",
+    "description": "Создание Alembic миграции для новой таблицы. Проверяет понимание миграций.",
+    "agent_role": "developer",
+    "task_prompt": "Создай Alembic миграцию для таблицы 'categories': id (UUID, pk), name (String 100, unique, not null), description (Text, nullable), parent_id (UUID, FK → categories.id, nullable — self-referencing), created_at (DateTime tz, server_default now). Добавь индекс по parent_id. Миграция должна иметь и upgrade и downgrade.",
+    "context_files": {
+      "alembic/versions/001_initial_schema.py": "revision = '001'\ndown_revision = None\n\ndef upgrade():\n    op.create_table('teams',\n        sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True),\n        sa.Column('name', sa.String(100), nullable=False, unique=True),\n    )\n\ndef downgrade():\n    op.drop_table('teams')"
+    },
+    "rubric": [
+      {
+        "name": "table_definition",
+        "description": "Все колонки определены с правильными типами, constraints, server_defaults",
+        "weight": 2.0,
+        "pass_threshold": 0.8
+      },
+      {
+        "name": "self_reference_fk",
+        "description": "Self-referencing FK parent_id корректен: nullable, правильный ondelete",
+        "weight": 2.0,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "index",
+        "description": "Индекс по parent_id создан",
+        "weight": 1.0,
+        "pass_threshold": 0.8
+      },
+      {
+        "name": "downgrade",
+        "description": "downgrade() корректно откатывает все изменения (drop index, drop table)",
+        "weight": 1.5,
+        "pass_threshold": 0.7
+      }
+    ],
+    "expected_artifacts": ["alembic/versions/NNN_add_categories.py"],
+    "tags": ["backend", "migration", "basic"]
+  },
+  {
+    "name": "websocket-integration",
+    "description": "Интеграция WebSocket для real-time обновлений. Проверяет понимание async и WS.",
+    "agent_role": "developer",
+    "task_prompt": "Добавь WebSocket endpoint /api/ws/notifications для real-time уведомлений. Backend: FastAPI WebSocket handler, который принимает подключения, хранит их в set, и имеет метод broadcast(message). Frontend: React hook useNotifications() возвращающий {notifications, isConnected}. Hook подключается к WS, накапливает сообщения, автоматически реконнектится при разрыве.",
+    "context_files": {
+      "app/routers/ws.py": "router = APIRouter()\n\n@router.websocket('/sessions/{session_id}')\nasync def ws_handler(websocket: WebSocket, session_id: uuid.UUID, db=Depends(get_db)):\n    await websocket.accept()\n    # ... message handling loop"
+    },
+    "rubric": [
+      {
+        "name": "ws_backend",
+        "description": "WebSocket endpoint корректен: accept, message loop, connection tracking, broadcast",
+        "weight": 2.0,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "ws_frontend_hook",
+        "description": "React hook useNotifications правильно управляет WS lifecycle: connect, messages, cleanup",
+        "weight": 2.0,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "reconnect_logic",
+        "description": "Auto-reconnect при разрыве с exponential backoff или фиксированным delay",
+        "weight": 1.5,
+        "pass_threshold": 0.6
+      },
+      {
+        "name": "type_safety",
+        "description": "Типизированные сообщения, нет any, строгий TypeScript",
+        "weight": 1.0,
+        "pass_threshold": 0.7
+      }
+    ],
+    "expected_artifacts": ["app/routers/notifications_ws.py", "src/hooks/useNotifications.ts"],
+    "tags": ["fullstack", "websocket", "intermediate"]
+  },
+  {
+    "name": "service-layer-extraction",
+    "description": "Рефакторинг: вынос бизнес-логики из роутера в service. Проверяет архитектурное мышление.",
+    "agent_role": "developer",
+    "task_prompt": "Отрефактори роутер orders.py: вынеси бизнес-логику в order_service.py. Роутер должен только принимать request, вызывать service, возвращать response. Service содержит: create_order (валидация наличия товара, расчёт total), get_order, list_orders_by_user, cancel_order (проверка что статус позволяет отмену).",
+    "context_files": {
+      "app/routers/orders.py": "@router.post('/orders')\nasync def create_order(body: OrderCreate, db=Depends(get_db)):\n    # Проверить что все products существуют\n    for item in body.items:\n        product = await db.get(Product, item.product_id)\n        if not product:\n            raise HTTPException(404, f'Product {item.product_id} not found')\n        if product.stock < item.quantity:\n            raise HTTPException(400, 'Insufficient stock')\n    # Рассчитать total\n    total = sum(p.price * i.quantity for p, i in zip(products, body.items))\n    # Создать заказ\n    order = Order(user_id=body.user_id, total=total, status='pending')\n    db.add(order)\n    await db.commit()\n    return order"
+    },
+    "rubric": [
+      {
+        "name": "separation_of_concerns",
+        "description": "Роутер не содержит бизнес-логики — только вызовы service и HTTP responses",
+        "weight": 2.5,
+        "pass_threshold": 0.8
+      },
+      {
+        "name": "service_completeness",
+        "description": "Все 4 функции реализованы в service с правильной валидацией",
+        "weight": 2.0,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "error_handling",
+        "description": "Бизнес-ошибки (insufficient stock, can't cancel) обрабатываются корректно",
+        "weight": 1.5,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "async_correctness",
+        "description": "async/await, правильная передача db session в service",
+        "weight": 1.0,
+        "pass_threshold": 0.7
+      }
+    ],
+    "expected_artifacts": ["app/services/order_service.py", "app/routers/orders.py"],
+    "tags": ["backend", "refactoring", "intermediate"]
+  },
+  {
+    "name": "form-validation",
+    "description": "React форма с валидацией. Проверяет работу с формами и UX.",
+    "agent_role": "developer",
+    "task_prompt": "Создай компонент AgentForm для создания/редактирования агента. Поля: name (required, 1-100 chars), role (required, select из предустановленных), system_prompt (required, textarea), allowed_tools (multi-select chips). Валидация на клиенте перед отправкой. Показывать inline ошибки под полями. При submit — POST /api/teams/{teamId}/agents.",
+    "context_files": {
+      "src/types/index.ts": "interface Agent {\n  id: string;\n  name: string;\n  role: string;\n  system_prompt: string;\n  allowed_tools: string[];\n  config: Record<string, unknown>;\n}"
+    },
+    "rubric": [
+      {
+        "name": "form_fields",
+        "description": "Все 4 поля присутствуют с правильными HTML input типами",
+        "weight": 1.5,
+        "pass_threshold": 0.8
+      },
+      {
+        "name": "validation",
+        "description": "Client-side валидация: required проверки, длина name, inline ошибки отображаются",
+        "weight": 2.0,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "submit_handling",
+        "description": "POST запрос при submit, обработка loading/error/success состояний",
+        "weight": 2.0,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "typescript_strict",
+        "description": "Строгая типизация: нет any, typed event handlers, typed state",
+        "weight": 1.5,
+        "pass_threshold": 0.7
+      }
+    ],
+    "expected_artifacts": ["src/components/AgentForm.tsx"],
+    "tags": ["frontend", "forms", "intermediate"]
+  },
+  {
+    "name": "test-coverage",
+    "description": "Написание тестов для существующего кода. Проверяет навыки тестирования.",
+    "agent_role": "developer",
+    "task_prompt": "Напиши unit-тесты для agent_service.py: test_create_agent (happy path), test_create_agent_duplicate_name (409 conflict), test_get_agent_not_found (returns None), test_list_agents_by_team (filter by team_id), test_update_agent_partial (only updated fields change). Используй pytest + AsyncSession mock.",
+    "context_files": {
+      "app/services/agent_service.py": "async def create_agent(db: AsyncSession, team_id: UUID, data: AgentCreate) -> Agent:\n    agent = Agent(team_id=team_id, **data.model_dump())\n    db.add(agent)\n    await db.commit()\n    await db.refresh(agent)\n    return agent\n\nasync def get_agent(db: AsyncSession, agent_id: UUID) -> Agent | None:\n    return await db.get(Agent, agent_id)"
+    },
+    "rubric": [
+      {
+        "name": "test_completeness",
+        "description": "Все 5 test cases реализованы и тестируют описанные сценарии",
+        "weight": 2.5,
+        "pass_threshold": 0.8
+      },
+      {
+        "name": "mock_usage",
+        "description": "AsyncSession замокан корректно, db operations не вызывают реальную БД",
+        "weight": 2.0,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "assertions",
+        "description": "Assertions проверяют конкретные значения, не просто 'не упало'",
+        "weight": 1.5,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "pytest_patterns",
+        "description": "Используются pytest fixtures, async test functions, правильные маркеры",
+        "weight": 1.0,
+        "pass_threshold": 0.6
+      }
+    ],
+    "expected_artifacts": ["tests/test_agent_service.py"],
+    "tags": ["backend", "testing", "intermediate"]
+  },
+  {
+    "name": "error-boundary",
+    "description": "React Error Boundary с fallback UI. Проверяет обработку ошибок на frontend.",
+    "agent_role": "developer",
+    "task_prompt": "Создай компонент ErrorBoundary (class component, т.к. hooks не поддерживают componentDidCatch). При ошибке: показать fallback UI с сообщением ошибки и кнопкой 'Retry'. Добавь hook useErrorHandler() для программного вызова. Оберни ChatPage в ErrorBoundary.",
+    "context_files": {
+      "src/pages/ChatPage.tsx": "export function ChatPage() {\n  const { sessionId } = useParams();\n  const { messages, send, status } = useChat(sessionId!);\n  return <div>...</div>;\n}"
+    },
+    "rubric": [
+      {
+        "name": "error_boundary_class",
+        "description": "Class component с getDerivedStateFromError и componentDidCatch реализован корректно",
+        "weight": 2.0,
+        "pass_threshold": 0.8
+      },
+      {
+        "name": "fallback_ui",
+        "description": "Fallback UI показывает ошибку и кнопку retry, retry сбрасывает state",
+        "weight": 1.5,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "hook_integration",
+        "description": "useErrorHandler hook работает и может программно триггерить error boundary",
+        "weight": 1.5,
+        "pass_threshold": 0.6
+      },
+      {
+        "name": "integration",
+        "description": "ChatPage обёрнут в ErrorBoundary корректно",
+        "weight": 1.0,
+        "pass_threshold": 0.7
+      }
+    ],
+    "expected_artifacts": ["src/components/ErrorBoundary.tsx", "src/hooks/useErrorHandler.ts"],
+    "tags": ["frontend", "error-handling", "intermediate"]
+  },
+  {
+    "name": "pagination-backend",
+    "description": "Серверная пагинация с cursor-based подходом. Проверяет работу с БД.",
+    "agent_role": "developer",
+    "task_prompt": "Добавь cursor-based пагинацию для GET /api/sessions. Query params: limit (default 20, max 100), cursor (optional UUID — last seen session id). Ответ: {items: Session[], next_cursor: string | null}. Сортировка по created_at DESC. Если items < limit — next_cursor = null.",
+    "context_files": {
+      "app/routers/sessions.py": "@router.get('/', response_model=list[SessionRead])\nasync def list_sessions(agent_id: UUID | None = None, db=Depends(get_db)):\n    return await session_service.list_sessions(db, agent_id=agent_id)"
+    },
+    "rubric": [
+      {
+        "name": "cursor_logic",
+        "description": "Cursor-based пагинация: cursor → WHERE created_at < cursor_timestamp, корректный next_cursor",
+        "weight": 2.5,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "limit_validation",
+        "description": "limit валидируется: default 20, max 100, min 1",
+        "weight": 1.0,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "response_format",
+        "description": "Ответ {items, next_cursor} с правильной типизацией Pydantic схемой",
+        "weight": 1.5,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "sql_correctness",
+        "description": "SQL запрос эффективен: ORDER BY + WHERE (не OFFSET), использует индекс",
+        "weight": 2.0,
+        "pass_threshold": 0.7
+      }
+    ],
+    "expected_artifacts": ["app/routers/sessions.py", "app/services/session_service.py"],
+    "tags": ["backend", "pagination", "intermediate"]
+  },
+  {
+    "name": "handoff-block-parsing",
+    "description": "Парсинг Handoff Block из ответа агента. Проверяет работу с текстовыми протоколами.",
+    "agent_role": "developer",
+    "task_prompt": "Напиши функцию parse_handoff_block(text: str) -> HandoffBlock | None. Парсит блок формата:\n=== HANDOFF ===\ntask_id: TASK-NNN\nstatus: done\nartifacts:\n  - file1.py\n  - file2.ts\nnotes: some notes\nnext: Reviewer review TASK-NNN\n===============\nВернуть Pydantic модель HandoffBlock(task_id, status, artifacts: list[str], notes, next_agent, next_action). Если блок не найден — вернуть None. Функция должна быть robust: работать даже если в тексте есть другой контент до/после блока.",
+    "context_files": {},
+    "rubric": [
+      {
+        "name": "parsing_correctness",
+        "description": "Корректно парсит все поля: task_id, status, artifacts list, notes, next",
+        "weight": 2.5,
+        "pass_threshold": 0.8
+      },
+      {
+        "name": "robustness",
+        "description": "Работает с текстом до/после блока, с разными whitespace вариантами",
+        "weight": 2.0,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "pydantic_model",
+        "description": "HandoffBlock — Pydantic модель с правильными типами и валидацией",
+        "weight": 1.5,
+        "pass_threshold": 0.7
+      },
+      {
+        "name": "none_handling",
+        "description": "Возвращает None если блок отсутствует, не бросает исключение",
+        "weight": 1.0,
+        "pass_threshold": 0.8
+      }
+    ],
+    "expected_artifacts": ["app/services/handoff_parser.py"],
+    "tags": ["backend", "parsing", "basic"]
+  }
+]

@@ -155,3 +155,95 @@ export interface ApprovalRequest {
   toAgent: string;
   task: string;
 }
+
+// ── Evaluation types ────────────────────────────────────────────────────────
+
+export interface RubricCriterion {
+  name: string;
+  description: string;
+  weight: number;
+  pass_threshold: number;
+}
+
+export interface EvalCase {
+  id: string;
+  name: string;
+  description: string;
+  agent_role: string;
+  task_prompt: string;
+  context_files: Record<string, string>;
+  rubric: RubricCriterion[];
+  expected_artifacts: string[];
+  tags: string[];
+  created_at: string;
+}
+
+export interface EvalCaseCreate {
+  name: string;
+  description: string;
+  agent_role?: string;
+  task_prompt: string;
+  context_files?: Record<string, string>;
+  rubric: RubricCriterion[];
+  expected_artifacts?: string[];
+  tags?: string[];
+}
+
+export interface EvalRunSummary {
+  id: string;
+  name: string;
+  prompt_version: string;
+  model: string;
+  status: "pending" | "running" | "completed" | "failed";
+  total_cases: number;
+  passed_cases: number;
+  failed_cases: number;
+  pass_rate: number | null;
+  created_at: string;
+}
+
+export interface EvalRun extends EvalRunSummary {
+  prompt_snapshot: string;
+  metadata_: Record<string, unknown>;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface EvalRunCreate {
+  name: string;
+  prompt_version: string;
+  prompt_snapshot: string;
+  model?: string;
+  case_ids?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface CriterionScore {
+  score: number;
+  reasoning: string;
+}
+
+export interface EvalResult {
+  id: string;
+  run_id: string;
+  case_id: string;
+  agent_output: string;
+  verdict: "pass" | "fail" | "error";
+  score: number;
+  criteria_scores: Record<string, CriterionScore>;
+  judge_reasoning: string;
+  trajectory: Record<string, unknown>;
+  token_usage: Record<string, number>;
+  duration_ms: number | null;
+  created_at: string;
+}
+
+export interface EvalComparison {
+  run_a: { id: string; prompt_version: string | null; pass_rate: number | null };
+  run_b: { id: string; prompt_version: string | null; pass_rate: number | null };
+  common_cases: number;
+  regressions: Array<{ case_id: string; score_a: number; score_b: number; delta: number }>;
+  improvements: Array<{ case_id: string; score_a: number; score_b: number; delta: number }>;
+  regression_count: number;
+  improvement_count: number;
+}
