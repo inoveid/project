@@ -12,7 +12,7 @@
 | `api/app/services/runtime/` (пакет) | **HIGH** | Весь chat flow, budget tracking, circuit breaker, telemetry |
 | `api/app/services/graph_service.py` | **HIGH** | Orchestration, handoff, HITL gate, sub-agent lifecycle |
 | `api/app/routers/ws.py` | **HIGH** | Все WebSocket клиенты, reconnect, approve/reject flow |
-| `web/src/hooks/useChat.ts` | **HIGH** | Весь chat UI, streaming, handoff визуализация |
+| `web/src/hooks/chat/` (пакет) | **HIGH** | Весь chat UI, streaming, handoff визуализация |
 | `web/src/types/index.ts` | **MEDIUM** | Frontend type contracts (29 type declarations (25 interfaces + 4 type aliases), WsIncoming/WsOutgoing) |
 | `api/app/main.py` (lifespan) | **MEDIUM** | Startup, graph init, router registration |
 | `api/app/database.py` | **MEDIUM** | Все DB-зависимые модули (9+ импортеров: все routers, auth_service, eval_service) |
@@ -162,24 +162,36 @@ cd api && pytest tests/test_ws.py -v
 
 ---
 
-### 4. `web/src/hooks/useChat.ts` (~374 строк) — HIGH
+### 4. `web/src/hooks/chat/` (пакет, 5 файлов) — HIGH
 
-**Что делает:** React hook для всего chat UI. WebSocket connection, streaming state, handoff visualization, reconnect logic.
+**Что делает:** React hook для всего chat UI. Декомпозирован на 4 модуля с чёткими границами ответственности.
 
-**Ключевые части:**
-- `handleEvent()` — switch на 13+ типов WS-событий (assistant_text, tool_use, tool_result, done, error, approval_required, handoff_start, sub_agent_*, handoff_done, handoff_cycle_detected)
-- `connect()` — WebSocket connection с reconnect (5 попыток, 2с delay, фиксированная — не exponential backoff)
-- `pendingTextRef` / `pendingToolsRef` / `pendingSubAgentRef` — streaming accumulation через refs
-- `updateStreamingItem()` / `updateSubAgentStreamingItem()` — batch UI updates
-- `sendMessage()` / `stopAgent()` / `approveHandoff()` / `rejectHandoff()` — user actions
+**Структура пакета:**
+```
+hooks/chat/
+├── index.ts              — re-export useChat, ChatStatus, UseChatResult
+├── useChat.ts (~105)     — публичный API хука, композиция модулей
+├── useChatSocket.ts (~106) — WebSocket connection + reconnect, инкапсулирует lifecycle
+├── chatEventHandler.ts (~222) — handleEvent switch (13 cases), pure function (без React hooks)
+└── chatState.ts (~36)    — типы (ChatStatus, PendingRefs, UseChatResult), константы, makeLocalMessage
+```
+Backward-compatible re-export: `hooks/useChat.ts` → `hooks/chat/`
+
+**Границы модулей:**
+- `chatEventHandler` — не зависит от React hooks, тестируется изолированно с моковыми refs/callbacks
+- `useChatSocket` — не знает о доменной логике (streaming IDs, handoff items). Принимает `onEvent` и `onDisconnect` callbacks, возвращает `{ send, stop, isOpen }`
+- `useChat` — композиция: state + refs + event handler + socket. Владеет доменной cleanup-логикой в `onDisconnect`
+- `chatState` — shared types и утилиты, без побочных эффектов
+
+**Важно: порядок useEffect.** В `useChat.ts` initialization effect **должен** быть объявлен перед вызовом `useChatSocket`, иначе `initializedRef.current` будет `false` при первом connect.
 
 **Связанные модули:**
 - `types/index.ts` — `WsIncoming`, `WsOutgoing`, `ChatItem`, `HandoffItem`, `Message`, `ToolUse`
-- `components/ChatPanel.tsx` — основной потребитель hook
+- `components/ChatPanel.tsx` — основной потребитель hook (импортирует из `hooks/useChat`)
 - `components/ChatWindow.tsx` — рендерит `ChatItem[]`
 - `components/HandoffBlock.tsx` — рендерит handoff items
 
-**Известные проблемы (из ARCHITECTURE_REVIEW):**
+**Известные проблемы:**
 - Budget events (`budget_warning`, `budget_exceeded`) не обрабатываются в `handleEvent` и не определены в `WsIncoming` — игнорируются молча
 - Reconnect не восстанавливает interrupted state серверной стороны
 
@@ -197,8 +209,9 @@ cd api && pytest tests/test_ws.py -v
 
 **Какие тесты запустить:**
 ```bash
-cd web && npm test -- --run useChat
-cd web && npm test -- --run ChatPanel
+cd web && npm test -- --run chatEventHandler  # 19 unit-тестов (изолированные, без React hooks)
+cd web && npm test -- --run useChat            # 23 интеграционных теста (через хук)
+cd web && npm test -- --run ChatPanel          # 6 тестов компонента
 ```
 
 ---
@@ -209,7 +222,8 @@ cd web && npm test -- --run ChatPanel
 
 **Связанные модули:**
 - Импортируется **всеми** frontend-файлами: hooks, components, API layer
-- `useChat.ts` — `WsIncoming`, `ChatItem`, `Message`, `ToolUse`, `HandoffItem`, `ApprovalRequest`
+- `hooks/chat/chatEventHandler.ts` — `WsIncoming`, `ChatItem`, `Message`, `HandoffItem`, `ApprovalRequest`
+- `hooks/chat/useChat.ts` — `ChatItem`, `Message`, `ToolUse`, `HandoffItem`
 - `api/*.ts` — типы для REST API (Team, Agent, Session и др.)
 - `components/*.tsx` — типы для props
 

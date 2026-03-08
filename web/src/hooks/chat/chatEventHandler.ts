@@ -1,16 +1,17 @@
+import type { Dispatch, SetStateAction } from "react";
 import type { ApprovalRequest, ChatItem, HandoffItem, Message, WsIncoming } from "../../types";
 import { isHandoffItem } from "../../types";
 import type { ChatStatus, PendingRefs } from "./chatState";
 import { makeLocalMessage } from "./chatState";
 
-interface EventCallbacks {
-  setItems: React.Dispatch<React.SetStateAction<ChatItem[]>>;
-  setStatus: React.Dispatch<React.SetStateAction<ChatStatus>>;
-  setError: React.Dispatch<React.SetStateAction<string | null>>;
-  setPendingApproval: React.Dispatch<React.SetStateAction<ApprovalRequest | null>>;
+export interface EventCallbacks {
+  setItems: Dispatch<SetStateAction<ChatItem[]>>;
+  setStatus: Dispatch<SetStateAction<ChatStatus>>;
+  setError: Dispatch<SetStateAction<string | null>>;
+  setPendingApproval: Dispatch<SetStateAction<ApprovalRequest | null>>;
 }
 
-function updateStreamingItem(refs: PendingRefs, setItems: React.Dispatch<React.SetStateAction<ChatItem[]>>): void {
+function updateStreamingItem(refs: PendingRefs, setItems: Dispatch<SetStateAction<ChatItem[]>>): void {
   setItems((prev) => {
     const idx = prev.findIndex((i) => !isHandoffItem(i) && i.id === "__streaming__");
     if (idx === -1) return prev;
@@ -26,7 +27,7 @@ function updateStreamingItem(refs: PendingRefs, setItems: React.Dispatch<React.S
   });
 }
 
-function updateSubAgentStreamingItem(refs: PendingRefs, setItems: React.Dispatch<React.SetStateAction<ChatItem[]>>): void {
+function updateSubAgentStreamingItem(refs: PendingRefs, setItems: Dispatch<SetStateAction<ChatItem[]>>): void {
   if (!refs.subAgentRef.current) return;
   const snapshot = { ...refs.subAgentRef.current, toolUses: (refs.subAgentRef.current.toolUses ?? []).map((t) => ({ ...t })) };
   setItems((prev) => {

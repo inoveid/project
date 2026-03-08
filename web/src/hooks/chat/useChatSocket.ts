@@ -1,29 +1,27 @@
 import { useCallback, useEffect, useRef } from "react";
+import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type { WsIncoming } from "../../types";
 import type { ChatStatus } from "./chatState";
 import { MAX_RECONNECT_ATTEMPTS, RECONNECT_DELAY_MS } from "./chatState";
-import { isHandoffItem } from "../../types";
-import type { ChatItem } from "../../types";
 
 interface UseChatSocketOptions {
   sessionId: string;
   enabled: boolean;
-  initializedRef: React.MutableRefObject<boolean>;
+  initializedRef: MutableRefObject<boolean>;
   onEvent: (event: WsIncoming) => void;
-  setStatus: React.Dispatch<React.SetStateAction<ChatStatus>>;
-  setError: React.Dispatch<React.SetStateAction<string | null>>;
-  setItems: React.Dispatch<React.SetStateAction<ChatItem[]>>;
-  resetPendingRefs: () => void;
+  onDisconnect: () => void;
+  setStatus: Dispatch<SetStateAction<ChatStatus>>;
+  setError: Dispatch<SetStateAction<string | null>>;
 }
 
 interface UseChatSocketResult {
-  wsRef: React.MutableRefObject<WebSocket | null>;
-  stoppedRef: React.MutableRefObject<boolean>;
-  reconnectTimer: React.MutableRefObject<ReturnType<typeof setTimeout> | null>;
+  send: (data: string) => void;
+  stop: () => void;
+  isOpen: () => boolean;
 }
 
 export function useChatSocket(options: UseChatSocketOptions): UseChatSocketResult {
-  const { sessionId, enabled, initializedRef, onEvent, setStatus, setError, setItems, resetPendingRefs } = options;
+  const { sessionId, enabled, initializedRef, onEvent, onDisconnect, setStatus, setError } = options;
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectCount = useRef(0);
@@ -57,11 +55,7 @@ export function useChatSocket(options: UseChatSocketOptions): UseChatSocketResul
     ws.onclose = () => {
       wsRef.current = null;
       setStatus("disconnected");
-      resetPendingRefs();
-      setItems((prev) => prev.filter((i) => {
-        if (isHandoffItem(i)) return i.id !== "__sub_agent_streaming__";
-        return i.id !== "__streaming__";
-      }));
+      onDisconnect();
       if (!stoppedRef.current && reconnectCount.current < MAX_RECONNECT_ATTEMPTS) {
         reconnectCount.current += 1;
         reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY_MS);
@@ -71,7 +65,7 @@ export function useChatSocket(options: UseChatSocketOptions): UseChatSocketResul
     ws.onerror = () => {
       setError("WebSocket connection error");
     };
-  }, [sessionId, onEvent, setStatus, setError, setItems, resetPendingRefs]);
+  }, [sessionId, onEvent, onDisconnect, setStatus, setError]);
 
   useEffect(() => {
     if (!enabled || !initializedRef.current) return;
@@ -89,5 +83,24 @@ export function useChatSocket(options: UseChatSocketOptions): UseChatSocketResul
     };
   }, [enabled, connect, initializedRef]);
 
-  return { wsRef, stoppedRef, reconnectTimer };
+  const send = useCallback((data: string) => {
+    wsRef.current?.send(data);
+  }, []);
+
+  const stop = useCallback(() => {
+    stoppedRef.current = true;
+    if (reconnectTimer.current !== null) {
+      clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = null;
+    }
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "stop" }));
+    }
+  }, []);
+
+  const isOpen = useCallback(() => {
+    return wsRef.current?.readyState === WebSocket.OPEN;
+  }, []);
+
+  return { send, stop, isOpen };
 }

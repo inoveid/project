@@ -1,2 +1,2 @@
 export { useChat } from "./useChat";
-export type { ChatStatus } from "./chatState";
+export type { ChatStatus, UseChatResult } from "./chatState";
