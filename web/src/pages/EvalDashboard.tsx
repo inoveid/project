@@ -24,7 +24,7 @@ export function EvalDashboard() {
   }
 
   const completedRuns = runs?.filter((r) => r.status === "completed") ?? [];
-  const latestPassRate = completedRuns.length > 0 ? completedRuns[0].pass_rate : null;
+  const latestPassRate = completedRuns.length > 0 ? completedRuns[0]?.pass_rate ?? null : null;
   const totalCases = cases?.length ?? 0;
 
   return (

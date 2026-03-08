@@ -59,7 +59,7 @@ describe("AuthLoginModal", () => {
     });
     renderComponent();
     expect(
-      await screen.findByText("Open the URL to authenticate"),
+      await screen.findByText("Open the URL in a browser to complete authentication"),
     ).toBeInTheDocument();
     expect(screen.getByText("Authorize")).toBeInTheDocument();
     expect(

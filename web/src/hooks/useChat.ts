@@ -59,7 +59,7 @@ export function useChat(
       const updated: Message = {
         ...current,
         content: pendingTextRef.current,
-        tool_uses: pendingToolsRef.current.length > 0 ? [...pendingToolsRef.current] : null,
+        tool_uses: pendingToolsRef.current.length > 0 ? pendingToolsRef.current.map((t) => ({ ...t })) : null,
       };
       const result = [...prev];
       result[idx] = updated;
@@ -69,7 +69,7 @@ export function useChat(
 
   const updateSubAgentStreamingItem = useCallback(() => {
     if (!pendingSubAgentRef.current) return;
-    const snapshot = { ...pendingSubAgentRef.current, toolUses: [...(pendingSubAgentRef.current.toolUses ?? [])] };
+    const snapshot = { ...pendingSubAgentRef.current, toolUses: (pendingSubAgentRef.current.toolUses ?? []).map((t) => ({ ...t })) };
     setItems((prev) => {
       const withoutPending = prev.filter((i) => i.id !== "__sub_agent_streaming__");
       return [...withoutPending, snapshot];
