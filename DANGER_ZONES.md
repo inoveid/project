@@ -9,7 +9,7 @@
 
 | Файл | Blast Radius | Что может сломаться |
 |------|-------------|-------------------|
-| `api/app/services/runtime.py` | **HIGH** | Весь chat flow, budget tracking, circuit breaker, telemetry |
+| `api/app/services/runtime/` (пакет) | **HIGH** | Весь chat flow, budget tracking, circuit breaker, telemetry |
 | `api/app/services/graph_service.py` | **HIGH** | Orchestration, handoff, HITL gate, sub-agent lifecycle |
 | `api/app/routers/ws.py` | **HIGH** | Все WebSocket клиенты, reconnect, approve/reject flow |
 | `web/src/hooks/useChat.ts` | **HIGH** | Весь chat UI, streaming, handoff визуализация |
@@ -33,16 +33,26 @@
 
 ## Детали по каждому файлу
 
-### 1. `api/app/services/runtime.py` (~390 строк) — HIGH
+### 1. `api/app/services/runtime/` (пакет, ~440 строк) — HIGH
 
 **Что делает:** Управляет жизненным циклом Claude CLI subprocess, budget tracking, circuit breaker, telemetry (Langfuse).
 
+**Структура пакета:**
+```
+runtime/
+├── __init__.py          — re-export: AgentRuntime, runtime, AgentRuntimeError, TransientAgentError, RunningProcess
+├── agent_runner.py      — AgentRuntime class, runtime singleton (~209 строк)
+├── cli_builder.py       — build_command() — построение CLI-команды (~32 строки)
+├── event_parser.py      — parse_event(), read_stream() — чистые функции (~135 строк)
+└── process_manager.py   — RunningProcess dataclass, kill_process(), launch_process() (~55 строк)
+```
+
 **Ключевые классы/функции:**
-- `AgentRuntime` — singleton (`runtime = AgentRuntime()`, строка 390)
+- `AgentRuntime` — singleton (`runtime = AgentRuntime()` в `agent_runner.py`)
 - `start_session()` — регистрация сессии (конфиг, workdir lock)
 - `send_message()` — запуск CLI subprocess, streaming событий, budget/circuit breaker
-- `_read_stream()` — парсинг JSON-событий из stdout Claude CLI
-- `_parse_event()` — преобразование raw events в типизированные dict'ы
+- `read_stream()` — парсинг JSON-событий из stdout Claude CLI (чистая функция в `event_parser.py`)
+- `parse_event()` — преобразование raw events в типизированные dict'ы (чистая функция в `event_parser.py`)
 - `stop_session()` — рекурсивная остановка процессов (включая children)
 
 **Связанные модули:**
@@ -51,8 +61,8 @@
 - `sessions.py` (router) — импортирует `runtime` singleton напрямую для session lifecycle
 - `budget.py` — встроен через `self._budget` (BudgetTracker)
 - `circuit_breaker.py` — встроен через `self._breaker` (CircuitBreaker)
-- `auth_service.py` — lazy import в `send_message()` (строка 100), скрыт от статического анализа
-- `telemetry.py` — lazy import в `send_message()` (строка 123), скрыт от статического анализа
+- `auth_service.py` — lazy import в `send_message()`, скрыт от статического анализа
+- `telemetry.py` — lazy import в `send_message()`, скрыт от статического анализа
 
 
 **Что проверить после изменения:**
@@ -88,7 +98,7 @@ cd web && npm test -- --run useChat
 
 **Связанные модули:**
 - `ws.py` — вызывает `get_graph()`, передаёт websocket/db через configurable
-- `runtime.py` — `send_message()`, `start_session()`, `stop_session()`
+- `runtime/` — `send_message()`, `start_session()`, `stop_session()`
 - `utils/handoff.py` — `parse_handoff_block()`, `build_agent_prompt()` (критичные утилиты для handoff)
 - `session_service.py` — `create_session()`, `add_message()`, `get_session()`, `stop_session()`
 - `agent_link_service.py` — `get_agent_handoff_targets()`
@@ -124,7 +134,7 @@ cd api && pytest tests/test_ws.py -v
 
 **Связанные модули:**
 - `graph_service.py` — `get_graph()`, `WorkflowState`
-- `runtime.py` — `start_session()`, `is_running()`, `stop_session()`, `get_children()`
+- `runtime/` — `start_session()`, `is_running()`, `stop_session()`, `get_children()`
 - `session_service.py` — `get_session()`, `add_message()`, `stop_session()`
 - `agent_link_service.py` — `get_agent_handoff_targets()`
 - `utils/handoff.py` — `format_handoff_instructions()`
@@ -286,7 +296,7 @@ cd api && pytest -v  # все тесты зависят от database setup
 
 **Связанные модули:**
 - `database.py` — `settings.database_url`
-- `runtime.py` — `settings.workspace_path`, `settings.claude_cli_path`, budget/circuit breaker params
+- `runtime/` — `settings.workspace_path`, `settings.claude_cli_path`, budget/circuit breaker params
 - `graph_service.py` — `settings.workspace_path`
 - `main.py` — `settings.cors_origins`, `settings.database_url`
 - `auth_service.py`, `memory_service.py`
