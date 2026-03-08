@@ -7,7 +7,8 @@ parses YAML frontmatter, and exposes list/get/update operations.
 import os
 import re
 import subprocess
-from typing import Optional
+
+
 
 
 def _tasks_dir(workspace_root: str) -> str:
@@ -42,7 +43,7 @@ def register_task_tools(mcp, workspace_root: str) -> None:
     """Register all task-related tools on the MCP server."""
 
     @mcp.tool()
-    def list_tasks(status: Optional[str] = None) -> str:
+    def list_tasks(status: str | None = None) -> str:
         """List all tasks in the workspace.
 
         Returns task ID, title, status, priority, and assignee for each task.
