@@ -1,8 +1,8 @@
 # Архитектурный анализ Agent Console: AI-first разработка
 
 **Дата:** 2026-03-08
-**Версия:** 8.0 (после независимого ревью Tests/Infrastructure v8)
-**Метод:** Восьмипроходный анализ — первичный (v1), коррекция (v2), независимая ревизия (v3), критическая самопроверка (v4), независимое ревью data layer + frontend + миграции (v5), full-stack ревью Chat/WebSocket pipeline (v6), глубокое ревью Memory/Eval/MCP подсистем (v7), независимое ревью тестов и инфраструктуры (v8)
+**Версия:** 9.0 (после независимого ревью Security/Auth v9)
+**Метод:** Девятипроходный анализ — первичный (v1), коррекция (v2), независимая ревизия (v3), критическая самопроверка (v4), независимое ревью data layer + frontend + миграции (v5), full-stack ревью Chat/WebSocket pipeline (v6), глубокое ревью Memory/Eval/MCP подсистем (v7), независимое ревью тестов и инфраструктуры (v8), независимое ревью аутентификации и безопасности (v9)
 
 ---
 
@@ -26,6 +26,7 @@
 16. [Ошибки пятого прохода анализа (ревью v6)](#16-ошибки-пятого-прохода-анализа-ревью-v6)
 17. [Ошибки шестого прохода анализа (ревью v7)](#17-ошибки-шестого-прохода-анализа-ревью-v7)
 18. [Ошибки седьмого прохода анализа (ревью v8)](#18-ошибки-седьмого-прохода-анализа-ревью-v8)
+19. [Ошибки восьмого прохода анализа (ревью v9)](#19-ошибки-восьмого-прохода-анализа-ревью-v9)
 
 ---
 
@@ -46,6 +47,7 @@
 | AI-agent readiness | 5/10 | Конвенции описаны, нет explicit contracts, inconsistent return types в сервисах |
 | Observability | 4/10 | Langfuse — минимальная интеграция (25 строк init, trace+generation в runtime), нет structured logging |
 | Change isolation | 5/10 | CRUD изолированы; core services сильно связаны, kill-all ломает параллельные сессии |
+| Security posture | 3/10 | Нет authN на API/WebSocket, single-user design, токены plain text в БД, нет rate limiting, нет CSP. PKCE flow корректен, CORS ограничен, path traversal защищён |
 | **Общая оценка** | **5/10** | Хорошая база для CRUD; core chat flow без тестов, архитектурные проблемы в оркестрации |
 
 ---
@@ -432,9 +434,11 @@ _code_verifier: Optional[str] = None
 _oauth_state: Optional[str] = None
 ```
 
-Module-level переменные. Два одновременных вызова `start_oauth_login()` перезапишут друг друга. Также `get_current_access_token()` вызывается из runtime.py при каждом send_message — при параллельных сессиях возможен race condition на token refresh.
+Module-level переменные. Два одновременных вызова `start_oauth_login()` перезапишут друг друга. Нет `asyncio.Lock` или atomic operations. Также `get_current_access_token()` вызывается из runtime.py при каждом send_message — при параллельных сессиях возможен race condition на token refresh.
 
-**Severity:** RISK (проявляется при параллельных сессиях)
+**Уточнение (v9):** Система single-user by design — в БД хранится максимум один OAuthToken (`delete(OAuthToken)` без WHERE, строки 113/167/208). OAuth flow запускается пользователем вручную через UI (AuthLoginModal). Вероятность двух одновременных OAuth flows крайне мала. Race condition на token refresh при side-by-side маловероятен — kill-all (runtime.py:84-86) сериализует выполнение send_message. Реальная severity ниже заявленной.
+
+**Severity:** RISK (LOW для single-user, проявляется при multi-user)
 
 ### 6.4 orchestrator handle_handoff() — мёртвый код (DEBT)
 
@@ -1171,6 +1175,140 @@ lint:
 	docker compose -f docker-compose.dev.yml exec web npm run lint
 ```
 
+### 6.57 Весь API без аутентификации — нет модели пользователя (SECURITY) [v9]
+
+**Файлы:** `api/app/routers/*.py`, `api/app/main.py`, `api/app/models/session.py`
+
+Ни один HTTP endpoint и WebSocket handler не требует аутентификации пользователя. Нет `Authorization` header, нет JWT, нет auth middleware. Session-модель не имеет `user_id`/`owner_id` поля.
+
+Последствия:
+- `GET /api/sessions` — возвращает **все** сессии без фильтрации по пользователю
+- `POST /api/sessions` — любой клиент может создать сессию для любого агента
+- `DELETE /api/sessions/{id}` — любой клиент может удалить любую сессию
+- WebSocket `ws://host/api/ws/sessions/{id}` — `await websocket.accept()` без проверки identity (ws.py:38)
+- Все REST endpoints (teams, agents, sessions, eval, memory) полностью открыты
+
+OAuth token проверяется **только** внутри `runtime.send_message()` (runtime.py:88-92) — это проверка наличия Claude API token, а не аутентификация пользователя.
+
+**Контекст:** Система спроектирована как single-user tool в Docker-контейнере. OAuth token хранится один на всё приложение (`delete(OAuthToken)` без WHERE, auth_service.py:113). Для dev/learning — допустимо. Для multi-user — требует архитектурного redesign.
+
+**Severity:** SECURITY (архитектурное ограничение)
+**Fix:** Для multi-user: добавить User модель, auth middleware (JWT), user_id FK в Session, ownership checks в endpoints.
+
+### 6.58 OAuth tokens в БД без шифрования (SECURITY) [v9]
+
+**Файл:** `api/app/models/oauth_token.py:18-19`
+```python
+access_token: Mapped[str] = mapped_column(Text, nullable=False)
+refresh_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+```
+
+Токены хранятся как plain text. Нет шифрования на уровне приложения (Fernet/AES — grep по проекту: 0 результатов). Нет column-level encryption в PostgreSQL.
+
+**Severity:** SECURITY (LOW для Docker dev, HIGH для production)
+**Fix:** `cryptography.fernet.Fernet` для шифрования access_token/refresh_token перед записью в БД.
+
+### 6.59 Нет rate limiting ни на одном endpoint (SECURITY) [v9]
+
+Grep по `rate.limit|RateLimiter|slowapi|throttle` — 0 результатов в `api/`. Ни один HTTP endpoint и WebSocket handler не защищён rate limiting'ом.
+
+Наиболее уязвимые endpoints:
+- `/api/auth/login` — спам OAuth-инициацией перезаписывает `_code_verifier` (6.3)
+- `/api/auth/callback` — brute force authorization codes
+- WebSocket — неограниченная частота сообщений
+- `/api/eval/runs` (POST) — запуск eval runs без ограничений
+
+**Severity:** SECURITY (LOW для Docker dev, MEDIUM для production)
+**Fix:** Добавить `slowapi` middleware или FastAPI rate limiting dependency.
+
+### 6.60 Нет Content-Security-Policy header (SECURITY) [v9]
+
+**Файл:** `api/app/main.py:28-34`
+
+Настроен только CORSMiddleware. Отсутствуют security headers:
+- `Content-Security-Policy` — нет защиты от inline scripts (defense-in-depth для XSS)
+- `X-Content-Type-Options` — нет `nosniff`
+- `X-Frame-Options` — нет `DENY`
+
+Frontend использует `react-markdown` v10.1.0 (safe by default — не рендерит raw HTML, блокирует `javascript:` URLs). XSS через markdown маловероятен. CSP — превентивная мера.
+
+**Severity:** SECURITY (LOW — react-markdown safe by default, CSP для defense-in-depth)
+**Fix:** Добавить security headers middleware или в nginx/reverse proxy.
+
+### 6.61 path traversal в specs.py — startswith без separator (SECURITY) [v9]
+
+**Файл:** `mcp-workspace/tools/specs.py:74-78`
+```python
+filepath = os.path.normpath(os.path.join(specs_path, filename))
+if not filepath.startswith(specs_path):
+    return "Error: path traversal not allowed."
+```
+
+`startswith()` — строковая операция, не path-операция. Edge case:
+- `specs_path = "/workspace/process/specs"`
+- Input: `"../specs_evil/secret.md"` → normpath → `"/workspace/process/specs_evil/secret.md"`
+- `startswith("/workspace/process/specs")` → **TRUE** — проверка пройдена
+
+Любая sibling-директория с именем, начинающимся на `specs`, доступна для чтения. Для сравнения: `tasks.py` (тот же MCP server) использует regex `^TASK-\d{3}$` для task_id — безопасен.
+
+Стандартные traversal-атаки (`../../etc/passwd`) **блокируются** корректно.
+
+**Severity:** SECURITY (MEDIUM — эксплуатируемый edge case, scope ограничен sibling-dirs)
+**Fix:** Заменить `filepath.startswith(specs_path)` на `filepath.startswith(specs_path + os.sep)` или `Path(filepath).is_relative_to(Path(specs_path))` (Python 3.9+).
+
+### 6.62 OAuth state parameter не верифицируется на callback (COSMETIC) [v9]
+
+**Файлы:** `api/app/services/auth_service.py:49-50, 74, 88`, `api/app/routers/auth.py:36-42`, `api/app/schemas/auth.py:19-20`
+
+`_oauth_state` генерируется при `start_oauth_login()` (строка 49), сохраняется в глобальной переменной, затем отправляется в token exchange request (строка 88: `"state": state`). Callback endpoint `AuthCodeSubmit` принимает только `code` (schemas/auth.py:19-20) — state не передаётся клиентом и не верифицируется client-side.
+
+**Почему это НЕ security issue:**
+1. `redirect_uri` = `https://platform.claude.com/oauth/code/callback` — НЕ наш endpoint. Код получается out-of-band (пользователь вручную копирует из браузера). Стандартная CSRF-атака (redirect с подставным code) неприменима.
+2. PKCE `code_verifier` уже обеспечивает привязку авторизации к инициатору — RFC 7636 специально разработан для public clients без client_secret.
+3. State отправляется в token exchange body — OAuth provider может верифицировать server-side.
+
+**Severity:** COSMETIC (best practice, не реальная уязвимость в данном flow)
+**Fix:** Добавить `state` в `AuthCodeSubmit` и верифицировать `state == _oauth_state` в `exchange_code()` для полноты.
+
+### 6.63 `CLAUDE_CODE_OAUTH_TOKEN` передаётся через env subprocess (SECURITY) [v9]
+
+**Файл:** `api/app/services/runtime.py:100`
+```python
+env = {**os.environ, "CLAUDE_CODE_OAUTH_TOKEN": token}
+```
+
+OAuth access token передаётся как environment variable в Claude CLI subprocess. На Linux env vars видны через `/proc/{pid}/environ` для root и владельца процесса. В Docker-контейнере (один пользователь, root) — приемлемо. При миграции на shared infrastructure (Kubernetes, multi-tenant) — потенциальная утечка токена.
+
+**Severity:** SECURITY (LOW для Docker, MEDIUM для shared infra)
+**Fix:** Для production: передавать token через tmpfile с mode 600, или через Unix socket.
+
+### 6.64 `.env.example` не документирует security-sensitive переменные (CONFIG) [v9]
+
+**Файл:** `.env.example`
+
+Содержит только 4 переменные: `AC_DATABASE_URL`, `AC_CLAUDE_CLI_PATH`, `AC_WORKSPACE_PATH`, `AC_CORS_ORIGINS`. Не документированы:
+- `AC_OAUTH_CLIENT_ID` — можно переопределить public client ID
+- `AC_VOYAGE_API_KEY` — API key для Voyage AI embeddings
+- `ANTHROPIC_API_KEY` — API key для judge_service (используется SDK напрямую, 6.48)
+- `LANGFUSE_SECRET_KEY` — API key для observability
+
+**Severity:** CONFIG (разработчик не знает о необходимости настройки)
+**Fix:** Добавить секции в `.env.example` с комментариями.
+
+### 6.65 `entrypoint.sh: git config --global --add safe.directory '*'` (SECURITY) [v9]
+
+**Файл:** `api/entrypoint.sh:15`
+```bash
+git config --global --add safe.directory '*'
+```
+
+Отключает git ownership checks для **всех** директорий глобально (CVE-2022-24765 mitigation bypass). В контексте Docker-контейнера (один пользователь, root, volume-mounted workspace) — обоснованное решение, т.к. UID mismatch между хостом и контейнером вызывает git errors.
+
+При миграции на bare-metal или shared containers — позволяет git доверять репозиториям произвольных пользователей.
+
+**Severity:** SECURITY (LOW для Docker dev, MEDIUM для production/shared)
+**Fix:** Заменить wildcard на конкретные пути: `git config --global --add safe.directory /workspace`.
+
 ---
 
 ## 7. AI-first критерии
@@ -1606,6 +1744,8 @@ logger.info("agent.message.sent", session_id=session_id, tokens=usage.input_toke
 | 5g | **[v7] Fix input_type="document" для query embeddings** (quality) | memory_service.py:40-42 | 10 мин |
 | 5h | **[v7] Fix judge return type annotation** (typing) | judge_service.py:153 | 5 мин |
 | 5i | **[v7] Error handling в background eval task** (stuck status) | evaluations.py:75-80 | 15 мин |
+| 5j | **[v9] Fix path traversal startswith edge case** | mcp-workspace/tools/specs.py:77 | 5 мин |
+| 5k | **[v9] safe.directory: wildcard → конкретный путь** | api/entrypoint.sh:15 | 5 мин |
 
 ### P1 — Критично для AI-agent разработки
 
@@ -1622,6 +1762,9 @@ logger.info("agent.message.sent", session_id=session_id, tokens=usage.input_toke
 | 11c | **[v7] Тесты memory_service** (_embed, search_memories, pgvector queries) | 3 часа |
 | 11d | **[v7] Тесты MCP server** (tasks, specs, path traversal) | 2 часа |
 | 11e | **[v7] Anthropic API key в централизованный config** | 30 мин |
+| 11f | **[v9] Rate limiting на auth endpoints** (slowapi) | 2 часа |
+| 11g | **[v9] Документировать security-sensitive env vars** в .env.example | 30 мин |
+| 11h | **[v9] Security headers (CSP, X-Content-Type-Options, X-Frame-Options)** | 1 час |
 
 ### P2 — Значительно улучшает AI-readiness
 
@@ -1657,6 +1800,9 @@ logger.info("agent.message.sent", session_id=session_id, tokens=usage.input_toke
 | 24 | Типизация config["configurable"] (GraphConfigurable TypedDict) | 1 час |
 | 25 | Structured logging | 4 часа |
 | 26 | Reconnect resume для interrupted state | 4 часа |
+| 27 | **[v9] WebSocket аутентификация** (token/session validation при connect) | 4 часа |
+| 28 | **[v9] Шифрование OAuth tokens at-rest** (Fernet) | 2 часа |
+| 29 | **[v9] User модель + ownership checks** (для multi-user) | 1-2 дня |
 
 ---
 
@@ -1678,6 +1824,9 @@ logger.info("agent.message.sent", session_id=session_id, tokens=usage.input_toke
 14. **[v7] Voyage AI input_type impact** — насколько значительно влияет использование `input_type="document"` вместо `"query"` на качество retrieval? Создать бенчмарк: 100 memories, 20 queries, сравнить recall@5 с document vs query
 15. **[v7] Background eval task failure modes** — запустить eval run → убить процесс → проверить что status застрял на "running". Проверить есть ли timeout/watchdog для зависших eval runs
 16. **[v7] Voyage client thread-safety** — `_embed()` вызывает `asyncio.to_thread(client.embed, ...)`. Если client — sync object, безопасен ли он для concurrent использования из разных threads? Или нужен thread-local client?
+17. **[v9] OAuth provider state verification** — отправляется ли state в token exchange body (`"state": state` в auth_service.py:88) и верифицируется ли server-side Anthropic OAuth provider? Проверить: отправить token exchange request с некорректным state, проверить что provider отклоняет
+18. **[v9] WebSocket session enumeration** — UUID v4 (122 бита энтропии) де-факто неугадываемы. Но утечка session_id через логи, network sniffing, browser history может дать полный доступ. Проверить: нет ли session_id в HTTP response headers, error messages, или frontend URLs
+19. **[v9] prompt injection в workspace файлах** — агент читает файлы workspace через Claude CLI. Вредоносный контент в workspace-файлах (indirect prompt injection) может перехватить управление агентом. Оценить: насколько реальна угроза для internal tool vs external-facing deployment
 
 ---
 
@@ -2122,4 +2271,101 @@ Full-stack ревью Chat/WebSocket pipeline: frontend useChat.ts → WebSocket
 
 ---
 
-*Версия 8.0. Включает результаты восьмипроходного анализа: первичный (v1), коррекция (v2), независимая ревизия оркестрации (v3), критическая самопроверка (v4), независимое ревью data layer + frontend + миграции (v5), full-stack ревью Chat/WebSocket pipeline (v6), глубокое ревью Memory/Eval/MCP подсистем (v7), независимое ревью тестов и инфраструктуры (v8). Выявлены 3 ложноположительные проблемы предыдущих версий (FK-индексы, HNSW, N+1), 4 severity-завышения в v6, 5 фактических ошибок предыдущих проходов (v8), 5 новых проблем инфраструктуры (v8). Общее число проблем: 55. Все утверждения верифицированы по исходному коду с указанием файлов и строк.*
+## 19. Ошибки восьмого прохода анализа (ревью v9)
+
+Независимое ревью аутентификации и безопасности: OAuth PKCE flow, хранение токенов, CORS, input validation, XSS, prompt injection, secrets management, WebSocket auth, rate limiting, MCP path traversal, entrypoint.sh. Метод: полное чтение 15 файлов (backend auth, frontend auth, config, ws.py, specs.py, entrypoint.sh, .gitignore, ChatMessage.tsx), grep-поиск по security patterns, критическая самопроверка выводов.
+
+### 19.1 Ошибки предыдущих проходов, обнаруженные в v9
+
+| # | Ошибка | Заявлено (v1-v8) | Реально (v9) | Влияние |
+|---|--------|------------------|-------------|---------|
+| 1 | **auth_service global state severity** | "RISK (проявляется при параллельных сессиях)" | Система single-user by design: один OAuthToken в БД, OAuth flow инициируется вручную, kill-all сериализует send_message. Реальная вероятность race condition крайне мала | Severity завышена — LOW для single-user |
+| 2 | **Безопасность не анализировалась** | Ни один проход (v1-v8) не исследовал security posture целиком | 9 новых проблем безопасности (6.57-6.65), отсутствие authN на API/WS, plain text tokens, нет rate limiting, path traversal edge case | Пропущена целая область анализа |
+| 3 | **CORS "потенциальная проблема"** | Не было явного вердикта | CORS безопасен: `allow_origins=settings.cors_origins` = `["http://localhost:3000"]` по умолчанию. `allow_credentials=True` безопасен при конкретных origins (не `["*"]`). `allow_methods/headers=["*"]` — избыточно широко, но не security issue | Ложное беспокойство |
+| 4 | **path traversal в specs.py "защищён"** | "path traversal protection" (3. Основные модули, MCP Server) | Защита неполная: `startswith(specs_path)` без trailing separator. `specs_evil/file.md` проходит проверку | Заявленная защита содержит edge case |
+
+### 19.2 Самопроверка v9
+
+При критической самопроверке собственных выводов обнаружены:
+
+1. **OAuth state verification — ложноположительная проблема.** Первоначальный вывод: "state не верифицируется — CSRF-уязвимость". После самопроверки: flow использует out-of-band code delivery (redirect_uri → platform.claude.com, пользователь копирует код вручную). CSRF неприменим. PKCE code_verifier обеспечивает привязку. State отправляется в token exchange body — может верифицироваться server-side. Severity снижена с SECURITY (P1) до COSMETIC (P3)
+2. **Шифрование токенов — завышена severity.** БД в Docker compose, internal network. Для компрометации нужен container escape. Если атакующий внутри контейнера — может прочитать env vars с ключом шифрования. Severity снижена с SECURITY до SECURITY (LOW для Docker dev)
+3. **Rate limiting — не учтён контекст deployment.** Для Docker-контейнера на localhost rate limiting не критичен. Severity разделена: LOW для dev, MEDIUM для production
+4. **Пропущен `CLAUDE_CODE_OAUTH_TOKEN` в env subprocess** — token передаётся через environment variable CLI-процесса (runtime.py:100). Добавлен как 6.63
+5. **react-markdown v10.1.0 — подтверждена безопасность.** Нет `rehypeRaw`, нет `dangerouslySetInnerHTML`, нет custom renderers. Safe by default. Но пропущено отсутствие CSP header — добавлен как 6.60
+
+### 19.3 Новые проблемы v9 (сводка)
+
+| # | Секция | Severity | Проблема |
+|---|--------|----------|----------|
+| 1 | 6.57 | SECURITY | Весь API/WebSocket без аутентификации, нет модели пользователя |
+| 2 | 6.58 | SECURITY | OAuth tokens в БД без шифрования (plain text) |
+| 3 | 6.59 | SECURITY | Нет rate limiting ни на одном endpoint |
+| 4 | 6.60 | SECURITY | Нет Content-Security-Policy и security headers |
+| 5 | 6.61 | SECURITY | Path traversal в specs.py — startswith без separator |
+| 6 | 6.62 | COSMETIC | OAuth state parameter не верифицируется (не security issue в PKCE out-of-band flow) |
+| 7 | 6.63 | SECURITY | OAuth token в env subprocess |
+| 8 | 6.64 | CONFIG | .env.example не документирует security-sensitive переменные |
+| 9 | 6.65 | SECURITY | entrypoint.sh safe.directory wildcard |
+
+### 19.4 Уточнения предыдущих оценок (v9)
+
+| Критерий | v8 оценка | v9 оценка | Обоснование изменения |
+|----------|-----------|-----------|----------------------|
+| Security posture (новый) | не оценивалось | **3/10** | Нет authN на API/WS, нет rate limiting, tokens plain text, нет CSP. Позитивы: PKCE корректен, CORS ограничен, react-markdown safe, path traversal частично защищён |
+| **Общая** | **5/10** | **5/10** | Подтверждена. Security issues не снижают общую оценку — проект в стадии dev/learning, single-user by design |
+
+### 19.5 Контекст: single-user design vs production security
+
+Многие security-проблемы (6.57-6.59, 6.63, 6.65) — следствие осознанного architectural decision: Agent Console — single-user dev tool в Docker. learning_roadmap.md указывает "безопасность (prompt injection)" как Gap G (приоритет 3, стадия 3). Архитектурные security-ограничения не являются багами — это trade-off для скорости разработки.
+
+**Когда станет критичным:**
+- Deployment за пределами localhost (remote server, cloud)
+- Доступ более чем одного пользователя
+- Обработка внешних (untrusted) данных в workspace
+- Production deployment с SLA
+
+### 19.6 Обновлённый реестр проблем по severity (v9)
+
+| Severity | v8 total | v9: убрано | v9: добавлено | Итого |
+|----------|----------|-----------|---------------|-------|
+| CRITICAL | 1 | 0 | 0 | 1 |
+| BUG | 5 | 0 | 0 | 5 |
+| DESIGN | 8 | 0 | 0 | 8 |
+| RELIABILITY | 10 | 0 | 0 | 10 |
+| PERFORMANCE | 5 | 0 | 0 | 5 |
+| UX | 4 | 0 | 0 | 4 |
+| ACCURACY | 1 | 0 | 0 | 1 |
+| CORRECTNESS | 1 | 0 | 0 | 1 |
+| STABILITY | 1 | 0 | 0 | 1 |
+| MISSING FEATURE | 1 | 0 | 0 | 1 |
+| TECH DEBT | 1 | 0 | 0 | 1 |
+| RISK | 1 | 0 | 0 | 1 |
+| COSMETIC | 1 | 0 | +1 (6.62 OAuth state) | 2 |
+| PROTOCOL GAP | 1 | 0 | 0 | 1 |
+| RESOURCE LEAK | 1 | 0 | 0 | 1 |
+| TEST GAP | 3 | 0 | 0 | 3 |
+| UNKNOWN | 1 | 0 | 0 | 1 |
+| QUALITY | 1 | 0 | 0 | 1 |
+| TYPING | 1 | 0 | 0 | 1 |
+| INCONSISTENCY | 1 | 0 | 0 | 1 |
+| CONFIG | 1 | 0 | +1 (6.64 .env.example) | 2 |
+| DURABILITY | 1 | 0 | 0 | 1 |
+| MISLEADING | 1 | 0 | 0 | 1 |
+| DEPENDENCY | 1 | 0 | 0 | 1 |
+| INFRA | 2 | 0 | 0 | 2 |
+| SECURITY | 0 | 0 | +6 (6.57-6.61, 6.63, 6.65) | 6 |
+| **Итого** | **55** | **0** | **+8** | **63** |
+
+### 19.7 Методологические уроки v9
+
+1. **Безопасность — отдельный проход анализа.** v1-v8 анализировали архитектуру, модульность, тесты, инфраструктуру — но ни один не проверил authN/authZ, rate limiting, secrets management целиком. Security review требует специализированного прохода
+2. **Учитывать deployment context при оценке severity.** Одна и та же проблема (нет rate limiting) может быть LOW для localhost Docker и HIGH для cloud production. Без контекста severity вводит в заблуждение
+3. **Проверять defense-in-depth, не только primary protection.** react-markdown safe by default — но отсутствие CSP означает, что любая будущая ошибка в rendering не будет иметь safety net
+4. **path traversal: `startswith()` — типовая ошибка.** Стандартный fix: добавить trailing separator или использовать `Path.is_relative_to()`. Встречается в security CTF и real-world CVE
+5. **Single-user design — документировать как архитектурное решение, не как баг.** Разделять "не реализовано" (gap) и "не нужно в текущем контексте" (trade-off)
+6. **Самопроверка выявляет ложноположительные.** 2 из 9 первоначальных security-выводов (OAuth state, token encryption severity) были скорректированы при самопроверке. Критическая ревизия собственных выводов — обязательный этап
+
+---
+
+*Версия 9.0. Включает результаты девятипроходного анализа: первичный (v1), коррекция (v2), независимая ревизия оркестрации (v3), критическая самопроверка (v4), независимое ревью data layer + frontend + миграции (v5), full-stack ревью Chat/WebSocket pipeline (v6), глубокое ревью Memory/Eval/MCP подсистем (v7), независимое ревью тестов и инфраструктуры (v8), независимое ревью аутентификации и безопасности (v9). v9 добавил 9 security-проблем (6.57-6.65), скорректировал 2 ложноположительных вывода (OAuth state, token encryption severity), уточнил auth_service risk (6.3). Общее число проблем: 63. Все утверждения верифицированы по исходному коду с указанием файлов и строк.*
