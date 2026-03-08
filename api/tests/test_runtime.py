@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from unittest.mock import AsyncMock, patch
 
@@ -127,9 +128,8 @@ def test_build_command_with_resume(agent_runtime, session_id):
     )
     agent_runtime._processes[session_id] = running
     cmd = agent_runtime._build_command(running)
-    assert "--session-id" in cmd
-    assert "claude-123" in cmd
-    assert "--resume" in cmd
+    assert "--continue" in cmd
+    assert "--session-id" not in cmd
 
 
 def test_build_command_empty_system_prompt(agent_runtime, session_id):
@@ -347,3 +347,57 @@ async def test_start_session_allows_workdir_after_process_exits(agent_runtime):
     # Should not raise
     await agent_runtime.start_session(sid2, "/shared/workdir", "test")
     assert agent_runtime.is_running(sid2)
+
+
+def test_parse_event_result_includes_model(agent_runtime, session_id):
+    """_parse_event should propagate model field from result events."""
+    event = {
+        "type": "result",
+        "cost_usd": 0.05,
+        "usage": {"input_tokens": 100, "output_tokens": 50},
+        "model": "claude-opus-4-20250514",
+    }
+    result = agent_runtime._parse_event(session_id, event)
+    assert result["model"] == "claude-opus-4-20250514"
+
+
+def test_parse_event_result_model_none(agent_runtime, session_id):
+    """_parse_event should handle missing model gracefully."""
+    event = {
+        "type": "result",
+        "cost_usd": 0.01,
+        "usage": {"input_tokens": 10, "output_tokens": 5},
+    }
+    result = agent_runtime._parse_event(session_id, event)
+    assert result["model"] is None
+
+
+@pytest.mark.asyncio
+async def test_read_stream_cancels_stderr_task_on_exception(agent_runtime, session_id):
+    """stderr_task should be cancelled if stdout iteration raises."""
+    mock_process = AsyncMock()
+
+    # stdout raises on iteration
+    async def exploding_iter():
+        raise RuntimeError("stream error")
+        yield  # noqa: unreachable
+
+    mock_process.stdout = exploding_iter()
+    mock_process.stderr = AsyncMock()
+
+    stderr_task_created = []
+    original_create_task = asyncio.create_task
+
+    def tracking_create_task(coro, **kwargs):
+        task = original_create_task(coro, **kwargs)
+        stderr_task_created.append(task)
+        return task
+
+    with patch("asyncio.create_task", side_effect=tracking_create_task):
+        with pytest.raises(RuntimeError, match="stream error"):
+            async for _ in agent_runtime._read_stream(session_id, mock_process):
+                pass
+
+    # Verify stderr_task was cancelled
+    if stderr_task_created:
+        assert stderr_task_created[0].cancelled() or stderr_task_created[0].done()

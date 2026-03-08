@@ -75,7 +75,7 @@ class AgentRuntime:
         self._processes[session_id] = RunningProcess(
             process=None,
             session_id=session_id,
-            workdir=workdir or settings.workspace_path,
+            workdir=effective_workdir,
             system_prompt=system_prompt,
             claude_session_id=claude_session_id,
             allowed_tools=allowed_tools or [],
@@ -314,7 +314,12 @@ class AgentRuntime:
                 if parsed:
                     yield parsed
 
-            await asyncio.wait_for(process.wait(), timeout=300)
+            try:
+                await asyncio.wait_for(process.wait(), timeout=300)
+            except asyncio.TimeoutError:
+                logger.error("CLI process did not exit within 300s, killing")
+                process.kill()
+                await process.wait()
 
             if stderr_task:
                 stderr = await stderr_task
