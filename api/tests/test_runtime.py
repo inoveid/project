@@ -144,15 +144,15 @@ def test_build_command_empty_system_prompt(session_id):
     assert "--system-prompt" not in cmd
 
 
-def test_parse_event_assistant_text(session_id):
+def test_parse_event_assistant_text():
     event = {"type": "assistant", "subtype": "text", "text": "Hello!"}
-    result = parse_event(session_id, event, {})
+    result = parse_event(event)
     assert result == {"type": "assistant_text", "content": "Hello!"}
 
 
-def test_parse_event_tool_use(session_id):
+def test_parse_event_tool_use():
     event = {"type": "tool_use", "tool": "read_file", "input": {"path": "/tmp"}}
-    result = parse_event(session_id, event, {})
+    result = parse_event(event)
     assert result == {
         "type": "tool_use",
         "tool_name": "read_file",
@@ -160,32 +160,22 @@ def test_parse_event_tool_use(session_id):
     }
 
 
-def test_parse_event_tool_result(session_id):
+def test_parse_event_tool_result():
     event = {"type": "tool_result", "output": "file contents"}
-    result = parse_event(session_id, event, {})
+    result = parse_event(event)
     assert result == {"type": "tool_result", "content": "file contents"}
 
 
-def test_parse_event_system_updates_session_id(session_id):
-    processes = {
-        session_id: RunningProcess(
-            process=None,
-            session_id=session_id,
-            workdir="/tmp",
-            system_prompt="test",
-        )
-    }
+def test_parse_event_system_returns_session_id_event():
     event = {"type": "system", "session_id": "new-claude-id"}
-    result = parse_event(session_id, event, processes)
-    assert result is None
-    assert processes[session_id].claude_session_id == "new-claude-id"
+    result = parse_event(event)
+    assert result == {"type": "system_session_id", "session_id": "new-claude-id"}
 
 
-def test_parse_event_unknown_returns_none(session_id):
+def test_parse_event_unknown_returns_none():
     event = {"type": "unknown_event"}
-    result = parse_event(session_id, event, {})
+    result = parse_event(event)
     assert result is None
-
 
 
 @pytest.mark.asyncio
@@ -281,7 +271,7 @@ async def test_start_session_allows_workdir_after_process_exits(agent_runtime):
     assert agent_runtime.is_running(sid2)
 
 
-def test_parse_event_result_includes_model(session_id):
+def test_parse_event_result_includes_model():
     """parse_event should propagate model field from result events."""
     event = {
         "type": "result",
@@ -289,18 +279,18 @@ def test_parse_event_result_includes_model(session_id):
         "usage": {"input_tokens": 100, "output_tokens": 50},
         "model": "claude-opus-4-20250514",
     }
-    result = parse_event(session_id, event, {})
+    result = parse_event(event)
     assert result["model"] == "claude-opus-4-20250514"
 
 
-def test_parse_event_result_model_none(session_id):
+def test_parse_event_result_model_none():
     """parse_event should handle missing model gracefully."""
     event = {
         "type": "result",
         "cost_usd": 0.01,
         "usage": {"input_tokens": 10, "output_tokens": 5},
     }
-    result = parse_event(session_id, event, {})
+    result = parse_event(event)
     assert result["model"] is None
 
 
@@ -409,9 +399,8 @@ async def test_get_children_empty(agent_runtime):
     assert agent_runtime.get_children(sid) == set()
 
 
-
 @pytest.mark.asyncio
-async def test_read_stream_final_message_yields_tool_use(agent_runtime, session_id):
+async def test_read_stream_final_message_yields_tool_use(session_id):
     """Final assistant message with content blocks yields tool_use events (BUG-1)."""
     final_message = json.dumps({
         "type": "assistant",
@@ -430,7 +419,7 @@ async def test_read_stream_final_message_yields_tool_use(agent_runtime, session_
     mock_process.returncode = 0
 
     events = []
-    async for ev in read_stream(session_id, mock_process, agent_runtime._processes):
+    async for ev in read_stream(mock_process):
         events.append(ev)
 
     assert events == [
@@ -440,7 +429,7 @@ async def test_read_stream_final_message_yields_tool_use(agent_runtime, session_
 
 
 @pytest.mark.asyncio
-async def test_read_stream_skips_duplicate_text(agent_runtime, session_id):
+async def test_read_stream_skips_duplicate_text(session_id):
     """Text blocks from final message are skipped if streaming chunks were sent (BUG-2)."""
     streaming_chunk = json.dumps({
         "type": "assistant",
@@ -464,7 +453,7 @@ async def test_read_stream_skips_duplicate_text(agent_runtime, session_id):
     mock_process.returncode = 0
 
     events = []
-    async for ev in read_stream(session_id, mock_process, agent_runtime._processes):
+    async for ev in read_stream(mock_process):
         events.append(ev)
 
     # Text should appear only once (from streaming chunk), tool_use from final message
@@ -475,7 +464,7 @@ async def test_read_stream_skips_duplicate_text(agent_runtime, session_id):
 
 
 @pytest.mark.asyncio
-async def test_read_stream_final_message_text_without_streaming(agent_runtime, session_id):
+async def test_read_stream_final_message_text_without_streaming(session_id):
     """If no streaming chunks, text from final message IS yielded."""
     final_message = json.dumps({
         "type": "assistant",
@@ -493,14 +482,14 @@ async def test_read_stream_final_message_text_without_streaming(agent_runtime, s
     mock_process.returncode = 0
 
     events = []
-    async for ev in read_stream(session_id, mock_process, agent_runtime._processes):
+    async for ev in read_stream(mock_process):
         events.append(ev)
 
     assert events == [{"type": "assistant_text", "content": "Short reply"}]
 
 
 @pytest.mark.asyncio
-async def test_read_stream_final_message_tool_result(agent_runtime, session_id):
+async def test_read_stream_final_message_tool_result(session_id):
     """Final message with tool_result blocks yields them."""
     final_message = json.dumps({
         "type": "assistant",
@@ -518,10 +507,28 @@ async def test_read_stream_final_message_tool_result(agent_runtime, session_id):
     mock_process.returncode = 0
 
     events = []
-    async for ev in read_stream(session_id, mock_process, agent_runtime._processes):
+    async for ev in read_stream(mock_process):
         events.append(ev)
 
     assert events == [{"type": "tool_result", "content": "file contents here"}]
+
+
+@pytest.mark.asyncio
+async def test_read_stream_yields_system_session_id():
+    """read_stream yields system_session_id events for the caller to handle."""
+    system_event = json.dumps({"type": "system", "session_id": "claude-xyz"})
+
+    mock_process = AsyncMock()
+    mock_process.stdout = _lines_to_stream([system_event])
+    mock_process.stderr = None
+    mock_process.wait = AsyncMock(return_value=0)
+    mock_process.returncode = 0
+
+    events = []
+    async for ev in read_stream(mock_process):
+        events.append(ev)
+
+    assert events == [{"type": "system_session_id", "session_id": "claude-xyz"}]
 
 
 def _lines_to_stream(lines: list[str]):
@@ -533,7 +540,7 @@ def _lines_to_stream(lines: list[str]):
 
 
 @pytest.mark.asyncio
-async def test_read_stream_cancels_stderr_task_on_exception(agent_runtime, session_id):
+async def test_read_stream_cancels_stderr_task_on_exception(session_id):
     """stderr_task should be cancelled if stdout iteration raises."""
     mock_process = AsyncMock()
 
@@ -555,7 +562,7 @@ async def test_read_stream_cancels_stderr_task_on_exception(agent_runtime, sessi
 
     with patch("asyncio.create_task", side_effect=tracking_create_task):
         with pytest.raises(RuntimeError, match="stream error"):
-            async for _ in read_stream(session_id, mock_process, agent_runtime._processes):
+            async for _ in read_stream(mock_process):
                 pass
 
     # Verify stderr_task was cancelled

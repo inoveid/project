@@ -7,8 +7,6 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any, Optional
 
-from .process_manager import RunningProcess
-
 logger = logging.getLogger(__name__)
 
 
@@ -18,17 +16,17 @@ class TransientAgentError(Exception):
 
 
 def parse_event(
-    session_id: uuid.UUID,
     event: dict[str, Any],
-    processes: dict[uuid.UUID, RunningProcess],
 ) -> Optional[dict[str, Any]]:
+    """Parse a single Claude CLI JSON event into an internal event dict.
+
+    Pure function — no side effects.  For "system" events carrying a
+    claude session id the caller is responsible for updating RunningProcess.
+    """
     event_type = event.get("type")
 
     if event_type == "system" and "session_id" in event:
-        running = processes.get(session_id)
-        if running:
-            running.claude_session_id = event["session_id"]
-        return None
+        return {"type": "system_session_id", "session_id": event["session_id"]}
 
     if event_type == "assistant":
         # Final message with content blocks is handled in read_stream
@@ -60,10 +58,13 @@ def parse_event(
 
 
 async def read_stream(
-    session_id: uuid.UUID,
     process: asyncio.subprocess.Process,
-    processes: dict[uuid.UUID, RunningProcess],
 ) -> AsyncIterator[dict[str, Any]]:
+    """Read stdout of a Claude CLI process and yield parsed events.
+
+    Pure async generator — no access to AgentRuntime state.
+    Yields ``system_session_id`` events that the caller must handle.
+    """
     if not process.stdout:
         return
 
@@ -100,7 +101,7 @@ async def read_stream(
                         yield {"type": "tool_result", "content": str(block.get("content", ""))}
                 continue
 
-            parsed = parse_event(session_id, event, processes)
+            parsed = parse_event(event)
             if parsed:
                 if parsed["type"] == "assistant_text":
                     had_streaming_text = True

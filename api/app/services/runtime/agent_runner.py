@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 class AgentRuntimeError(Exception):
     pass
 
+
 class AgentRuntime:
     """Manages long-lived claude CLI subprocesses for agent sessions."""
 
@@ -120,10 +121,17 @@ class AgentRuntime:
         call_succeeded = False
 
         try:
-            async for event in read_stream(session_id, process, self._processes):
-                if event["type"] == "assistant_text":
+            async for event in read_stream(process):
+                etype = event["type"]
+
+                # Handle session id update from CLI system event
+                if etype == "system_session_id":
+                    running.claude_session_id = event["session_id"]
+                    continue
+
+                if etype == "assistant_text":
                     output_parts.append(event["content"])
-                elif event["type"] == "result":
+                elif etype == "result":
                     usage = event.get("usage", {})
                     input_tokens = usage.get("input_tokens", 0)
                     output_tokens = usage.get("output_tokens", 0)
@@ -141,7 +149,7 @@ class AgentRuntime:
                     if budget_event:
                         yield budget_event
 
-                    continue  # не отправляем result на фронтенд
+                    continue  # don't forward result to frontend
                 yield event
         except TransientAgentError:
             self._breaker.record_failure()
@@ -196,5 +204,6 @@ class AgentRuntime:
         if running:
             return running.claude_session_id
         return None
+
 
 runtime = AgentRuntime()
