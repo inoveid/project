@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "workspace": {
+      "command": "/Users/semenov.m/Documents/Projects/ai-dev-agents/workspace/developers/agent-console/project/mcp-workspace/.venv/bin/python",
+      "args": ["server.py"],
+      "cwd": "/Users/semenov.m/Documents/Projects/ai-dev-agents/workspace/developers/agent-console/project/mcp-workspace",
+      "env": {
+        "WORKSPACE_ROOT": "/Users/semenov.m/Documents/Projects/ai-dev-agents/workspace/developers/agent-console"
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+[project]
+name = "mcp-workspace"
+version = "0.1.0"
+description = "MCP server for agent workspace tools"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp[cli]>=1.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
