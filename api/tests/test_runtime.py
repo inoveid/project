@@ -1,4 +1,5 @@
 import asyncio
+import json
 import uuid
 from unittest.mock import AsyncMock, patch
 
@@ -494,6 +495,128 @@ async def test_run_task_no_parent_tracking(agent_runtime, tmp_path):
 
     # No children tracking should exist
     assert not agent_runtime._children
+
+
+@pytest.mark.asyncio
+async def test_read_stream_final_message_yields_tool_use(agent_runtime, session_id):
+    """Final assistant message with content blocks yields tool_use events (BUG-1)."""
+    final_message = json.dumps({
+        "type": "assistant",
+        "message": {
+            "content": [
+                {"type": "text", "text": "Let me read the file."},
+                {"type": "tool_use", "name": "read_file", "input": {"path": "/tmp/x"}},
+            ],
+        },
+    })
+
+    mock_process = AsyncMock()
+    mock_process.stdout = _lines_to_stream([final_message])
+    mock_process.stderr = None
+    mock_process.wait = AsyncMock(return_value=0)
+    mock_process.returncode = 0
+
+    events = []
+    async for ev in agent_runtime._read_stream(session_id, mock_process):
+        events.append(ev)
+
+    assert events == [
+        {"type": "assistant_text", "content": "Let me read the file."},
+        {"type": "tool_use", "tool_name": "read_file", "tool_input": {"path": "/tmp/x"}},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_read_stream_skips_duplicate_text(agent_runtime, session_id):
+    """Text blocks from final message are skipped if streaming chunks were sent (BUG-2)."""
+    streaming_chunk = json.dumps({
+        "type": "assistant",
+        "subtype": "text",
+        "text": "Hello world",
+    })
+    final_message = json.dumps({
+        "type": "assistant",
+        "message": {
+            "content": [
+                {"type": "text", "text": "Hello world"},
+                {"type": "tool_use", "name": "bash", "input": {"cmd": "ls"}},
+            ],
+        },
+    })
+
+    mock_process = AsyncMock()
+    mock_process.stdout = _lines_to_stream([streaming_chunk, final_message])
+    mock_process.stderr = None
+    mock_process.wait = AsyncMock(return_value=0)
+    mock_process.returncode = 0
+
+    events = []
+    async for ev in agent_runtime._read_stream(session_id, mock_process):
+        events.append(ev)
+
+    # Text should appear only once (from streaming chunk), tool_use from final message
+    assert events == [
+        {"type": "assistant_text", "content": "Hello world"},
+        {"type": "tool_use", "tool_name": "bash", "tool_input": {"cmd": "ls"}},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_read_stream_final_message_text_without_streaming(agent_runtime, session_id):
+    """If no streaming chunks, text from final message IS yielded."""
+    final_message = json.dumps({
+        "type": "assistant",
+        "message": {
+            "content": [
+                {"type": "text", "text": "Short reply"},
+            ],
+        },
+    })
+
+    mock_process = AsyncMock()
+    mock_process.stdout = _lines_to_stream([final_message])
+    mock_process.stderr = None
+    mock_process.wait = AsyncMock(return_value=0)
+    mock_process.returncode = 0
+
+    events = []
+    async for ev in agent_runtime._read_stream(session_id, mock_process):
+        events.append(ev)
+
+    assert events == [{"type": "assistant_text", "content": "Short reply"}]
+
+
+@pytest.mark.asyncio
+async def test_read_stream_final_message_tool_result(agent_runtime, session_id):
+    """Final message with tool_result blocks yields them."""
+    final_message = json.dumps({
+        "type": "assistant",
+        "message": {
+            "content": [
+                {"type": "tool_result", "content": "file contents here"},
+            ],
+        },
+    })
+
+    mock_process = AsyncMock()
+    mock_process.stdout = _lines_to_stream([final_message])
+    mock_process.stderr = None
+    mock_process.wait = AsyncMock(return_value=0)
+    mock_process.returncode = 0
+
+    events = []
+    async for ev in agent_runtime._read_stream(session_id, mock_process):
+        events.append(ev)
+
+    assert events == [{"type": "tool_result", "content": "file contents here"}]
+
+
+def _lines_to_stream(lines: list[str]):
+    """Helper: create an async iterator that yields encoded lines."""
+    async def _iter():
+        for line in lines:
+            yield (line + "\n").encode()
+    return _iter()
 
 
 @pytest.mark.asyncio
