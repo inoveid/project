@@ -1,8 +1,8 @@
 # Архитектурный анализ Agent Console: AI-first разработка
 
 **Дата:** 2026-03-08
-**Версия:** 9.0 (после независимого ревью Security/Auth v9)
-**Метод:** Девятипроходный анализ — первичный (v1), коррекция (v2), независимая ревизия (v3), критическая самопроверка (v4), независимое ревью data layer + frontend + миграции (v5), full-stack ревью Chat/WebSocket pipeline (v6), глубокое ревью Memory/Eval/MCP подсистем (v7), независимое ревью тестов и инфраструктуры (v8), независимое ревью аутентификации и безопасности (v9)
+**Версия:** 10.0 (после независимого ревью Frontend CRUD/State Management v10)
+**Метод:** Десятипроходный анализ — первичный (v1), коррекция (v2), независимая ревизия (v3), критическая самопроверка (v4), независимое ревью data layer + frontend + миграции (v5), full-stack ревью Chat/WebSocket pipeline (v6), глубокое ревью Memory/Eval/MCP подсистем (v7), независимое ревью тестов и инфраструктуры (v8), независимое ревью аутентификации и безопасности (v9), независимое ревью Frontend CRUD и State Management (v10)
 
 ---
 
@@ -27,6 +27,7 @@
 17. [Ошибки шестого прохода анализа (ревью v7)](#17-ошибки-шестого-прохода-анализа-ревью-v7)
 18. [Ошибки седьмого прохода анализа (ревью v8)](#18-ошибки-седьмого-прохода-анализа-ревью-v8)
 19. [Ошибки восьмого прохода анализа (ревью v9)](#19-ошибки-восьмого-прохода-анализа-ревью-v9)
+20. [Ошибки девятого прохода анализа (ревью v10)](#20-ошибки-девятого-прохода-анализа-ревью-v10)
 
 ---
 
@@ -41,7 +42,7 @@
 |----------|--------|-------------|
 | Структура директорий | 8/10 | Чёткое разделение api/web, слоёная архитектура |
 | Модульность | 5/10 | CRUD-модули хороши; runtime (365, 4 класса), graph_service (303) — монолиты; @retry мёртвая логика |
-| Типизация | 9/10 | TypeScript strict, Pydantic v2, SQLAlchemy Mapped |
+| Типизация | 8/10 | TypeScript strict + noUncheckedIndexedAccess, Pydantic v2, SQLAlchemy Mapped. ⚠ `as WsIncoming` без runtime validation (useChat.ts:251), `undefined as T` (client.ts:21) |
 | Тестовое покрытие | 4/10 | 182 backend-теста (13 файлов), test_ws.py полностью нерабочий (ImportError), 0 тестов graph_service/orchestrator/memory, budget+circuit_breaker — качественные pure unit |
 | Документация | 6/10 | Хороший CLAUDE.md, но нет ARCHITECTURE.md, WS protocol, state contracts |
 | AI-agent readiness | 5/10 | Конвенции описаны, нет explicit contracts, inconsistent return types в сервисах |
@@ -1309,6 +1310,70 @@ git config --global --add safe.directory '*'
 **Severity:** SECURITY (LOW для Docker dev, MEDIUM для production/shared)
 **Fix:** Заменить wildcard на конкретные пути: `git config --global --add safe.directory /workspace`.
 
+### 6.66 AgentCard обходит useCreateSession — кэш sessions не инвалидируется (BUG) [v10]
+
+**Файл:** `web/src/components/AgentCard.tsx:4, 19`
+```tsx
+import { createSession } from "../api/sessions";  // прямой импорт API
+// ...
+const session = await createSession(agent.id);     // прямой вызов без хука
+```
+
+AgentCard вызывает `createSession()` напрямую из API-слоя, минуя хук `useCreateSession` (useSessions.ts:14-22). Хук `useCreateSession` при успехе вызывает `invalidateQueries({ queryKey: SESSIONS_KEY })`, что обновляет список сессий во всех компонентах. Прямой вызов в AgentCard **не инвалидирует кэш** — после создания сессии через AgentCard, Dashboard (ActiveSessions) и SessionList не знают о новой сессии до следующего refetchInterval (10 секунд).
+
+Для сравнения: QuickStartChat.tsx:14 корректно использует `useCreateSession()`.
+
+**Severity:** BUG (stale UI до 10 секунд после создания сессии)
+**Fix:** Заменить прямой вызов на `useCreateSession` хук, как в QuickStartChat.
+
+### 6.67 SessionList дублирует useQuery из useSessions (CODE DUPLICATION) [v10]
+
+**Файл:** `web/src/components/SessionList.tsx:72-76`
+```tsx
+const { data: sessions, isLoading } = useQuery({
+  queryKey: ["sessions"],
+  queryFn: getSessions,
+  refetchInterval: 10_000,
+});
+```
+
+Идентичный запрос в `useSessions` (hooks/useSessions.ts:6-12): тот же queryKey `["sessions"]`, та же queryFn `getSessions`, тот же `refetchInterval: 10_000`. Благодаря одинаковому queryKey, TanStack Query дедуплицирует запросы — два компонента не вызывают API дважды. Однако при изменении одного из двух мест (например, queryKey или refetchInterval) второе может разойтись.
+
+**Severity:** CODE DUPLICATION (не баг из-за query dedup, но risk при изменениях)
+**Fix:** Заменить inline useQuery на `useSessions()` из хука.
+
+### 6.68 Ошибки delete-мутаций не показываются пользователю (UX) [v10]
+
+**Файлы:** `web/src/pages/Dashboard.tsx:32-36`, `web/src/pages/TeamPage.tsx:38-42`
+```tsx
+function handleDelete(id: string) {
+  if (window.confirm("Delete this team?")) {
+    deleteTeam.mutate(id);  // нет onError, нет UI feedback при ошибке
+  }
+}
+```
+
+При ошибке удаления (сеть недоступна, 500 от API, FK constraint violation) мутация тихо проваливается — пользователь не видит ни toast, ни сообщения об ошибке. `deleteTeam.error` доступен, но не используется нигде в шаблоне. Тот же паттерн в TeamPage для `deleteAgent.mutate()` и `deleteLink.mutate()`.
+
+Для сравнения: TeamForm и AgentForm корректно показывают `error` через props.
+
+**Severity:** UX (silent failure на деструктивной операции)
+**Fix:** Добавить onError callback с alert/toast, или отображать `deleteTeam.error` в UI.
+
+### 6.69 useEvalRuns и useSessions — непоследовательные стратегии polling (INCONSISTENCY) [v10]
+
+**Файлы:** `web/src/hooks/useSessions.ts:10`, `web/src/hooks/useEvaluations.ts:48, 57-60`
+
+Три разных подхода к polling в одном проекте:
+1. `useSessions`: безусловный `refetchInterval: 10_000` — поллинг даже если все сессии остановлены
+2. `useEvalRuns`: безусловный `refetchInterval: 5000` — поллинг даже если все runs завершены (6.50)
+3. `useEvalRun`: условный `refetchInterval: (query) => status === "running" ? 3000 : false` — правильный паттерн
+
+`useEvalRun` демонстрирует правильный подход (условный polling), но это единственный хук его применяющий. Остальные расходуют сетевые ресурсы на бесполезные запросы.
+
+**Severity:** INCONSISTENCY (wasteful network + inconsistent patterns)
+**Fix:** Применить условный polling по примеру `useEvalRun` к `useSessions` и `useEvalRuns`.
+
 ---
 
 ## 7. AI-first критерии
@@ -1566,6 +1631,24 @@ await asyncio.wait_for(process.wait(), timeout=300)
 
 Заменить `refetchInterval: 5000` на условный polling как в `useEvalRun` (только при наличии running/pending runs).
 
+**F13. AgentCard — использовать useCreateSession вместо прямого API-вызова [v10]**
+
+Файл: `web/src/components/AgentCard.tsx:4, 16-24`
+
+Заменить `import { createSession } from "../api/sessions"` + `await createSession(agent.id)` на хук `useCreateSession()` из `useSessions.ts`. Это исправит cache invalidation (6.66).
+
+**F14. SessionList — использовать useSessions() вместо inline useQuery [v10]**
+
+Файл: `web/src/components/SessionList.tsx:72-76`
+
+Заменить inline `useQuery({ queryKey: ["sessions"], queryFn: getSessions, refetchInterval: 10_000 })` на `useSessions()` из хука (6.67).
+
+**F15. Показать ошибки delete-мутаций [v10]**
+
+Файлы: `web/src/pages/Dashboard.tsx:32-36`, `web/src/pages/TeamPage.tsx:38-42`
+
+Добавить `onError: (err) => alert(err.message)` в `deleteTeam.mutate()` / `deleteAgent.mutate()`, или отображать `.error` в UI (6.68).
+
 ### 9.2 Средние улучшения (2-8 часов)
 
 **M1. Создать ARCHITECTURE.md**
@@ -1788,6 +1871,10 @@ logger.info("agent.message.sent", session_id=session_id, tokens=usage.input_toke
 | 19h | **[v7] Retry при невалидном JSON от LLM в judge** | 30 мин |
 | 19i | **[v7] Startup-валидация API keys** (lazy failure) | 30 мин |
 | 19j | **[v7] Fix duration_ms — включить judge time** (misleading) | 15 мин |
+| 19k | **[v10] AgentCard → useCreateSession** (cache invalidation bug) | 10 мин |
+| 19l | **[v10] SessionList → useSessions()** (code duplication) | 5 мин |
+| 19m | **[v10] Показать ошибки delete-мутаций** (silent failure) | 15 мин |
+| 19n | **[v10] Условный polling в useSessions** (wasteful 10s) | 10 мин |
 
 ### P3 — Масштабируемость
 
@@ -2368,4 +2455,78 @@ Full-stack ревью Chat/WebSocket pipeline: frontend useChat.ts → WebSocket
 
 ---
 
-*Версия 9.0. Включает результаты девятипроходного анализа: первичный (v1), коррекция (v2), независимая ревизия оркестрации (v3), критическая самопроверка (v4), независимое ревью data layer + frontend + миграции (v5), full-stack ревью Chat/WebSocket pipeline (v6), глубокое ревью Memory/Eval/MCP подсистем (v7), независимое ревью тестов и инфраструктуры (v8), независимое ревью аутентификации и безопасности (v9). v9 добавил 9 security-проблем (6.57-6.65), скорректировал 2 ложноположительных вывода (OAuth state, token encryption severity), уточнил auth_service risk (6.3). Общее число проблем: 63. Все утверждения верифицированы по исходному коду с указанием файлов и строк.*
+---
+
+## 20. Ошибки девятого прохода анализа (ревью v10)
+
+Независимое ревью Frontend CRUD и State Management. Метод: полное чтение 20 файлов (pages, hooks, API layer, компоненты для Teams, Agents, Sessions, Evaluations), проверка каждого утверждения из анализа конкретными ссылками на код.
+
+### 20.1 Фактические ошибки v1-v9
+
+| # | Ошибка | Заявлено | Реально | Влияние |
+|---|--------|----------|---------|---------|
+| 1 | Типизация 9/10 | "TypeScript strict, Pydantic v2, SQLAlchemy Mapped" | **8/10** — tsconfig.json:13 подтверждает `strict: true` + `noUncheckedIndexedAccess`, 0 `any` в prod-коде, 0 `@ts-ignore`. Но: `JSON.parse() as WsIncoming` (useChat.ts:251) без runtime validation, `undefined as T` (client.ts:21) для 204-ответов — потенциальный type unsafety | Оценка завышена на 1 балл |
+| 2 | "Prop drilling в TeamPage: 7+ callbacks" | "7+ callbacks передаются дочерним компонентам" | **6 callbacks** (handleDelete, handleEdit, handleCreate, handleUpdate, handleCreateLink, handleDeleteLink), max 6 props на компонент (AgentForm). Глубина вложенности — 1 уровень. Это стандартный React-паттерн, не prop drilling | Severity завышена — нет проблемы |
+| 3 | AgentCard — "вызывает createSession() напрямую, не через hook" | Отмечено как факт | Верно, но **не указано конкретное последствие**: кэш sessions не инвалидируется → stale UI до 10 секунд | Пропущен реальный баг (cache invalidation) |
+
+### 20.2 Подтверждённые утверждения v1-v9
+
+| # | Утверждение | Файл:строка | Статус |
+|---|------------|-------------|--------|
+| 1 | SessionList дублирует useQuery вместо useSessions | SessionList.tsx:72-76 vs useSessions.ts:6-12 | ВЕРНО — идентичный queryKey, queryFn, refetchInterval |
+| 2 | AgentCard вызывает createSession напрямую | AgentCard.tsx:4,19 | ВЕРНО |
+| 3 | staleTime=30s, retry=1 | main.tsx:11-12 | ВЕРНО — точное совпадение |
+| 4 | useEvalRuns безусловный polling 5s | useEvaluations.ts:48 | ВЕРНО (6.50) |
+| 5 | Zero React Error Boundaries | все .tsx файлы | ВЕРНО (6.8) |
+
+### 20.3 Пропущенные проблемы (обнаружены v10)
+
+| # | Проблема | Severity | Секция | Описание |
+|---|----------|----------|--------|----------|
+| 1 | AgentCard не инвалидирует кэш sessions | BUG | 6.66 | createSession() напрямую, без invalidateQueries. Dashboard/SessionList не узнают о новой сессии до refetchInterval (10с) |
+| 2 | SessionList дублирует useSessions | CODE DUPLICATION | 6.67 | Идентичный useQuery inline, risk расхождения при изменениях |
+| 3 | Ошибки delete-мутаций не показываются | UX | 6.68 | deleteTeam/deleteAgent/deleteLink.mutate() без onError, пользователь не видит ошибку |
+| 4 | Непоследовательные стратегии polling | INCONSISTENCY | 6.69 | 3 разных подхода: безусловный 10s, безусловный 5s, условный. Только useEvalRun делает правильно |
+
+### 20.4 Уточнения предыдущих оценок (v10)
+
+| Критерий | v9 оценка | v10 оценка | Обоснование изменения |
+|----------|-----------|-----------|----------------------|
+| Типизация | 9/10 | **8/10** | `as WsIncoming` без runtime validation, `undefined as T`. Но `strict: true` + `noUncheckedIndexedAccess` + 0 `any` — выше среднего |
+| **Общая** | **5/10** | **5/10** | Подтверждена. CRUD frontend зрелый (7-8/10), core chat flow хрупкий (4/10) |
+
+### 20.5 Дополнительные наблюдения (v10)
+
+**Положительные паттерны, не отмеченные ранее:**
+
+1. **FormMode discriminated union** — Dashboard и TeamPage используют `type FormMode = { kind: "closed" } | { kind: "create" } | { kind: "edit"; entity: T }`. Грамотный TypeScript-паттерн с exhaustive checking
+2. **CRUD-хуки единообразны на ~85%** — useTeams, useAgents, useSessions, useEvaluations следуют паттерну: queryKey constant, useMutation + invalidateQueries onSuccess. Отклонения минорны (именование `qc` vs `queryClient`, наличие refetchInterval)
+3. **Eval-компоненты зрелее CRUD-компонентов** — EvalRunsList имеет status badges, progress bars; NewEvalRunForm — batch selection с "Select All"; useEvalRun — единственный условный polling. Показывает эволюцию паттернов проекта
+4. **EvalDashboard правильно передаёт данные через props** — в отличие от SessionList (inline useQuery), eval-компоненты получают данные от parent. Автор учёл на ошибке SessionList
+
+**Оставшиеся пробелы:**
+
+1. **Loading states — только текст** — все компоненты показывают `"Loading..."` / `"Loading teams..."`. Нет skeleton UI, спиннеров, Suspense
+2. **Нет error recovery UI** — ни один компонент не предлагает "Retry" при ошибке загрузки. `retry: 1` в QueryClient, после чего dead end
+3. **Нет глобального error handler** — каждый компонент обрабатывает ошибки локально (или не обрабатывает, как delete-мутации). Нет toast-системы
+
+### 20.6 Обновлённый реестр проблем по severity (v10)
+
+| Severity | v9 total | v10: добавлено | Итого |
+|----------|----------|---------------|-------|
+| BUG | 5 | +1 (6.66 AgentCard cache) | 6 |
+| UX | 4 | +1 (6.68 delete errors) | 5 |
+| CODE DUPLICATION | 0 | +1 (6.67 SessionList) | 1 |
+| INCONSISTENCY | 1 | +1 (6.69 polling patterns) | 2 |
+| **Итого** | **63** | **+4** | **67** |
+
+### 20.7 Методологические уроки v10
+
+1. **Проверять не только наличие бага, но и его конкретное последствие.** "AgentCard вызывает API напрямую" — факт. "Кэш не инвалидируется, stale UI 10 секунд" — баг. Без второго предложения первое — лишь code style observation
+2. **"Prop drilling" требует количественной проверки.** 6 callbacks на 1 уровень вложенности — нормальный React-паттерн, не проблема. Prop drilling проблематичен при 3+ уровнях передачи
+3. **Сравнивать паттерны внутри проекта.** Разница между useEvalRun (условный polling) и useSessions/useEvalRuns (безусловный) показывает эволюцию проекта и выявляет inconsistency
+4. **Презентационные компоненты vs самостоятельно загружающие** — EvalRunsList получает данные через props (правильно), SessionList загружает сам (дублирует хук). Контраст виден только при чтении обоих
+
+---
+
+*Версия 10.0. Включает результаты десятипроходного анализа: первичный (v1), коррекция (v2), независимая ревизия оркестрации (v3), критическая самопроверка (v4), независимое ревью data layer + frontend + миграции (v5), full-stack ревью Chat/WebSocket pipeline (v6), глубокое ревью Memory/Eval/MCP подсистем (v7), независимое ревью тестов и инфраструктуры (v8), независимое ревью аутентификации и безопасности (v9), независимое ревью Frontend CRUD и State Management (v10). v10 скорректировал типизацию 9/10→8/10, опроверг "prop drilling 7+ callbacks" (реально 6, не проблема), добавил 4 проблемы (6.66-6.69). Общее число проблем: 67. Все утверждения верифицированы по исходному коду с указанием файлов и строк.*
