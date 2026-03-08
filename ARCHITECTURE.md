@@ -102,7 +102,7 @@
 | graph_service.py | ~307 | LangGraph StateGraph: 3 nodes, 2 routing functions, checkpoint |
 | auth_service.py | ~209 | OAuth2 PKCE, token refresh |
 | budget.py | ~208 | BudgetTracker, cost computation, warning/critical events |
-| orchestrator_service.py | ~203 | format_handoff_instructions, parse_handoff_block, _build_agent_prompt |
+| orchestrator_service.py | ~203 | format_handoff_instructions, parse_handoff_block, _build_agent_prompt (все 3 используются в graph_service); handle_handoff — мёртвый код (~129 строк) |
 | memory_service.py | ~199 | pgvector RAG, Voyage AI embeddings |
 | judge_service.py | ~198 | LLM-as-Judge via Anthropic SDK |
 | circuit_breaker.py | ~151 | CLOSED/OPEN/HALF_OPEN state machine |
@@ -176,19 +176,28 @@ Change isolation: **высокая** — каждый ресурс изолир�
 2. ws.py: accept → load session → load agent → get handoff_targets
 3. ws.py: format_handoff_instructions → append to system_prompt
 4. ws.py: runtime.start_session() (если не запущен)
-     → запуск Claude CLI subprocess
+     → НЕ запускает subprocess — только сохраняет конфигурацию
+       (workdir, system_prompt, claude_session_id, allowed_tools, budget)
 5. Client sends {"type": "message", "content": "..."}
 6. ws.py: add_message(db, user) → build WorkflowState → _run_graph()
 7. graph.astream() → run_agent_node:
      a. runtime.send_message():
         → kill stale CLI process этой сессии (если есть)
-        → write content to stdin
-        → stream JSON events from stdout
+        → get OAuth token (auth_service.get_current_access_token)
+        → check budget (BudgetTracker)
+        → check circuit_breaker
+        → launch NEW Claude CLI subprocess (эфемерный — новый на каждое сообщение)
+        → write content to stdin + EOF
+        → stream JSON events from stdout (_read_stream)
         → record budget usage (может yield budget_warning/budget_exceeded)
         → yield events (assistant_text, tool_use, tool_result)
      b. websocket.send_json(event) для каждого yield
+        — depth > 0: события получают prefix sub_agent_
      c. save response to DB (add_message assistant)
+        — depth > 0: также сохраняет в main_session для истории
      d. parse_handoff_block → check handoff
+     e. depth > 0: runtime.stop_session() (cleanup sub-agent)
+        depth == 0: сохраняет claude_session_id для resume
 8. route_after_agent:
      → handoff? → notify_handoff_node → gate_node
      → no handoff? → END
@@ -198,11 +207,12 @@ Change isolation: **высокая** — каждый ресурс изолир�
 11. Client sends {"type": "approve"} или {"type": "reject"}
 12. ws.py: _run_graph(Command(resume=True/False))
 13. gate_node resumes:
-     → approved: create sub-agent session → runtime.start_session → run_agent_node (depth+1)
+     → approved: check cycle → create sub-session → _build_agent_prompt
+       → runtime.start_session (config only) → send "handoff_start"
+       → return state с depth+1 → run_agent_node (шаг 7)
      → rejected: END
-14. run_agent_node (sub-agent): те же шаги 7a-d, события с prefix sub_agent_
-15. route_after_agent: END (или новый handoff, depth limited by recursion_limit=20)
-16. ws.py: send {"type": "done"}
+14. route_after_agent: END (или новый handoff, depth limited by recursion_limit=20)
+15. ws.py: send {"type": "done"}
 ```
 
 **Файлы (8+):** ws.py, graph_service.py, runtime.py, orchestrator_service.py, auth_service.py, budget.py, circuit_breaker.py, session_service.py.
