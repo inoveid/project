@@ -23,8 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.schemas.session import SessionCreate
 from app.services.agent_link_service import get_agent_handoff_targets
-from app.services.orchestrator_service import (
-    _build_agent_prompt,
+from app.services.utils.handoff import (
+    build_agent_prompt,
     parse_handoff_block,
 )
 from app.services.runtime import runtime
@@ -218,7 +218,7 @@ async def gate_node(state: WorkflowState, config: RunnableConfig) -> dict:
     # Построить системный промпт с контекстом цепочки
     sub_targets = await get_agent_handoff_targets(db, target.id)
     chain_tuples = [tuple(p) for p in state["chain"]] + [tuple(current_pair)]
-    system_prompt = _build_agent_prompt(target, list(chain_tuples), sub_targets)
+    system_prompt = build_agent_prompt(target, list(chain_tuples), sub_targets)
 
     # Запустить runtime sub-агента
     workdir = (target.config.get("workdir") or settings.workspace_path) if target.config else settings.workspace_path

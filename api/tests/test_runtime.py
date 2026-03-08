@@ -185,77 +185,6 @@ def test_parse_event_unknown_returns_none(agent_runtime, session_id):
     assert result is None
 
 
-@pytest.mark.asyncio
-async def test_run_task_creates_isolated_dir(agent_runtime, tmp_path):
-    """run_task creates .handoff_sessions/<uuid>/ as subprocess CWD."""
-    workdir = str(tmp_path)
-
-    async def fake_send_message(sid, content):
-        # Verify isolated dir was created
-        handoff_dir = tmp_path / ".handoff_sessions"
-        assert handoff_dir.exists()
-        subdirs = list(handoff_dir.iterdir())
-        assert len(subdirs) == 1
-        # Verify the session uses isolated dir
-        running = agent_runtime._processes[sid]
-        assert ".handoff_sessions/" in running.workdir
-        return
-        yield  # noqa: unreachable — makes this an async generator
-
-    with patch.object(agent_runtime, "send_message", side_effect=fake_send_message):
-        async for _ in agent_runtime.run_task(
-            workdir=workdir,
-            system_prompt="test prompt",
-            task="do something",
-        ):
-            pass
-
-
-@pytest.mark.asyncio
-async def test_run_task_yields_events(agent_runtime, tmp_path):
-    """run_task proxies events from send_message."""
-    expected_events = [
-        {"type": "assistant_text", "content": "hello"},
-        {"type": "tool_use", "tool_name": "read", "tool_input": {}},
-    ]
-
-    async def fake_send_message(sid, content):
-        for event in expected_events:
-            yield event
-
-    with patch.object(agent_runtime, "send_message", side_effect=fake_send_message):
-        collected = []
-        async for event in agent_runtime.run_task(
-            workdir=str(tmp_path),
-            system_prompt="test",
-            task="hello",
-        ):
-            collected.append(event)
-
-    assert collected == expected_events
-
-
-@pytest.mark.asyncio
-async def test_run_task_cleans_up_session(agent_runtime, tmp_path):
-    """stop_session is called in finally block even on error."""
-    stop_mock = AsyncMock()
-
-    async def fake_send_message(sid, content):
-        raise RuntimeError("boom")
-        yield  # noqa: unreachable — makes this an async generator
-
-    with patch.object(agent_runtime, "send_message", side_effect=fake_send_message), \
-         patch.object(agent_runtime, "stop_session", stop_mock):
-        with pytest.raises(RuntimeError, match="boom"):
-            async for _ in agent_runtime.run_task(
-                workdir=str(tmp_path),
-                system_prompt="test",
-                task="fail",
-            ):
-                pass
-
-    stop_mock.assert_awaited_once()
-
 
 @pytest.mark.asyncio
 async def test_send_message_kills_only_own_session(agent_runtime):
@@ -477,24 +406,6 @@ async def test_get_children_empty(agent_runtime):
     sid = uuid.uuid4()
     assert agent_runtime.get_children(sid) == set()
 
-
-@pytest.mark.asyncio
-async def test_run_task_no_parent_tracking(agent_runtime, tmp_path):
-    """run_task (ephemeral) does not use parent tracking."""
-    async def fake_send_message(sid, content):
-        return
-        yield  # noqa: unreachable
-
-    with patch.object(agent_runtime, "send_message", side_effect=fake_send_message):
-        async for _ in agent_runtime.run_task(
-            workdir=str(tmp_path),
-            system_prompt="test",
-            task="do something",
-        ):
-            pass
-
-    # No children tracking should exist
-    assert not agent_runtime._children
 
 
 @pytest.mark.asyncio
