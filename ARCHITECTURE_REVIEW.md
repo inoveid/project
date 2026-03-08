@@ -1,8 +1,8 @@
 # Архитектурный анализ Agent Console: AI-first разработка
 
 **Дата:** 2026-03-08
-**Версия:** 6.0 (после независимого ревью Chat/WebSocket full-stack v6)
-**Метод:** Шестипроходный анализ — первичный (v1), коррекция (v2), независимая ревизия (v3), критическая самопроверка (v4), независимое ревью data layer + frontend + миграции (v5), full-stack ревью Chat/WebSocket pipeline (v6)
+**Версия:** 7.0 (после независимого ревью Memory/Eval/MCP v7)
+**Метод:** Семипроходный анализ — первичный (v1), коррекция (v2), независимая ревизия (v3), критическая самопроверка (v4), независимое ревью data layer + frontend + миграции (v5), full-stack ревью Chat/WebSocket pipeline (v6), глубокое ревью Memory/Eval/MCP подсистем (v7)
 
 ---
 
@@ -24,6 +24,7 @@
 14. [Ошибки третьего прохода анализа (ревью v4)](#14-ошибки-третьего-прохода-анализа-ревью-v4)
 15. [Ошибки четвёртого прохода анализа (ревью v5)](#15-ошибки-четвёртого-прохода-анализа-ревью-v5)
 16. [Ошибки пятого прохода анализа (ревью v6)](#16-ошибки-пятого-прохода-анализа-ревью-v6)
+17. [Ошибки шестого прохода анализа (ревью v7)](#17-ошибки-шестого-прохода-анализа-ревью-v7)
 
 ---
 
@@ -359,9 +360,9 @@ interrupted = False
 | P2 | Observability | telemetry.py + budget.py: Langfuse trace+generation в send_message, token pricing | Partial | gen_ai semantic conventions неполные, structured logging отсутствует, budget.record_usage не получает model name (cost opus занижена 5x) |
 | P3 | Automatic Orchestrator | orchestrator_service.py: parse_handoff_block, auto-routing | Replaced | Заменён P4 (LangGraph). handle_handoff() = мёртвый код |
 | P4 | LangGraph Redesign | graph_service.py: StateGraph, PostgreSQL checkpointing, interrupt() | Done | Time-travel debugging UI не реализован |
-| P5 | Vector Memory | memory_service.py: pgvector, Voyage AI, episodic + semantic | Done | Hybrid search (BM25 + dense) — нет, только dense. ✓ HNSW index настроен (миграция 003, m=16, ef_construction=64) |
-| P6 | Evaluation Framework | eval_service.py + judge_service.py + golden dataset | Done | Trajectory evaluation не реализована (только outcome) |
-| P7 | MCP Server | mcp-workspace/: tasks, specs tools | Done | Полнофункционален |
+| P5 | Vector Memory | memory_service.py: pgvector, Voyage AI, episodic + semantic | Done | Hybrid search (BM25 + dense) — нет, только dense. ✓ HNSW index настроен (миграция 003, m=16, ef_construction=64). ⚠ `input_type="document"` для query embeddings (6.40). ⚠ 0 тестов |
+| P6 | Evaluation Framework | eval_service.py + judge_service.py + golden dataset | Done | Trajectory evaluation не реализована (только outcome). ⚠ judge return type annotation ложная (6.41). ⚠ Background task без error handling (6.43) |
+| P7 | MCP Server | mcp-workspace/: tasks, specs tools | Done | Полнофункционален. ⚠ 0 тестов |
 | P8 | Production Hardening | circuit_breaker.py + budget.py | Partial | Stateless Redis — нет. Semantic caching — нет |
 
 ---
@@ -923,6 +924,166 @@ Tool-вызовы не отображаются в UI до получения `d
 **Severity:** UX (delayed rendering, расширение 6.2)
 **Fix:** Вызывать `setItems()` с копией pending state после каждого tool_use/sub_agent_tool_use для real-time rendering.
 
+### 6.40 memory_service: input_type="document" для query embeddings (QUALITY) [v7]
+
+**Файл:** `api/app/services/memory_service.py:40-42`
+```python
+result = await asyncio.to_thread(
+    client.embed, [text_input], model=EMBEDDING_MODEL, input_type="document"
+)
+```
+
+Функция `_embed()` используется как для сохранения (`save_episodic`, `save_semantic`), так и для поиска (`search_memories`). Voyage AI различает `input_type="document"` и `input_type="query"` — модель оптимизирует embeddings по-разному для этих типов. Для search запросов (строка 120: `_embed(query)`) используется неправильный `input_type`, что снижает качество retrieval.
+
+**Severity:** QUALITY (search relevance degraded)
+**Fix:** Добавить параметр в `_embed()`:
+```python
+async def _embed(text_input: str, input_type: str = "document") -> list[float]:
+    client = _get_voyage_client()
+    result = await asyncio.to_thread(
+        client.embed, [text_input], model=EMBEDDING_MODEL, input_type=input_type
+    )
+```
+И вызывать `_embed(query, input_type="query")` в `search_memories`.
+
+### 6.41 judge_service: return type annotation не соответствует реальному возвращаемому значению (TYPING) [v7]
+
+**Файл:** `api/app/services/judge_service.py:153, 198`
+
+Сигнатура: `async def judge_agent_output(...) -> JudgeResponse:`
+Фактический return: `return response, token_usage` — tuple[JudgeResponse, dict].
+
+Вызов в eval_service.py:191: `judge_response, token_usage = await judge_agent_output(...)` — работает в runtime, но противоречит аннотации. Type checker (mypy/pyright) пометит как ошибку.
+
+**Severity:** TYPING
+**Fix:** Изменить аннотацию на `-> tuple[JudgeResponse, dict]:`.
+
+### 6.42 judge_service: нет retry при невалидном JSON от LLM (RELIABILITY) [v7]
+
+**Файл:** `api/app/services/judge_service.py:111`
+```python
+data: dict[str, Any] = json.loads(text)
+```
+
+Если LLM вернёт невалидный JSON, `json.loads` бросит `JSONDecodeError`. Нет retry, нет fallback. Ошибка поднимется до `execute_eval_run()`, которая запишет `verdict="error"`. Judge уже потратил токены — результат отброшен без попытки переспросить.
+
+**Severity:** RELIABILITY
+**Fix:** Обернуть в retry (до 2 повторов) или fallback с просьбой вернуть валидный JSON.
+
+### 6.43 Background eval task — status застревает на "running" при ошибке (RELIABILITY) [v7]
+
+**Файл:** `api/app/routers/evaluations.py:75-80`
+```python
+async def _run_eval():
+    from app.database import async_session
+    async with async_session() as session:
+        await eval_service.execute_eval_run(session, run.id, case_ids=case_ids)
+```
+
+Нет try/finally. Если `execute_eval_run()` бросает исключение до обновления status (например, `ValueError("No eval cases found")`), run останется со `status="running"` навсегда. Frontend будет бесконечно polling'ить этот run (useEvalRun refetchInterval: 3000 при status "running").
+
+**Severity:** RELIABILITY
+**Fix:** Обернуть в try/except с обновлением status на "failed":
+```python
+async def _run_eval():
+    from app.database import async_session
+    async with async_session() as session:
+        try:
+            await eval_service.execute_eval_run(session, run.id, case_ids=case_ids)
+        except Exception as e:
+            run_obj = await session.get(EvalRun, run.id)
+            if run_obj and run_obj.status == "running":
+                run_obj.status = "failed"
+                await session.commit()
+```
+
+### 6.44 execute_eval_run — один commit для всех results (DURABILITY) [v7]
+
+**Файл:** `api/app/services/eval_service.py:167-247`
+
+Внутри цикла `for case in cases` — `db.add(eval_result)` без промежуточных `commit()`. Финальный `await db.commit()` на строке 247 коммитит все результаты атомарно. Если БД или процесс упадёт между case #5 и case #10 — все 10 результатов потеряются (и потраченные на judge LLM-токены).
+
+**Severity:** DURABILITY (при long-running eval)
+**Fix:** Добавить `await db.commit()` после каждого `db.add(eval_result)` внутри цикла, или после каждых N кейсов.
+
+### 6.45 judge_service создаёт Anthropic client на каждый вызов (PERFORMANCE) [v7]
+
+**Файл:** `api/app/services/judge_service.py:168`
+```python
+client = anthropic.AsyncAnthropic(api_key=api_key) if api_key else anthropic.AsyncAnthropic()
+```
+
+Аналогично 6.9 (Voyage client). При batch eval run из 10 кейсов создаётся 10 httpx-клиентов. Severity ниже чем 6.9 — Anthropic SDK использует `httpx.AsyncClient`, который легче sync Voyage Client.
+
+**Severity:** PERFORMANCE (minor)
+**Fix:** Module-level singleton аналогично рекомендации M6.
+
+### 6.46 0 тестов для memory_service (TEST GAP) [v7]
+
+Среди 13 test-файлов в `api/tests/` отсутствуют `test_memory.py` и `test_memory_service.py`. Покрытие memory-подсистемы = 0. Не протестированы:
+- `_embed()` — Voyage API вызов
+- `search_memories()` — merge + sort логика
+- `_search_episodic()` / `_search_semantic()` — pgvector queries
+
+**Severity:** TEST GAP
+
+### 6.47 0 тестов для MCP server (TEST GAP) [v7]
+
+Нет тестов в `mcp-workspace/`. Не протестированы:
+- `list_tasks()`, `get_task()`, `update_task_status()` — task tools
+- `list_specs()`, `get_spec()` — spec tools с path traversal protection
+- `get_project_context()`, `get_protocol()` — resources
+
+**Severity:** TEST GAP
+
+### 6.48 Anthropic API key не в централизованном config (INCONSISTENCY) [v7]
+
+**Файлы:** `api/app/config.py:16` vs `api/app/services/judge_service.py:168`
+
+`voyage_api_key` определён в `config.py` с prefix `AC_`. Anthropic API key используется через `anthropic.AsyncAnthropic()` без параметра — SDK читает `ANTHROPIC_API_KEY` из env напрямую, минуя `Settings`. Нет валидации наличия ключа при старте.
+
+**Severity:** INCONSISTENCY
+**Fix:** Добавить `anthropic_api_key: str = ""` в Settings и использовать в judge_service.
+
+### 6.49 voyage_api_key="" по умолчанию — lazy failure (CONFIG) [v7]
+
+**Файл:** `api/app/config.py:16`
+```python
+voyage_api_key: str = ""
+```
+
+Если env var `AC_VOYAGE_API_KEY` не задана, `voyageai.Client(api_key="")` будет создан при первом вызове `_embed()`, и API вернёт AuthenticationError. FastAPI стартует без ошибок — failure только при запросе к memory endpoints. Аналогично для Anthropic key в judge_service.
+
+**Severity:** CONFIG (lazy failure)
+**Fix:** Валидация при startup, или хотя бы log.warning если ключи пусты.
+
+### 6.50 useEvalRuns — безусловный polling каждые 5 секунд (PERFORMANCE) [v7]
+
+**Файл:** `web/src/hooks/useEvaluations.ts:48`
+```typescript
+refetchInterval: 5000,
+```
+
+Список eval runs рефетчится каждые 5 секунд **безусловно**, даже если все runs завершены. В отличие от `useEvalRun` (строки 57-60), который polling'ит только `running`/`pending`, список не учитывает статус.
+
+**Severity:** PERFORMANCE (wasteful network)
+**Fix:** Условный polling как в `useEvalRun`:
+```typescript
+refetchInterval: (query) => {
+  const runs = query.state.data ?? [];
+  return runs.some(r => r.status === "running" || r.status === "pending") ? 5000 : false;
+},
+```
+
+### 6.51 eval_service.duration_ms измеряет только agent_output, не judge (MISLEADING) [v7]
+
+**Файл:** `api/app/services/eval_service.py:169-177`
+
+`duration_ms` замеряет время между `start_time` и получением `agent_output` (строка 177), но **не включает** время вызова judge (строки 191-193). В `EvalResult` поле `duration_ms` хранится вместе с judge verdict — кажется что это полное время оценки кейса.
+
+**Severity:** MISLEADING
+**Fix:** Перенести `start_time` перед циклом или замерять отдельно agent_time и judge_time.
+
 ---
 
 ## 7. AI-first критерии
@@ -1029,6 +1190,8 @@ Module-level mutable singletons (полный реестр, v4):
 - **test_ws.py устарел** — ссылается на P3-функции (`_parse_handoff_block`, `_stream_response`), которых нет в текущем коде (см. 6.11)
 - **0 тестов для graph_service.py** — core оркестрация не покрыта
 - **0 тестов для orchestrator_service.py** — parse_handoff_block, format_handoff_instructions не протестированы отдельно
+- **0 тестов для memory_service.py** [v7] — `_embed()`, `search_memories()`, `_search_episodic/semantic()` не покрыты. Voyage API и pgvector queries тестируются только в production
+- **0 тестов для MCP server** [v7] — `mcp-workspace/` не содержит ни одного теста. `list_tasks()`, `get_task()`, `update_task_status()`, path traversal protection в `get_spec()` — всё без покрытия
 - Integration tests с реальной БД (все тесты — MagicMock)
 - Тесты CASCADE-удаления
 - Тесты pgvector (cosine distance, embedding storage)
@@ -1036,7 +1199,7 @@ Module-level mutable singletons (полный реестр, v4):
 - Тесты concurrent sessions
 - Тесты WebSocket message ordering
 
-**Оценка: 3/10** (снижена с 5/10: тесты core chat flow не работают, graph_service/orchestrator не покрыты)
+**Оценка: 3/10** (снижена с 5/10: тесты core chat flow не работают, graph_service/orchestrator не покрыты, 0 тестов для memory и MCP)
 
 ### 7.7 Agent Entrypoints
 
@@ -1154,6 +1317,30 @@ await asyncio.wait_for(process.wait(), timeout=300)
 
 Добавить `model=event.get("model")` в вызов record_usage().
 
+**F9. Исправить input_type в memory_service._embed() [v7]**
+
+Файл: `api/app/services/memory_service.py:38-42`
+
+Добавить параметр `input_type: str = "document"` в `_embed()`, вызывать `_embed(query, input_type="query")` в `search_memories()`.
+
+**F10. Исправить return type annotation в judge_service [v7]**
+
+Файл: `api/app/services/judge_service.py:153`
+
+Изменить `-> JudgeResponse:` на `-> tuple[JudgeResponse, dict]:`.
+
+**F11. Добавить error handling в background eval task [v7]**
+
+Файл: `api/app/routers/evaluations.py:75-80`
+
+Обернуть `_run_eval()` в try/except с обновлением status на "failed" при ошибке.
+
+**F12. Условный polling в useEvalRuns [v7]**
+
+Файл: `web/src/hooks/useEvaluations.ts:48`
+
+Заменить `refetchInterval: 5000` на условный polling как в `useEvalRun` (только при наличии running/pending runs).
+
 ### 9.2 Средние улучшения (2-8 часов)
 
 **M1. Создать ARCHITECTURE.md**
@@ -1233,6 +1420,28 @@ def _get_voyage_client() -> voyageai.Client:
 setTimeout(connect, RECONNECT_DELAY_MS * Math.pow(2, reconnectCount.current));
 ```
 
+**M11. Singleton для Anthropic client в judge_service [v7]**
+
+Аналогично M6 для Voyage. Создать module-level singleton `_anthropic_client`.
+
+**M12. Промежуточные commit в execute_eval_run [v7]**
+
+Файл: `api/app/services/eval_service.py:167-247`
+
+Добавить `await db.commit()` после каждого `db.add(eval_result)` для durability при long-running eval.
+
+**M13. Retry при невалидном JSON от LLM в judge_service [v7]**
+
+Файл: `api/app/services/judge_service.py:111`
+
+Обернуть `json.loads` в retry (до 2 повторов) с инструкцией LLM вернуть валидный JSON.
+
+**M14. Startup-валидация API keys [v7]**
+
+Файл: `api/app/config.py`
+
+Добавить `anthropic_api_key: str = ""` в Settings. При startup — log.warning если voyage_api_key или anthropic_api_key пусты.
+
 **M10. Lifespan retry**
 
 ```python
@@ -1307,6 +1516,9 @@ logger.info("agent.message.sent", session_id=session_id, tokens=usage.input_toke
 | 5d | **[v4] Передать model в budget.record_usage()** (cost opus 5x) | runtime.py:141 | 10 мин |
 | 5e | **[v6] Сброс pending refs при reconnect** (stale data BUG) | useChat.ts:287-294 | 10 мин |
 | 5f | **[v6] Kill sub-agent process при WS disconnect** (orphan leak) | graph_service.py / ws.py | 30 мин |
+| 5g | **[v7] Fix input_type="document" для query embeddings** (quality) | memory_service.py:40-42 | 10 мин |
+| 5h | **[v7] Fix judge return type annotation** (typing) | judge_service.py:153 | 5 мин |
+| 5i | **[v7] Error handling в background eval task** (stuck status) | evaluations.py:75-80 | 15 мин |
 
 ### P1 — Критично для AI-agent разработки
 
@@ -1320,6 +1532,9 @@ logger.info("agent.message.sent", session_id=session_id, tokens=usage.input_toke
 | 11 | DANGER_ZONES.md | 1 час |
 | 11a | **[v6] Budget events → WsIncoming + handleEvent + UI banner** | 2 часа |
 | 11b | **[v6] Тесты approval flow** (approve/reject/reconnect) | 2 часа |
+| 11c | **[v7] Тесты memory_service** (_embed, search_memories, pgvector queries) | 3 часа |
+| 11d | **[v7] Тесты MCP server** (tasks, specs, path traversal) | 2 часа |
+| 11e | **[v7] Anthropic API key в централизованный config** | 30 мин |
 
 ### P2 — Значительно улучшает AI-readiness
 
@@ -1337,6 +1552,12 @@ logger.info("agent.message.sent", session_id=session_id, tokens=usage.input_toke
 | 19b | **[v4] React.memo на ChatMessage, ToolUseBlock, HandoffBlock** | 30 мин |
 | 19c | **[v4] Exponential backoff для WS reconnection** | 15 мин |
 | 19d | **[v4] Concurrent protection в execute_eval_run()** | 15 мин |
+| 19e | **[v7] Singleton Anthropic client в judge_service** | 15 мин |
+| 19f | **[v7] Условный polling в useEvalRuns** (wasteful 5s) | 10 мин |
+| 19g | **[v7] Промежуточные commit в execute_eval_run** (durability) | 30 мин |
+| 19h | **[v7] Retry при невалидном JSON от LLM в judge** | 30 мин |
+| 19i | **[v7] Startup-валидация API keys** (lazy failure) | 30 мин |
+| 19j | **[v7] Fix duration_ms — включить judge time** (misleading) | 15 мин |
 
 ### P3 — Масштабируемость
 
@@ -1367,6 +1588,9 @@ logger.info("agent.message.sent", session_id=session_id, tokens=usage.input_toke
 11. **Повторный astream() на тот же thread_id** — что происходит с existing checkpoint когда ws.py отправляет новый initial_state после отклонённого handoff? Перезаписывается ли checkpoint?
 12. **[v6] `__interrupt__` detection format** — ws.py:185 проверяет `"__interrupt__" in chunk` при `stream_mode="values"`. Формат interrupt в state values не документирован в LangGraph. Нужен эксперимент: `async for chunk in graph.astream(...)` с interrupt → проверить формат chunk
 13. **[v6] Stale refs при reconnect** — воспроизвести баг: начать стриминг → разорвать WS → reconnect → отправить новое сообщение → проверить что pendingTextRef содержит мусор от предыдущего стриминга
+14. **[v7] Voyage AI input_type impact** — насколько значительно влияет использование `input_type="document"` вместо `"query"` на качество retrieval? Создать бенчмарк: 100 memories, 20 queries, сравнить recall@5 с document vs query
+15. **[v7] Background eval task failure modes** — запустить eval run → убить процесс → проверить что status застрял на "running". Проверить есть ли timeout/watchdog для зависших eval runs
+16. **[v7] Voyage client thread-safety** — `_embed()` вызывает `asyncio.to_thread(client.embed, ...)`. Если client — sync object, безопасен ли он для concurrent использования из разных threads? Или нужен thread-local client?
 
 ---
 
@@ -1647,4 +1871,84 @@ Full-stack ревью Chat/WebSocket pipeline: frontend useChat.ts → WebSocket
 
 ---
 
-*Версия 6.0. Включает результаты шестипроходного анализа: первичный (v1), коррекция (v2), независимая ревизия оркестрации (v3), критическая самопроверка (v4), независимое ревью data layer + frontend + миграции (v5), full-stack ревью Chat/WebSocket pipeline с критической самопроверкой (v6). Выявлены 3 ложноположительные проблемы предыдущих версий (FK-индексы, HNSW, N+1), 4 severity-завышения в v6. Все утверждения верифицированы по исходному коду с указанием файлов и строк.*
+## 17. Ошибки шестого прохода анализа (ревью v7)
+
+Глубокое ревью Memory (P5), Evaluation (P6) и MCP (P7) подсистем. Метод: полное чтение 12 файлов, верификация 7 утверждений предыдущих анализов, ответы на 6 дополнительных вопросов, критическая самопроверка найденных выводов.
+
+### 17.1 Ошибки предыдущих проходов, обнаруженные в v7
+
+| # | Ошибка | Заявлено (v1-v6) | Реально (v7) | Влияние |
+|---|--------|------------------|-------------|---------|
+| 1 | **P5 Memory: "нет HNSW"** | "pgvector без HNSW" (v4) | HNSW индексы есть в миграции 003:42-47, 69-74 — уже исправлено в v5 (6.23) | Подтверждение v5 исправления |
+| 2 | **P5 Memory: input_type не анализировался** | Все v1-v6 пропустили | `_embed()` использует `input_type="document"` для queries — снижает recall | Новая проблема 6.40 |
+| 3 | **P6 Eval: judge return type не проверялся** | Не упоминался | Сигнатура `-> JudgeResponse`, return `(response, token_usage)` tuple | Новая проблема 6.41 |
+| 4 | **P6 Eval: background task error handling** | Не анализировался | Нет try/finally → status "running" навсегда при ошибке | Новая проблема 6.43 |
+| 5 | **P7 MCP: 0 тестов** | Не упоминалось | mcp-workspace/ не содержит тестов | Новая проблема 6.47 |
+| 6 | **Memory: 0 тестов** | Не упоминалось | api/tests/ не содержит test_memory*.py | Новая проблема 6.46 |
+
+### 17.2 Новые проблемы v7 (сводка)
+
+| # | Секция | Severity | Проблема |
+|---|--------|----------|----------|
+| 1 | 6.40 | QUALITY | `input_type="document"` для query embeddings |
+| 2 | 6.41 | TYPING | judge return type annotation mismatch |
+| 3 | 6.42 | RELIABILITY | Нет retry при невалидном JSON от LLM |
+| 4 | 6.43 | RELIABILITY | Background eval task — status застревает |
+| 5 | 6.44 | DURABILITY | Один commit для всех eval results |
+| 6 | 6.45 | PERFORMANCE | Anthropic client создаётся per call |
+| 7 | 6.46 | TEST GAP | 0 тестов для memory_service |
+| 8 | 6.47 | TEST GAP | 0 тестов для MCP server |
+| 9 | 6.48 | INCONSISTENCY | Anthropic API key не в config |
+| 10 | 6.49 | CONFIG | voyage_api_key="" — lazy failure |
+| 11 | 6.50 | PERFORMANCE | useEvalRuns безусловный polling 5s |
+| 12 | 6.51 | MISLEADING | duration_ms не включает judge time |
+
+### 17.3 Самопроверка v7
+
+При критической самопроверке v7 обнаружены следующие нюансы:
+
+1. **Anthropic client-per-call severity** — завышена. `httpx.AsyncClient` легче sync Voyage Client (6.9). Severity корректно установлена как "PERFORMANCE (minor)"
+2. **eval_service "312 строк" vs "311 строк"** — `wc -l` даёт 311, Read tool показывает 312. Разница из-за trailing newline. Предыдущий анализ (v4) корректно отметил это как несущественную неточность
+3. **Подтверждение v5**: HNSW индексы действительно существуют в миграции 003 — перепроверено построчно
+
+### 17.4 Методологические уроки v7
+
+1. **Подсистемы анализировать целиком** — Memory/Eval/MCP не получили глубокого анализа в v1-v6, хотя были упомянуты в карте. Каждую подсистему нужно покрывать отдельным проходом
+2. **Проверять input_type/mode параметры ML-API** — Voyage AI различает document/query embeddings. Использование неправильного типа снижает recall без видимых ошибок
+3. **Проверять return type vs actual return** — Python не enforce'ит type annotations в runtime. Tuple return vs single type — частый паттерн ошибки
+4. **Проверять background tasks на failure handling** — FastAPI BackgroundTasks не имеют встроенного error handling. Без try/except status может застрять
+5. **Проверять наличие тестов для КАЖДОЙ подсистемы** — 0 тестов для memory и MCP обнаружились только при явном поиске test-файлов
+6. **Проверять polling patterns** — условный vs безусловный refetchInterval — разница между O(1) и O(∞) сетевых запросов
+
+### 17.5 Обновлённый реестр проблем по severity (v7)
+
+| Severity | v6 total | v7: убрано | v7: добавлено | Итого |
+|----------|----------|-----------|---------------|-------|
+| CRITICAL | 1 | 0 | 0 | 1 |
+| BUG | 5 | 0 | 0 | 5 |
+| DESIGN | 8 | 0 | 0 | 8 |
+| RELIABILITY | 6 | 0 | +2 (6.42 JSON retry, 6.43 stuck status) | 8 |
+| PERFORMANCE | 3 | 0 | +2 (6.45 Anthropic client, 6.50 polling) | 5 |
+| UX | 4 | 0 | 0 | 4 |
+| ACCURACY | 1 | 0 | 0 | 1 |
+| CORRECTNESS | 1 | 0 | 0 | 1 |
+| STABILITY | 1 | 0 | 0 | 1 |
+| MISSING FEATURE | 1 | 0 | 0 | 1 |
+| TECH DEBT | 1 | 0 | 0 | 1 |
+| RISK | 1 | 0 | 0 | 1 |
+| COSMETIC | 1 | 0 | 0 | 1 |
+| PROTOCOL GAP | 1 | 0 | 0 | 1 |
+| RESOURCE LEAK | 1 | 0 | 0 | 1 |
+| TEST GAP | 1 | 0 | +2 (6.46 memory, 6.47 MCP) | 3 |
+| UNKNOWN | 1 | 0 | 0 | 1 |
+| QUALITY | 0 | 0 | +1 (6.40 input_type) | 1 |
+| TYPING | 0 | 0 | +1 (6.41 judge return) | 1 |
+| INCONSISTENCY | 0 | 0 | +1 (6.48 Anthropic key) | 1 |
+| CONFIG | 0 | 0 | +1 (6.49 lazy failure) | 1 |
+| DURABILITY | 0 | 0 | +1 (6.44 single commit) | 1 |
+| MISLEADING | 0 | 0 | +1 (6.51 duration_ms) | 1 |
+| **Итого** | **38** | **0** | **+12** | **50** |
+
+---
+
+*Версия 7.0. Включает результаты семипроходного анализа: первичный (v1), коррекция (v2), независимая ревизия оркестрации (v3), критическая самопроверка (v4), независимое ревью data layer + frontend + миграции (v5), full-stack ревью Chat/WebSocket pipeline (v6), глубокое ревью Memory/Eval/MCP подсистем с критической самопроверкой (v7). Выявлены 3 ложноположительные проблемы предыдущих версий (FK-индексы, HNSW, N+1), 4 severity-завышения в v6, 12 новых проблем в v7. Все утверждения верифицированы по исходному коду с указанием файлов и строк.*
