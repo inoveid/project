@@ -37,7 +37,9 @@ export function TeamPage() {
 
   function handleDelete(agentId: string) {
     if (window.confirm("Delete this agent?")) {
-      deleteAgent.mutate(agentId);
+      deleteAgent.mutate(agentId, {
+        onError: (err: Error) => alert(err.message),
+      });
     }
   }
 
@@ -67,7 +69,9 @@ export function TeamPage() {
 
   function handleDeleteLink(linkId: string) {
     if (window.confirm("Delete this link?")) {
-      deleteLink.mutate(linkId);
+      deleteLink.mutate(linkId, {
+        onError: (err: Error) => alert(err.message),
+      });
     }
   }
 

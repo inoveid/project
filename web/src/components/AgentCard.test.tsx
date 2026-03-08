@@ -2,12 +2,15 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AgentCard } from "./AgentCard";
 import type { Agent } from "../types";
 import * as sessionsApi from "../api/sessions";
 
 vi.mock("../api/sessions", () => ({
   createSession: vi.fn(),
+  getSessions: vi.fn(),
+  stopSession: vi.fn(),
 }));
 
 const mockNavigate = vi.fn();
@@ -32,11 +35,16 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
   };
 }
 
-function renderCard(agent = makeAgent()) {
+function renderCard(agent = makeAgent(), props: { onEdit?: (a: Agent) => void; onDelete?: (id: string) => void } = {}) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   return render(
-    <MemoryRouter>
-      <AgentCard agent={agent} onEdit={vi.fn()} onDelete={vi.fn()} />
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <AgentCard agent={agent} onEdit={props.onEdit ?? vi.fn()} onDelete={props.onDelete ?? vi.fn()} />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -99,11 +107,7 @@ describe("AgentCard", () => {
     const user = userEvent.setup();
     const onEdit = vi.fn();
     const agent = makeAgent();
-    render(
-      <MemoryRouter>
-        <AgentCard agent={agent} onEdit={onEdit} onDelete={vi.fn()} />
-      </MemoryRouter>,
-    );
+    renderCard(agent, { onEdit });
     await user.click(screen.getByText("Edit"));
     expect(onEdit).toHaveBeenCalledWith(agent);
   });
@@ -111,11 +115,7 @@ describe("AgentCard", () => {
   it("calls onDelete when Delete is clicked", async () => {
     const user = userEvent.setup();
     const onDelete = vi.fn();
-    render(
-      <MemoryRouter>
-        <AgentCard agent={makeAgent()} onEdit={vi.fn()} onDelete={onDelete} />
-      </MemoryRouter>,
-    );
+    renderCard(makeAgent(), { onDelete });
     await user.click(screen.getByText("Delete"));
     expect(onDelete).toHaveBeenCalledWith("agent-1");
   });

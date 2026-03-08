@@ -346,4 +346,144 @@ describe("useChat", () => {
       expect(item.content).toBe("Cycle detected: A -> B -> A");
     }
   });
+
+  it("resets pending refs and removes __streaming__ on WS disconnect", () => {
+    const { result } = renderHook(() => useChat("s-1", [], true));
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.simulateOpen());
+
+    act(() => ws.simulateMessage({ type: "assistant_text", content: "Hello" }));
+    expect(result.current.items).toHaveLength(1);
+    expect(result.current.items[0]!).toHaveProperty("id", "__streaming__");
+
+    act(() => ws.simulateClose());
+
+    expect(result.current.items).toHaveLength(0);
+    expect(result.current.status).toBe("disconnected");
+  });
+
+  it("does not carry stale text after reconnect", () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useChat("s-1", [], true));
+    const ws1 = MockWebSocket.instances[0]!;
+    act(() => ws1.simulateOpen());
+
+    act(() => ws1.simulateMessage({ type: "assistant_text", content: "Old " }));
+    act(() => ws1.simulateClose());
+
+    act(() => vi.advanceTimersByTime(2000));
+    const ws2 = MockWebSocket.instances[1]!;
+    act(() => ws2.simulateOpen());
+
+    act(() => ws2.simulateMessage({ type: "assistant_text", content: "New" }));
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]?.content).toBe("New");
+  });
+
+  it("tool_use triggers re-render with streaming item", () => {
+    const { result } = renderHook(() => useChat("s-1", [], true));
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.simulateOpen());
+
+    act(() => ws.simulateMessage({ type: "assistant_text", content: "Hi" }));
+    act(() =>
+      ws.simulateMessage({
+        type: "tool_use",
+        tool_name: "Read",
+        tool_input: { path: "/a.ts" },
+      }),
+    );
+
+    expect(result.current.messages).toHaveLength(1);
+    const msg = result.current.messages[0]!;
+    expect(msg.id).toBe("__streaming__");
+    expect(msg.tool_uses).toEqual([
+      { tool_name: "Read", tool_input: { path: "/a.ts" } },
+    ]);
+  });
+
+  it("tool_result triggers re-render updating streaming item", () => {
+    const { result } = renderHook(() => useChat("s-1", [], true));
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.simulateOpen());
+
+    act(() => ws.simulateMessage({ type: "assistant_text", content: "Hi" }));
+    act(() =>
+      ws.simulateMessage({
+        type: "tool_use",
+        tool_name: "Read",
+        tool_input: { path: "/a.ts" },
+      }),
+    );
+    act(() =>
+      ws.simulateMessage({
+        type: "tool_result",
+        content: "file contents",
+      }),
+    );
+
+    const msg = result.current.messages[0]!;
+    expect(msg.tool_uses?.[0]?.result).toBe("file contents");
+  });
+
+  it("sub_agent_tool_use triggers re-render", () => {
+    const { result } = renderHook(() => useChat("s-1", [], true));
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.simulateOpen());
+
+    act(() =>
+      ws.simulateMessage({
+        type: "sub_agent_assistant_text",
+        agent_name: "coder",
+        content: "Working",
+      }),
+    );
+    act(() =>
+      ws.simulateMessage({
+        type: "sub_agent_tool_use",
+        tool_name: "Write",
+        tool_input: { path: "/b.ts" },
+      }),
+    );
+
+    expect(result.current.items).toHaveLength(1);
+    const item = result.current.items[0]!;
+    expect(isHandoffItem(item)).toBe(true);
+    if (isHandoffItem(item)) {
+      expect(item.toolUses).toHaveLength(1);
+      expect(item.toolUses?.[0]?.tool_name).toBe("Write");
+    }
+  });
+
+  it("sub_agent_tool_result triggers re-render", () => {
+    const { result } = renderHook(() => useChat("s-1", [], true));
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.simulateOpen());
+
+    act(() =>
+      ws.simulateMessage({
+        type: "sub_agent_assistant_text",
+        agent_name: "coder",
+        content: "Working",
+      }),
+    );
+    act(() =>
+      ws.simulateMessage({
+        type: "sub_agent_tool_use",
+        tool_name: "Write",
+        tool_input: { path: "/b.ts" },
+      }),
+    );
+    act(() =>
+      ws.simulateMessage({
+        type: "sub_agent_tool_result",
+        content: "ok",
+      }),
+    );
+
+    const item = result.current.items[0]!;
+    if (isHandoffItem(item)) {
+      expect(item.toolUses?.[0]?.result).toBe("ok");
+    }
+  });
 });

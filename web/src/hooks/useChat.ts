@@ -51,6 +51,31 @@ export function useChat(
   const initialMessagesRef = useRef(initialMessages);
   initialMessagesRef.current = initialMessages;
 
+  const updateStreamingItem = useCallback(() => {
+    setItems((prev) => {
+      const idx = prev.findIndex((i) => !isHandoffItem(i) && i.id === "__streaming__");
+      if (idx === -1) return prev;
+      const current = prev[idx] as Message;
+      const updated: Message = {
+        ...current,
+        content: pendingTextRef.current,
+        tool_uses: pendingToolsRef.current.length > 0 ? [...pendingToolsRef.current] : null,
+      };
+      const result = [...prev];
+      result[idx] = updated;
+      return result;
+    });
+  }, []);
+
+  const updateSubAgentStreamingItem = useCallback(() => {
+    if (!pendingSubAgentRef.current) return;
+    const snapshot = { ...pendingSubAgentRef.current, toolUses: [...(pendingSubAgentRef.current.toolUses ?? [])] };
+    setItems((prev) => {
+      const withoutPending = prev.filter((i) => i.id !== "__sub_agent_streaming__");
+      return [...withoutPending, snapshot];
+    });
+  }, []);
+
   const handleEvent = useCallback(
     (event: WsIncoming) => {
       switch (event.type) {
@@ -77,6 +102,7 @@ export function useChat(
             tool_name: event.tool_name,
             tool_input: event.tool_input,
           });
+          updateStreamingItem();
           break;
 
         case "tool_result": {
@@ -84,6 +110,7 @@ export function useChat(
           if (lastTool) {
             lastTool.result = event.content;
           }
+          updateStreamingItem();
           break;
         }
 
@@ -182,6 +209,7 @@ export function useChat(
               ...(pendingSubAgentRef.current.toolUses ?? []),
               { tool_name: event.tool_name, tool_input: event.tool_input },
             ];
+            updateSubAgentStreamingItem();
           }
           break;
         }
@@ -191,6 +219,7 @@ export function useChat(
             const tools = pendingSubAgentRef.current.toolUses ?? [];
             const last = tools[tools.length - 1];
             if (last) last.result = event.content;
+            updateSubAgentStreamingItem();
           }
           break;
         }
@@ -228,7 +257,7 @@ export function useChat(
         }
       }
     },
-    [],
+    [updateStreamingItem, updateSubAgentStreamingItem],
   );
 
   const connect = useCallback(() => {
@@ -258,6 +287,13 @@ export function useChat(
     ws.onclose = () => {
       wsRef.current = null;
       setStatus("disconnected");
+      pendingTextRef.current = "";
+      pendingToolsRef.current = [];
+      pendingSubAgentRef.current = null;
+      setItems((prev) => prev.filter((i) => {
+        if (isHandoffItem(i)) return i.id !== "__sub_agent_streaming__";
+        return i.id !== "__streaming__";
+      }));
       if (!stoppedRef.current && reconnectCount.current < MAX_RECONNECT_ATTEMPTS) {
         reconnectCount.current += 1;
         reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY_MS);

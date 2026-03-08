@@ -1,5 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
-import { getSessions } from "../api/sessions";
+import { useSessions } from "../hooks/useSessions";
 import type { SessionListItem } from "../types";
 
 interface SessionListProps {
@@ -69,11 +68,7 @@ export function SessionList({
   onOpenSide,
   activeSessionIds = [],
 }: SessionListProps) {
-  const { data: sessions, isLoading } = useQuery({
-    queryKey: ["sessions"],
-    queryFn: getSessions,
-    refetchInterval: 10_000,
-  });
+  const { data: sessions, isLoading } = useSessions();
 
   if (isLoading) {
     return (

@@ -1,7 +1,6 @@
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Agent } from "../types";
-import { createSession } from "../api/sessions";
+import { useCreateSession } from "../hooks/useSessions";
 
 interface AgentCardProps {
   agent: Agent;
@@ -11,16 +10,12 @@ interface AgentCardProps {
 
 export function AgentCard({ agent, onEdit, onDelete }: AgentCardProps) {
   const navigate = useNavigate();
-  const [starting, setStarting] = useState(false);
+  const createSession = useCreateSession();
 
-  async function handleChat() {
-    setStarting(true);
-    try {
-      const session = await createSession(agent.id);
-      navigate(`/chat/${session.id}`);
-    } catch {
-      setStarting(false);
-    }
+  function handleChat() {
+    createSession.mutate(agent.id, {
+      onSuccess: (session) => navigate(`/chat/${session.id}`),
+    });
   }
 
   return (
@@ -65,11 +60,11 @@ export function AgentCard({ agent, onEdit, onDelete }: AgentCardProps) {
 
       <div className="mt-3">
         <button
-          onClick={() => void handleChat()}
-          disabled={starting}
+          onClick={handleChat}
+          disabled={createSession.isPending}
           className="text-sm text-blue-600 border border-blue-300 px-3 py-1 rounded hover:bg-blue-50 disabled:opacity-50"
         >
-          {starting ? "Starting..." : "Chat"}
+          {createSession.isPending ? "Starting..." : "Chat"}
         </button>
       </div>
     </div>

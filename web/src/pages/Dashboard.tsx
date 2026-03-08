@@ -31,7 +31,9 @@ export function Dashboard() {
 
   function handleDelete(id: string) {
     if (window.confirm("Delete this team?")) {
-      deleteTeam.mutate(id);
+      deleteTeam.mutate(id, {
+        onError: (err: Error) => alert(err.message),
+      });
     }
   }
 
