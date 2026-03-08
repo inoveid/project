@@ -376,3 +376,244 @@ Endpoint: `WS /api/ws/sessions/{session_id}`
 3. Удаление `__streaming__` и `__sub_agent_streaming__` элементов из items
 4. Если `reconnectCount < MAX_RECONNECT_ATTEMPTS` → setTimeout → повторное подключение
 5. После 5 неудачных попыток — остаёмся в `disconnected`
+
+---
+
+## 4. LangGraph Workflow
+
+### 4.1 Граф
+
+```
+START → run_agent ──→ [route_after_agent] ──→ END
+                           │
+                    handoff_target?
+                    depth < MAX_DEPTH(5)?
+                           │ yes
+                           ▼
+                    notify_handoff → gate ──→ [route_after_gate] ──→ END
+                                                    │
+                                             gateway_approved?
+                                                    │ yes
+                                                    ▼
+                                              run_agent (цикл)
+```
+
+Файл: `api/app/services/graph_service.py`. Компилируется в `main.py` lifespan → `build_graph(checkpointer)`.
+
+**Лимиты:**
+- `MAX_DEPTH = 5` (graph_service.py:35) — макс. глубина sub-agent handoff
+- `recursion_limit = 20` (ws.py:78) — LangGraph recursion limit в graph_config
+
+### 4.2 Nodes
+
+| Node | Функция | Что делает |
+|------|---------|------------|
+| `run_agent` | `run_agent_node()` | Стримит события из `runtime.send_message()` в WebSocket. Сохраняет ответ в DB. Парсит handoff-блок из ответа. Для sub-агентов (depth>0): добавляет prefix `sub_agent_` к событиям, останавливает runtime после завершения. |
+| `notify_handoff` | `notify_handoff_node()` | Отправляет `approval_required` в WebSocket. Выполняется один раз — при resume графа не повторяется. |
+| `gate` | `gate_node()` | Вызывает `interrupt()` — граф паузируется, state сохраняется в checkpoint. При resume с `Command(resume=True)`: создаёт sub-сессию, запускает runtime sub-агента, отправляет `handoff_start`. При `Command(resume=False)`: отменяет handoff. |
+
+### 4.3 Routing
+
+| Функция | Входное условие | → Результат |
+|---------|-----------------|-------------|
+| `route_after_agent` | `handoff_target` есть и `depth < MAX_DEPTH` | → `notify_handoff` |
+| `route_after_agent` | иначе | → `END` |
+| `route_after_gate` | `gateway_approved == True` | → `run_agent` |
+| `route_after_gate` | иначе | → `END` |
+
+### 4.4 WorkflowState — поля и контракты
+
+| Поле | Тип | Кто пишет | Кто читает | Описание |
+|------|-----|-----------|------------|----------|
+| `main_session_id` | str | ws.py (init) | run_agent, gate | WebSocket-сессия (неизменна) |
+| `current_session_id` | str | ws.py (init), gate | run_agent | Claude CLI сессия текущего агента |
+| `current_agent_id` | str | ws.py (init), gate | gate | UUID текущего агента |
+| `current_agent_name` | str | ws.py (init), gate | run_agent, notify_handoff | Имя агента для UI |
+| `task` | str | ws.py (init), gate | run_agent | Текст задачи/сообщения |
+| `depth` | int | ws.py (init=0), gate (+1) | run_agent, route_after_agent | 0=main, >0=sub-agent |
+| `chain` | list | ws.py (init=[]), gate | gate | Пары `[[from, to], ...]` для детекции циклов |
+| `handoff_target` | str\|None | run_agent | route_after_agent, notify_handoff, gate | Имя целевого агента из handoff-блока |
+| `handoff_message` | str\|None | run_agent | notify_handoff, gate | Текст задачи для sub-агента |
+| `gateway_approved` | bool\|None | run_agent (None), gate | route_after_gate | Решение HITL gate |
+| `messages` | list | ws.py (init=[]), run_agent | — | Накопленные `{agent, text, tools}` |
+
+### 4.5 Checkpoint Persistence
+
+- **Backend:** `AsyncPostgresSaver` (LangGraph) — таблицы `langgraph_checkpoints`, `langgraph_writes`
+- **Инициализация:** `main.py` lifespan → `checkpointer.setup()` → `build_graph(checkpointer)` → `_compiled_graph`
+- **Thread ID:** `session_id` — каждая WS-сессия имеет изолированную историю checkpoints
+- **Когда сохраняется:** после каждого node (автоматически LangGraph)
+- **interrupt():** сохраняет state в checkpoint, паузирует граф. Resume через `Command(resume=value)`
+- **Детекция interrupt:** `_run_graph()` (ws.py:191) проверяет `"__interrupt__" in chunk` при `stream_mode="values"`
+- **Non-serializable configurable:** `websocket` и `db` передаются через `config["configurable"]` и НЕ персистируются в checkpoint — нужно передавать при каждом `astream()`
+- **DB session:** одна `AsyncSession` (из `Depends(get_db)`) живёт весь WS connection и используется всеми nodes. `expire_on_commit=False` (database.py:6) предотвращает инвалидацию ORM-объектов после commit внутри nodes
+- **"stop" non-preemptive:** цикл `_handle_messages` блокируется на `_run_graph()` — команда "stop" обрабатывается только после завершения текущего graph execution
+- **Disconnect cleanup:** при `WebSocketDisconnect` ws.py сначала закрывает orphaned child sessions в DB (`stop_session(db, child_id)` для каждого `runtime.get_children()`), затем вызывает `runtime.stop_session(session_id)`
+- **Singleton:** `_compiled_graph` — module-level, устанавливается в lifespan, доступ через `get_graph()`
+
+---
+
+## 5. Dependency Graph
+
+### 5.1 Зависимости сервисов
+
+```
+main.py (lifespan)
+  ├─→ graph_service.build_graph(checkpointer)
+  └─→ graph_service._compiled_graph (singleton)
+
+ws.py (WebSocket handler)
+  ├─→ graph_service.get_graph()        — скомпилированный граф
+  ├─→ runtime.start_session()          — запуск CLI config
+  ├─→ runtime.is_running()             — проверка перед start
+  ├─→ runtime.get_children()           — orphaned children при disconnect
+  ├─→ runtime.stop_session()           — cleanup
+  ├─→ session_service                  — CRUD сессий
+  ├─→ agent_link_service               — handoff targets
+  └─→ orchestrator_service             — format_handoff_instructions
+
+graph_service
+  ├─→ runtime.send_message()           — CLI subprocess
+  ├─→ runtime.start_session()          — sub-agent config
+  ├─→ runtime.stop_session()           — sub-agent cleanup
+  ├─→ orchestrator_service             — parse_handoff_block, _build_agent_prompt
+  ├─→ session_service                  — create/get/stop session, add_message
+  └─→ agent_link_service               — get_agent_handoff_targets
+
+runtime (AgentRuntime)
+  ├─→ budget (BudgetTracker)           — встроен в __init__
+  ├─→ circuit_breaker (CircuitBreaker) — встроен в __init__
+  ├─→ auth_service                     — ⚠ lazy import в send_message()
+  └─→ telemetry                        — ⚠ lazy import в send_message()
+
+eval_service
+  └─→ judge_service                    — LLM-as-Judge
+
+memory_service
+  └─→ Voyage AI (external)             — embeddings
+```
+
+### 5.2 Hidden Dependencies (lazy imports)
+
+| Где | Что импортируется | Строка | Почему скрыто |
+|-----|-------------------|--------|---------------|
+| `runtime.send_message()` | `auth_service.get_current_access_token` | runtime.py:100 | `from app.services.auth_service import ...` внутри метода |
+| `runtime.send_message()` | `telemetry.get_langfuse` | runtime.py:123 | `from app.services.telemetry import ...` внутри метода |
+| `runtime.run_task()` | `pathlib.Path` | runtime.py:237 | Не влияет на тестирование |
+
+Lazy imports в runtime нужны для избежания циклических зависимостей, но скрывают реальные зависимости от статического анализа.
+
+### 5.3 Module-level Singletons
+
+| Singleton | Файл | Mutable | Инициализация |
+|-----------|------|---------|---------------|
+| `runtime` | runtime.py:419 | Да (_processes, _budget, _breaker) | При импорте модуля |
+| `_compiled_graph` | graph_service.py:301 | Да | В main.py lifespan |
+| `_langfuse` | telemetry.py:12 | Да | При импорте модуля (если `LANGFUSE_SECRET_KEY` установлен) |
+| `_code_verifier` | auth_service.py:21 | Да | При вызове login |
+| `_oauth_state` | auth_service.py:22 | Да | При вызове login |
+| `settings` | config.py:29 | Нет | При импорте |
+| `engine` | database.py:5 | Нет | При импорте |
+
+5 из 7 singletons имеют mutable state. `runtime` и `_compiled_graph` — ключевые для работы приложения.
+
+---
+
+## 6. How-to Guides
+
+### 6.1 Как добавить новый CRUD ресурс
+
+См. [CLAUDE.md → API-конвенции](CLAUDE.md) — 5 файлов: model → schema → service → router → main.py.
+
+### 6.2 Как добавить новый тип WS-события
+
+**6 файлов:**
+
+1. **Backend — генерация события:**
+   - `api/app/services/graph_service.py` или `api/app/routers/ws.py` — добавить `await ws.send_json({"type": "new_event", ...})`
+   - Если событие из node — в соответствующем node в graph_service
+   - Если событие из WS handler — в ws.py
+
+2. **Backend — sub-agent prefix (если нужен):**
+   - `api/app/services/graph_service.py` `run_agent_node()` — добавить prefix `sub_agent_` для depth>0
+
+3. **Frontend — тип:**
+   - `web/src/types/index.ts` — добавить в `WsIncoming` union type и interface
+
+4. **Frontend — обработка:**
+   - `web/src/hooks/useChat.ts` — добавить `case "new_event":` в `handleEvent` switch
+
+5. **Frontend — отображение:**
+   - `web/src/components/ChatWindow.tsx` или создать новый компонент — рендеринг события
+
+6. **Тест:**
+   - Frontend тест для нового case в handleEvent
+
+### 6.3 Как добавить новый LangGraph node
+
+**4 файла:**
+
+1. **Node function** — `api/app/services/graph_service.py`:
+   ```python
+   async def new_node(state: WorkflowState, config: RunnableConfig) -> dict:
+       # Получить websocket/db из config["configurable"]
+       ws: WebSocket = config["configurable"]["websocket"]
+       db: AsyncSession = config["configurable"]["db"]
+       # ... логика ...
+       return {"field": new_value}  # partial update WorkflowState
+   ```
+
+2. **Routing function** (если нужна) — `api/app/services/graph_service.py`:
+   ```python
+   def route_after_new_node(state: WorkflowState) -> Literal["next_node", "__end__"]:
+       if state.get("some_condition"):
+           return "next_node"
+       return END
+   ```
+
+3. **Регистрация в графе** — `api/app/services/graph_service.py` → `build_graph()`:
+   ```python
+   graph.add_node("new_node", new_node)
+   graph.add_edge("previous_node", "new_node")          # или
+   graph.add_conditional_edges("previous_node", route_fn) # conditional
+   ```
+
+4. **Тест** — `api/tests/test_graph_service.py`
+
+**Если node использует `interrupt()`** — дополнительно обновить `_handle_messages` в `api/app/routers/ws.py` для обработки нового типа resume.
+
+**Если node генерирует новые WS-события** — дополнительно см. секцию 6.2.
+
+### 6.4 Как добавить новую страницу frontend
+
+**4 файла:**
+
+1. **Page component** — `web/src/pages/NewPage.tsx`:
+   ```tsx
+   export function NewPage() {
+     // hooks для данных
+     return <div>...</div>
+   }
+   ```
+
+2. **Route** — `web/src/App.tsx`:
+   ```tsx
+   <Route path="/new-page" element={<NewPage />} />
+   ```
+
+3. **Hook** (если нужны данные) — `web/src/hooks/useNewResource.ts`:
+   ```tsx
+   export function useNewResources() {
+     return useQuery({ queryKey: ["new-resources"], queryFn: getNewResources })
+   }
+   ```
+
+4. **API layer** (если новый endpoint) — `web/src/api/newResource.ts`:
+   ```tsx
+   export async function getNewResources(): Promise<NewResource[]> {
+     const res = await client.get("/api/new-resources")
+     return res.data
+   }
+   ```
+
+**Конвенции:** именованные экспорты, PascalCase для компонентов, camelCase для утилит. См. [CLAUDE.md → Frontend конвенции](CLAUDE.md).
