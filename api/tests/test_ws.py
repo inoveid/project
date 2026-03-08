@@ -6,7 +6,6 @@ import pytest
 from starlette.testclient import TestClient
 
 from app.main import app
-from app.routers.ws import _parse_handoff_block
 from app.services.session_service import SessionNotFoundError
 
 
@@ -131,41 +130,6 @@ def test_ws_stop_message():
         mock_runtime.stop_session.assert_called_once_with(session_id)
 
 
-def test_ws_message_streams_response():
-    session_id = uuid.uuid4()
-    session = _make_session_mock(session_id)
-
-    async def mock_stream_response(websocket, db, sid, content, agent, targets, chain=None):
-        await websocket.send_json({"type": "assistant_text", "content": "Hello"})
-        await websocket.send_json({"type": "tool_use", "tool_name": "read", "tool_input": {}})
-        await websocket.send_json({"type": "done"})
-
-    with (
-        patch(f"{WS_SERVICE}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS_SERVICE}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
-        patch(f"{WS_SERVICE}.runtime") as mock_runtime,
-        patch(f"{WS_SERVICE}.add_message", new_callable=AsyncMock) as mock_add_msg,
-        patch(f"{WS_SERVICE}._stream_response", side_effect=mock_stream_response),
-    ):
-        mock_runtime.is_running.return_value = True
-
-        client = TestClient(app)
-        with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
-            ws.send_json({"type": "message", "content": "Hi"})
-
-            events = []
-            for _ in range(3):
-                events.append(ws.receive_json())
-
-            types = [e["type"] for e in events]
-            assert "assistant_text" in types
-            assert "tool_use" in types
-            assert "done" in types
-
-        # user message saved by _handle_messages before _stream_response
-        mock_add_msg.assert_called_once()
-        assert mock_add_msg.call_args.args[2] == "user"
-
 
 def test_ws_starts_runtime_if_not_running():
     session_id = uuid.uuid4()
@@ -190,44 +154,3 @@ def test_ws_starts_runtime_if_not_running():
         assert call_kwargs["session_id"] == session_id
         assert call_kwargs["workdir"] == "/tmp/project"
         assert call_kwargs["system_prompt"] == "You are helpful"
-
-
-# --- Handoff parsing tests ---
-
-
-def test_parse_handoff_block_valid():
-    text = 'Some response text\n```handoff\n{"to": "Reviewer", "message": "Please review"}\n```'
-    result = _parse_handoff_block(text)
-    assert result == {"to": "Reviewer", "message": "Please review"}
-
-
-def test_parse_handoff_block_invalid_json():
-    text = '```handoff\n{not valid json}\n```'
-    result = _parse_handoff_block(text)
-    assert result is None
-
-
-def test_parse_handoff_block_missing_fields():
-    text = '```handoff\n{"to": "Reviewer"}\n```'
-    result = _parse_handoff_block(text)
-    assert result is None
-
-    text2 = '```handoff\n{"message": "do stuff"}\n```'
-    result2 = _parse_handoff_block(text2)
-    assert result2 is None
-
-
-def test_parse_handoff_block_no_block():
-    text = "Just a regular response with no handoff block at all."
-    result = _parse_handoff_block(text)
-    assert result is None
-
-
-def test_parse_handoff_block_in_middle_of_text():
-    text = (
-        "I have completed the implementation.\n\n"
-        "Here is a summary of changes.\n\n"
-        '```handoff\n{"to": "QA", "message": "Please run tests"}\n```\n'
-    )
-    result = _parse_handoff_block(text)
-    assert result == {"to": "QA", "message": "Please run tests"}

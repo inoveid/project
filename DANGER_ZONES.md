@@ -22,10 +22,10 @@
 
 | Тест-файл | Статус | Проблема |
 |-----------|--------|----------|
-| `test_ws.py` | **СЛОМАН** | Импортирует `_parse_handoff_block` из ws.py — функция перенесена в utils/handoff |
+| `test_ws.py` | Частично | 6 тестов WS-протокола работают. Удалён `test_ws_message_streams_response` (патчил P3-функцию `_stream_response`) |
 | `test_runtime.py` | Существует | — |
 | `test_graph_service.py` | **НЕ СУЩЕСТВУЕТ** | 0 тестов для nodes, routing, interrupt |
-| `test_handoff.py` | **НЕ СУЩЕСТВУЕТ** | 0 тестов для parse_handoff_block, build_agent_prompt |
+| `test_handoff.py` | Существует | 15 тестов: parse_handoff_block, format_handoff_instructions, build_agent_prompt |
 
 При изменении core-модулей (runtime, graph_service, ws) автоматической защиты практически нет.
 
@@ -67,7 +67,8 @@
 **Какие тесты запустить:**
 ```bash
 cd api && pytest tests/test_runtime.py -v
-cd api && pytest tests/test_ws.py -v      # ВНИМАНИЕ: сломан (см. таблицу выше)
+cd api && pytest tests/test_ws.py -v
+cd api && pytest tests/test_handoff.py -v
 cd web && npm test -- --run useChat
 ```
 
@@ -106,7 +107,8 @@ cd web && npm test -- --run useChat
 **Какие тесты запустить:**
 ```bash
 # test_graph_service.py НЕ СУЩЕСТВУЕТ — ручная проверка обязательна
-cd api && pytest tests/test_ws.py -v  # ВНИМАНИЕ: сломан
+cd api && pytest tests/test_handoff.py -v
+cd api && pytest tests/test_ws.py -v
 ```
 
 ---
@@ -145,7 +147,7 @@ cd api && pytest tests/test_ws.py -v  # ВНИМАНИЕ: сломан
 
 **Какие тесты запустить:**
 ```bash
-cd api && pytest tests/test_ws.py -v  # ВНИМАНИЕ: сломан (ImportError на строке 9)
+cd api && pytest tests/test_ws.py -v
 ```
 
 ---
