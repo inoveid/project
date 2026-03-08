@@ -130,7 +130,6 @@ def test_ws_stop_message():
         mock_runtime.stop_session.assert_called_once_with(session_id)
 
 
-
 def test_ws_starts_runtime_if_not_running():
     session_id = uuid.uuid4()
     session = _make_session_mock(session_id)
