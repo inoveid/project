@@ -24,4 +24,4 @@ coverage/
 
 
 # Claude
-.claude*.tsbuildinfo
+.claude

@@ -309,8 +309,9 @@ class AgentRuntime:
     ) -> AsyncIterator[dict[str, Any]]:
         if not process.stdout:
             return
-        
+
         stderr_task = asyncio.create_task(process.stderr.read()) if process.stderr else None
+        had_streaming_text = False
 
         try:
             async for line in process.stdout:
@@ -324,8 +325,28 @@ class AgentRuntime:
                     logger.warning("Non-JSON line from claude: %s", text)
                     continue
 
+                # Final assistant message with content blocks (BUG-1 + BUG-2):
+                # Iterate all blocks, yield tool_use/tool_result individually,
+                # skip text if streaming chunks already sent it.
+                if event.get("type") == "assistant" and isinstance(event.get("message"), dict):
+                    for block in event["message"].get("content", []):
+                        block_type = block.get("type")
+                        if block_type == "text" and not had_streaming_text:
+                            yield {"type": "assistant_text", "content": block.get("text", "")}
+                        elif block_type == "tool_use":
+                            yield {
+                                "type": "tool_use",
+                                "tool_name": block.get("name", ""),
+                                "tool_input": block.get("input", {}),
+                            }
+                        elif block_type == "tool_result":
+                            yield {"type": "tool_result", "content": str(block.get("content", ""))}
+                    continue
+
                 parsed = self._parse_event(session_id, event)
                 if parsed:
+                    if parsed["type"] == "assistant_text":
+                        had_streaming_text = True
                     yield parsed
 
             try:
@@ -367,11 +388,7 @@ class AgentRuntime:
             return None
 
         if event_type == "assistant":
-            message = event.get("message")
-            if isinstance(message, dict):
-                for block in message.get("content", []):
-                    if block.get("type") == "text":
-                        return {"type": "assistant_text", "content": block.get("text", "")}
+            # Final message with content blocks is handled in _read_stream
             subtype = event.get("subtype")
             if subtype == "text":
                 return {"type": "assistant_text", "content": event.get("text", "")}
