@@ -15,6 +15,14 @@ class Settings(BaseSettings):
 
     voyage_api_key: str = ""
 
+    # Circuit breaker settings
+    cb_failure_threshold: int = 5
+    cb_recovery_timeout: float = 30.0
+    cb_failure_window: float = 60.0
+
+    # Budget settings
+    budget_session_limit_usd: float = 2.0
+
     model_config = {"env_prefix": "AC_", "env_file": ".env"}
 
 

@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from app.config import settings
+from app.services.budget import BudgetExceededError, BudgetTracker
+from app.services.circuit_breaker import CircuitBreaker, CircuitOpenError
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +43,15 @@ class AgentRuntime:
 
     def __init__(self) -> None:
         self._processes: dict[uuid.UUID, RunningProcess] = {}
+        self._budget = BudgetTracker(
+            default_session_limit=settings.budget_session_limit_usd,
+        )
+        self._breaker = CircuitBreaker(
+            failure_threshold=settings.cb_failure_threshold,
+            recovery_timeout=settings.cb_recovery_timeout,
+            failure_window=settings.cb_failure_window,
+            name="claude_cli",
+        )
 
     async def start_session(
         self,
@@ -61,6 +72,7 @@ class AgentRuntime:
             claude_session_id=claude_session_id,
             allowed_tools=allowed_tools or [],
         )
+        self._budget.start_session(str(session_id))
 
     async def send_message(
         self, session_id: uuid.UUID, content: str
@@ -78,6 +90,12 @@ class AgentRuntime:
         token = await get_current_access_token()
         if not token:
             raise AgentRuntimeError("Not authenticated. Please login first.")
+
+        # Budget check: fail if session budget is exhausted
+        self._budget.check_budget(str(session_id))
+
+        # Circuit breaker: fail-fast if CLI is known to be down
+        self._breaker.check()
 
         env = {**os.environ, "CLAUDE_CODE_OAUTH_TOKEN": token}
 
@@ -106,6 +124,7 @@ class AgentRuntime:
         input_tokens = 0
         output_tokens = 0
         cost_usd = None
+        call_succeeded = False
 
         try:
             async for event in self._read_stream(session_id, process):
@@ -116,8 +135,26 @@ class AgentRuntime:
                     input_tokens = usage.get("input_tokens", 0)
                     output_tokens = usage.get("output_tokens", 0)
                     cost_usd = event.get("cost_usd")
+                    call_succeeded = True
+
+                    # Record usage and emit budget events
+                    budget_event = self._budget.record_usage(
+                        session_id=str(session_id),
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        reported_cost=cost_usd,
+                    )
+                    if budget_event:
+                        yield budget_event
+
                     continue  # не отправляем result на фронтенд
                 yield event
+        except TransientAgentError:
+            self._breaker.record_failure()
+            raise
+        else:
+            if call_succeeded:
+                self._breaker.record_success()
         finally:
             output_text = "".join(output_parts)
             if generation:
@@ -158,6 +195,7 @@ class AgentRuntime:
         running = self._processes.pop(session_id, None)
         if running:
             await self._kill_process(running)
+        self._budget.remove_session(str(session_id))
 
     async def run_task(
         self,
