@@ -254,3 +254,96 @@ async def test_run_task_cleans_up_session(agent_runtime, tmp_path):
                 pass
 
     stop_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_message_kills_only_own_session(agent_runtime):
+    """send_message should kill only the process of the current session, not others."""
+    import sys
+    from unittest.mock import MagicMock
+
+    # Pre-inject mock auth_service to avoid import chain issues
+    mock_auth_module = MagicMock()
+    mock_auth_module.get_current_access_token = AsyncMock(return_value="token")
+    sys.modules["app.services.auth_service"] = mock_auth_module
+
+    # Pre-inject mock telemetry
+    mock_telemetry = MagicMock()
+    mock_telemetry.get_langfuse = MagicMock(return_value=None)
+    sys.modules["app.services.telemetry"] = mock_telemetry
+
+    try:
+        sid1 = uuid.uuid4()
+        sid2 = uuid.uuid4()
+
+        mock_proc1 = AsyncMock()
+        mock_proc1.returncode = None
+        mock_proc2 = AsyncMock()
+        mock_proc2.returncode = None
+
+        await agent_runtime.start_session(sid1, "/tmp/a", "test")
+        await agent_runtime.start_session(sid2, "/tmp/b", "test")
+        agent_runtime._processes[sid1].process = mock_proc1
+        agent_runtime._processes[sid2].process = mock_proc2
+
+        with patch.object(agent_runtime, "_kill_process", new_callable=AsyncMock) as kill_mock, \
+             patch.object(agent_runtime, "_launch_process", new_callable=AsyncMock) as launch_mock:
+            # Make launch return a mock process with stdout/stdin
+            mock_new_proc = AsyncMock()
+            mock_new_proc.stdin = AsyncMock()
+            mock_new_proc.stdin.write = lambda x: None
+            mock_new_proc.stdin.write_eof = lambda: None
+            mock_new_proc.stdout = AsyncMock()
+            mock_new_proc.stdout.__aiter__ = AsyncMock(return_value=iter([]))
+            mock_new_proc.stderr = None
+            mock_new_proc.returncode = 0
+            mock_new_proc.wait = AsyncMock(return_value=0)
+            launch_mock.return_value = mock_new_proc
+
+            # Consume the async generator
+            try:
+                async for _ in agent_runtime.send_message(sid1, "hello"):
+                    pass
+            except Exception:
+                pass
+
+            # _kill_process should be called with sid1's running process, NOT sid2's
+            kill_mock.assert_awaited_once()
+            killed_running = kill_mock.call_args[0][0]
+            assert killed_running.session_id == sid1
+    finally:
+        sys.modules.pop("app.services.auth_service", None)
+        sys.modules.pop("app.services.telemetry", None)
+
+
+@pytest.mark.asyncio
+async def test_start_session_rejects_busy_workdir(agent_runtime):
+    """start_session should reject if workdir is actively used by another session."""
+    sid1 = uuid.uuid4()
+    sid2 = uuid.uuid4()
+
+    await agent_runtime.start_session(sid1, "/shared/workdir", "test")
+    # Simulate active process
+    mock_proc = AsyncMock()
+    mock_proc.returncode = None
+    agent_runtime._processes[sid1].process = mock_proc
+
+    with pytest.raises(AgentRuntimeError, match="already in use"):
+        await agent_runtime.start_session(sid2, "/shared/workdir", "test")
+
+
+@pytest.mark.asyncio
+async def test_start_session_allows_workdir_after_process_exits(agent_runtime):
+    """start_session should allow workdir if previous process has exited."""
+    sid1 = uuid.uuid4()
+    sid2 = uuid.uuid4()
+
+    await agent_runtime.start_session(sid1, "/shared/workdir", "test")
+    # Simulate exited process
+    mock_proc = AsyncMock()
+    mock_proc.returncode = 0
+    agent_runtime._processes[sid1].process = mock_proc
+
+    # Should not raise
+    await agent_runtime.start_session(sid2, "/shared/workdir", "test")
+    assert agent_runtime.is_running(sid2)

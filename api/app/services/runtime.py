@@ -64,6 +64,14 @@ class AgentRuntime:
         if session_id in self._processes:
             raise AgentRuntimeError(f"Session {session_id} already running")
 
+        # Reject if workdir is actively used by another session
+        effective_workdir = workdir or settings.workspace_path
+        for sid, r in self._processes.items():
+            if r.workdir == effective_workdir and r.process and r.process.returncode is None:
+                raise AgentRuntimeError(
+                    f"Workdir {effective_workdir} already in use by session {sid}"
+                )
+
         self._processes[session_id] = RunningProcess(
             process=None,
             session_id=session_id,
@@ -81,9 +89,9 @@ class AgentRuntime:
         if not running:
             raise AgentRuntimeError(f"Session {session_id} not running")
 
-        # Kill ALL stale CLI processes (any session may lock the workdir)
-        for r in self._processes.values():
-            await self._kill_process(r)
+        # Kill stale CLI process for THIS session only
+        if running.process and running.process.returncode is None:
+            await self._kill_process(running)
 
         from app.services.auth_service import get_current_access_token
 
@@ -142,6 +150,7 @@ class AgentRuntime:
                         session_id=str(session_id),
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
+                        model=event.get("model"),
                         reported_cost=cost_usd,
                     )
                     if budget_event:
@@ -240,7 +249,7 @@ class AgentRuntime:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type(TransientAgentError),
+        retry=retry_if_exception_type(OSError),
     )
     async def _launch_process(
         self, cmd: list[str], env: dict, cwd: str
@@ -289,35 +298,43 @@ class AgentRuntime:
         
         stderr_task = asyncio.create_task(process.stderr.read()) if process.stderr else None
 
-        async for line in process.stdout:
-            text = line.decode().strip()
-            if not text:
-                continue
+        try:
+            async for line in process.stdout:
+                text = line.decode().strip()
+                if not text:
+                    continue
 
-            try:
-                event = json.loads(text)
-            except json.JSONDecodeError:
-                logger.warning("Non-JSON line from claude: %s", text)
-                continue
+                try:
+                    event = json.loads(text)
+                except json.JSONDecodeError:
+                    logger.warning("Non-JSON line from claude: %s", text)
+                    continue
 
-            parsed = self._parse_event(session_id, event)
-            if parsed:
-                yield parsed
+                parsed = self._parse_event(session_id, event)
+                if parsed:
+                    yield parsed
 
-        await process.wait()
+            await asyncio.wait_for(process.wait(), timeout=300)
 
-        if stderr_task:
-            stderr = await stderr_task 
-            error_text = stderr.decode().strip()
-            if error_text:
-                if process.returncode != 0:
-                    logger.error("Claude CLI error (rc=%s): %s", process.returncode, error_text)
-                    error_lower = error_text.lower()
-                    if any(word in error_lower for word in ["rate limit", "timeout", "connection"]):
-                        raise TransientAgentError(error_text)
-                    yield {"type": "error", "error": error_text}
-                else:
-                    logger.info("Claude CLI stderr: %s", error_text[:500])
+            if stderr_task:
+                stderr = await stderr_task
+                error_text = stderr.decode().strip()
+                if error_text:
+                    if process.returncode != 0:
+                        logger.error("Claude CLI error (rc=%s): %s", process.returncode, error_text)
+                        error_lower = error_text.lower()
+                        if any(word in error_lower for word in ["rate limit", "timeout", "connection"]):
+                            raise TransientAgentError(error_text)
+                        yield {"type": "error", "error": error_text}
+                    else:
+                        logger.info("Claude CLI stderr: %s", error_text[:500])
+        finally:
+            if stderr_task and not stderr_task.done():
+                stderr_task.cancel()
+                try:
+                    await stderr_task
+                except asyncio.CancelledError:
+                    pass
 
     def _parse_event(
         self, session_id: uuid.UUID, event: dict[str, Any]
@@ -353,6 +370,7 @@ class AgentRuntime:
                 "type": "result",
                 "cost_usd": event.get("cost_usd"),
                 "usage": event.get("usage", {}),
+                "model": event.get("model"),
             }
 
         if event_type == "tool_result":
