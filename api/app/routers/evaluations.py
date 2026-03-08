@@ -1,7 +1,10 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from app.database import get_db
 from app.schemas.evaluation import (
@@ -78,11 +81,15 @@ async def create_eval_run(
             try:
                 await eval_service.execute_eval_run(session, run.id, case_ids=case_ids)
             except Exception:
-                from app.models.evaluation import EvalRun
-                run_obj = await session.get(EvalRun, run.id)
-                if run_obj and run_obj.status == "running":
-                    run_obj.status = "failed"
-                    await session.commit()
+                logger.exception("Eval run %s failed", run.id)
+                try:
+                    from app.models.evaluation import EvalRun
+                    run_obj = await session.get(EvalRun, run.id)
+                    if run_obj and run_obj.status == "running":
+                        run_obj.status = "failed"
+                        await session.commit()
+                except Exception:
+                    logger.exception("Failed to mark eval run %s as failed", run.id)
 
     background_tasks.add_task(_run_eval)
     return run

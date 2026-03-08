@@ -163,7 +163,7 @@ async def judge_agent_output(
         api_key: Anthropic API key (если None — берётся из ANTHROPIC_API_KEY env)
 
     Returns:
-        JudgeResponse с verdict, score, criteria_scores и reasoning
+        Tuple of (JudgeResponse, token_usage dict with input_tokens and output_tokens).
     """
     client = anthropic.AsyncAnthropic(api_key=api_key) if api_key else anthropic.AsyncAnthropic()
 

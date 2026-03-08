@@ -288,6 +288,39 @@ def test_parse_judge_response_fail():
     assert response.score == 0.3
 
 
+@pytest.mark.asyncio
+async def test_run_eval_sets_failed_on_exception(client):
+    """BUG-4: If execute_eval_run raises, the run status must become 'failed'."""
+    run = _make_run()
+    run["status"] = "running"
+
+    mock_session = AsyncMock()
+    mock_run_obj = AsyncMock()
+    mock_run_obj.status = "running"
+    mock_session.get = AsyncMock(return_value=mock_run_obj)
+    mock_session.commit = AsyncMock()
+
+    mock_session_ctx = AsyncMock()
+    mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch(f"{SERVICE}.create_run", new_callable=AsyncMock, return_value=run),
+        patch(f"{SERVICE}.execute_eval_run", new_callable=AsyncMock, side_effect=RuntimeError("boom")),
+        patch("app.database.async_session", return_value=mock_session_ctx),
+    ):
+        resp = await client.post(
+            "/api/eval/runs",
+            json={
+                "name": "fail-run",
+                "prompt_version": "v1.0",
+                "prompt_snapshot": "You are a developer.",
+            },
+        )
+
+    assert resp.status_code == 201
+
+
 def test_parse_judge_response_markdown_fences():
     from app.services.judge_service import _parse_judge_response
     from app.schemas.evaluation import RubricCriterion

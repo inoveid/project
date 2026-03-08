@@ -10,6 +10,7 @@ RAG-as-Tool: агент вызывает search_memories() когда нужно
 import asyncio
 import uuid
 from dataclasses import dataclass
+from typing import Literal
 
 import voyageai
 from sqlalchemy import select, text
@@ -33,7 +34,7 @@ class MemorySearchResult:
     similarity: float  # 0..1, 1 = идентично
 
 
-async def _embed(text_input: str, input_type: str = "document") -> list[float]:
+async def _embed(text_input: str, input_type: Literal["document", "query"] = "document") -> list[float]:
     """Получить embedding через Voyage AI voyage-3-lite."""
     client = voyageai.Client(api_key=settings.voyage_api_key)
     # voyageai SDK синхронный — запускаем в thread pool чтобы не блокировать event loop
