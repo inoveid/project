@@ -1,19 +1,28 @@
-import json
+"""Tests for app.routers.ws — WebSocket handler."""
+
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from starlette.testclient import TestClient
 
 from app.main import app
 from app.services.session_service import SessionNotFoundError
 
+WS = "app.routers.ws"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
 
 def _make_session_mock(session_id, agent_id=None):
     agent_id = agent_id or uuid.uuid4()
     agent = MagicMock()
+    agent.id = agent_id
+    agent.name = "TestAgent"
     agent.config = {"workdir": "/tmp/project"}
     agent.system_prompt = "You are helpful"
+    agent.allowed_tools = []
 
     session = MagicMock()
     session.id = session_id
@@ -25,25 +34,59 @@ def _make_session_mock(session_id, agent_id=None):
     return session
 
 
-WS_SERVICE = "app.routers.ws"
+def _noop_graph():
+    """Mock graph that streams nothing and finishes."""
+    g = MagicMock()
+
+    async def _astream(*args, **kwargs):
+        return
+        yield  # make it an async generator  # noqa: unreachable
+
+    g.astream = _astream
+    return g
 
 
-def _default_patches(session):
-    """Return common patches for WS tests (session + handoff_targets)."""
-    return [
-        patch(f"{WS_SERVICE}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS_SERVICE}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
-    ]
+def _error_graph(error_msg="Graph exploded"):
+    """Mock graph whose astream raises an exception."""
+    g = MagicMock()
+
+    async def _astream(*args, **kwargs):
+        raise RuntimeError(error_msg)
+        yield  # noqa: unreachable — makes it async gen
+
+    g.astream = _astream
+    return g
+
+
+def _capturing_graph():
+    """Mock graph that captures inputs and interrupts on 1st call."""
+    captured = []
+    counter = {"n": 0}
+    g = MagicMock()
+
+    async def _astream(input, config, **kwargs):
+        counter["n"] += 1
+        captured.append(input)
+        if counter["n"] == 1:
+            yield {"__interrupt__": True}
+        else:
+            yield {"messages": []}
+
+    g.astream = _astream
+    g._captured = captured
+    return g
+
+
+# ---------------------------------------------------------------------------
+# Basic connection & error handling
+# ---------------------------------------------------------------------------
 
 
 def test_ws_session_not_found():
-    with (
-        patch(
-            f"{WS_SERVICE}.get_session",
-            new_callable=AsyncMock,
-            side_effect=SessionNotFoundError("not found"),
-        ),
-        patch(f"{WS_SERVICE}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+    with patch(
+        f"{WS}.get_session",
+        new_callable=AsyncMock,
+        side_effect=SessionNotFoundError("not found"),
     ):
         client = TestClient(app)
         with client.websocket_connect(f"/api/ws/sessions/{uuid.uuid4()}") as ws:
@@ -57,9 +100,10 @@ def test_ws_invalid_json():
     session = _make_session_mock(session_id)
 
     with (
-        patch(f"{WS_SERVICE}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS_SERVICE}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
-        patch(f"{WS_SERVICE}.runtime") as mock_runtime,
+        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.runtime") as mock_runtime,
+        patch(f"{WS}.get_graph", return_value=_noop_graph()),
     ):
         mock_runtime.is_running.return_value = True
 
@@ -76,9 +120,10 @@ def test_ws_unknown_message_type():
     session = _make_session_mock(session_id)
 
     with (
-        patch(f"{WS_SERVICE}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS_SERVICE}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
-        patch(f"{WS_SERVICE}.runtime") as mock_runtime,
+        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.runtime") as mock_runtime,
+        patch(f"{WS}.get_graph", return_value=_noop_graph()),
     ):
         mock_runtime.is_running.return_value = True
 
@@ -95,9 +140,10 @@ def test_ws_empty_message_content():
     session = _make_session_mock(session_id)
 
     with (
-        patch(f"{WS_SERVICE}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS_SERVICE}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
-        patch(f"{WS_SERVICE}.runtime") as mock_runtime,
+        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.runtime") as mock_runtime,
+        patch(f"{WS}.get_graph", return_value=_noop_graph()),
     ):
         mock_runtime.is_running.return_value = True
 
@@ -109,14 +155,20 @@ def test_ws_empty_message_content():
             assert "Empty" in data["error"]
 
 
+# ---------------------------------------------------------------------------
+# Stop & runtime lifecycle
+# ---------------------------------------------------------------------------
+
+
 def test_ws_stop_message():
     session_id = uuid.uuid4()
     session = _make_session_mock(session_id)
 
     with (
-        patch(f"{WS_SERVICE}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS_SERVICE}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
-        patch(f"{WS_SERVICE}.runtime") as mock_runtime,
+        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.runtime") as mock_runtime,
+        patch(f"{WS}.get_graph", return_value=_noop_graph()),
     ):
         mock_runtime.is_running.return_value = True
         mock_runtime.stop_session = AsyncMock()
@@ -135,9 +187,10 @@ def test_ws_starts_runtime_if_not_running():
     session = _make_session_mock(session_id)
 
     with (
-        patch(f"{WS_SERVICE}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS_SERVICE}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
-        patch(f"{WS_SERVICE}.runtime") as mock_runtime,
+        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.runtime") as mock_runtime,
+        patch(f"{WS}.get_graph", return_value=_noop_graph()),
     ):
         mock_runtime.is_running.return_value = False
         mock_runtime.start_session = AsyncMock()
@@ -153,3 +206,351 @@ def test_ws_starts_runtime_if_not_running():
         assert call_kwargs["session_id"] == session_id
         assert call_kwargs["workdir"] == "/tmp/project"
         assert call_kwargs["system_prompt"] == "You are helpful"
+
+
+# ---------------------------------------------------------------------------
+# Message → DB + Graph
+# ---------------------------------------------------------------------------
+
+
+def test_ws_message_saves_to_db():
+    """Incoming message is saved to DB via add_message before graph runs."""
+    session_id = uuid.uuid4()
+    session = _make_session_mock(session_id)
+    mock_add = AsyncMock()
+
+    with (
+        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.runtime") as mock_runtime,
+        patch(f"{WS}.add_message", mock_add),
+        patch(f"{WS}.get_graph", return_value=_noop_graph()),
+    ):
+        mock_runtime.is_running.return_value = True
+
+        client = TestClient(app)
+        with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+            ws.send_json({"type": "message", "content": "Hello agent"})
+            data = ws.receive_json()
+            assert data["type"] == "done"
+
+        mock_add.assert_called_once()
+        args = mock_add.call_args.args
+        assert args[1] == session_id
+        assert args[2] == "user"
+        assert args[3] == "Hello agent"
+
+
+def test_ws_message_triggers_run_graph():
+    """Message triggers graph.astream with correct initial WorkflowState."""
+    session_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    session = _make_session_mock(session_id, agent_id=agent_id)
+    session.agent.name = "Dev"
+
+    captured = {}
+    g = MagicMock()
+
+    async def _astream(input, config, **kwargs):
+        captured["state"] = input
+        return
+        yield  # noqa: unreachable
+
+    g.astream = _astream
+
+    with (
+        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.runtime") as mock_runtime,
+        patch(f"{WS}.add_message", new_callable=AsyncMock),
+        patch(f"{WS}.get_graph", return_value=g),
+    ):
+        mock_runtime.is_running.return_value = True
+
+        client = TestClient(app)
+        with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+            ws.send_json({"type": "message", "content": "Do the thing"})
+            ws.receive_json()  # done
+
+    state = captured["state"]
+    assert state["main_session_id"] == str(session_id)
+    assert state["current_session_id"] == str(session_id)
+    assert state["current_agent_id"] == str(agent_id)
+    assert state["current_agent_name"] == "Dev"
+    assert state["task"] == "Do the thing"
+    assert state["depth"] == 0
+    assert state["chain"] == []
+    assert state["handoff_target"] is None
+
+
+# ---------------------------------------------------------------------------
+# Interrupt / Approve / Reject
+# ---------------------------------------------------------------------------
+
+
+def test_ws_run_graph_sets_interrupted():
+    """__interrupt__ in graph output sets interrupted=True; no 'done' sent."""
+    session_id = uuid.uuid4()
+    session = _make_session_mock(session_id)
+
+    g = MagicMock()
+
+    async def _astream(*args, **kwargs):
+        yield {"__interrupt__": True}
+
+    g.astream = _astream
+
+    with (
+        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.runtime") as mock_runtime,
+        patch(f"{WS}.add_message", new_callable=AsyncMock),
+        patch(f"{WS}.get_graph", return_value=g),
+        patch(f"{WS}.stop_session", new_callable=AsyncMock),
+    ):
+        mock_runtime.is_running.return_value = True
+        mock_runtime.stop_session = AsyncMock()
+        mock_runtime.get_children.return_value = set()
+
+        client = TestClient(app)
+        with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+            ws.send_json({"type": "message", "content": "trigger handoff"})
+            # Verify interrupted state: a new message should get error
+            ws.send_json({"type": "message", "content": "another"})
+            data = ws.receive_json()
+            assert data["type"] == "error"
+            assert "approval" in data["error"].lower()
+
+
+def test_ws_approve_resumes_graph():
+    """Approve when interrupted resumes graph with Command(resume=True)."""
+    session_id = uuid.uuid4()
+    session = _make_session_mock(session_id)
+    g = _capturing_graph()
+
+    with (
+        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.runtime") as mock_runtime,
+        patch(f"{WS}.add_message", new_callable=AsyncMock),
+        patch(f"{WS}.get_graph", return_value=g),
+        patch(f"{WS}.stop_session", new_callable=AsyncMock),
+    ):
+        mock_runtime.is_running.return_value = True
+        mock_runtime.stop_session = AsyncMock()
+        mock_runtime.get_children.return_value = set()
+
+        client = TestClient(app)
+        with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+            ws.send_json({"type": "message", "content": "start"})
+            ws.send_json({"type": "approve"})
+            data = ws.receive_json()
+            assert data["type"] == "done"
+
+    from langgraph.types import Command
+    resume_input = g._captured[1]
+    assert isinstance(resume_input, Command)
+    assert resume_input.resume is True
+
+
+def test_ws_reject_resumes_graph():
+    """Reject when interrupted resumes graph with Command(resume=False)."""
+    session_id = uuid.uuid4()
+    session = _make_session_mock(session_id)
+    g = _capturing_graph()
+
+    with (
+        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.runtime") as mock_runtime,
+        patch(f"{WS}.add_message", new_callable=AsyncMock),
+        patch(f"{WS}.get_graph", return_value=g),
+        patch(f"{WS}.stop_session", new_callable=AsyncMock),
+    ):
+        mock_runtime.is_running.return_value = True
+        mock_runtime.stop_session = AsyncMock()
+        mock_runtime.get_children.return_value = set()
+
+        client = TestClient(app)
+        with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+            ws.send_json({"type": "message", "content": "start"})
+            ws.send_json({"type": "reject"})
+            data = ws.receive_json()
+            assert data["type"] == "done"
+
+    from langgraph.types import Command
+    resume_input = g._captured[1]
+    assert isinstance(resume_input, Command)
+    assert resume_input.resume is False
+
+
+def test_ws_message_while_interrupted_sends_error():
+    """Message while graph is interrupted returns approval error."""
+    session_id = uuid.uuid4()
+    session = _make_session_mock(session_id)
+
+    g = MagicMock()
+
+    async def _astream(*args, **kwargs):
+        yield {"__interrupt__": True}
+
+    g.astream = _astream
+
+    with (
+        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.runtime") as mock_runtime,
+        patch(f"{WS}.add_message", new_callable=AsyncMock),
+        patch(f"{WS}.get_graph", return_value=g),
+        patch(f"{WS}.stop_session", new_callable=AsyncMock),
+    ):
+        mock_runtime.is_running.return_value = True
+        mock_runtime.stop_session = AsyncMock()
+        mock_runtime.get_children.return_value = set()
+
+        client = TestClient(app)
+        with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+            ws.send_json({"type": "message", "content": "trigger"})
+            ws.send_json({"type": "message", "content": "new message"})
+            data = ws.receive_json()
+            assert data["type"] == "error"
+            assert "approval" in data["error"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Disconnect cleanup
+# ---------------------------------------------------------------------------
+
+
+def test_ws_disconnect_cleanup():
+    """On disconnect, child sessions stopped in DB and main runtime cleaned up."""
+    session_id = uuid.uuid4()
+    child_id = uuid.uuid4()
+    session = _make_session_mock(session_id)
+    mock_stop_svc = AsyncMock()
+
+    with (
+        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.runtime") as mock_runtime,
+        patch(f"{WS}.stop_session", mock_stop_svc),
+        patch(f"{WS}.get_graph", return_value=_noop_graph()),
+    ):
+        mock_runtime.is_running.return_value = True
+        mock_runtime.get_children.return_value = {child_id}
+        mock_runtime.stop_session = AsyncMock()
+
+        client = TestClient(app)
+        with client.websocket_connect(f"/api/ws/sessions/{session_id}"):
+            pass  # disconnect immediately
+
+        mock_stop_svc.assert_called_once()
+        assert mock_stop_svc.call_args.args[1] == child_id
+        mock_runtime.stop_session.assert_called_once_with(session_id)
+
+
+# ---------------------------------------------------------------------------
+# Handoff targets in prompt
+# ---------------------------------------------------------------------------
+
+
+def test_ws_handoff_targets_appended_to_prompt():
+    """Handoff targets are appended to system_prompt for runtime."""
+    session_id = uuid.uuid4()
+    session = _make_session_mock(session_id)
+
+    target = MagicMock()
+    target.name = "Reviewer"
+    target.role = "reviewer"
+    target.description = "Reviews code"
+
+    with (
+        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[target]),
+        patch(f"{WS}.runtime") as mock_runtime,
+        patch(f"{WS}.get_graph", return_value=_noop_graph()),
+    ):
+        mock_runtime.is_running.return_value = False
+        mock_runtime.start_session = AsyncMock()
+        mock_runtime.stop_session = AsyncMock()
+
+        client = TestClient(app)
+        with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+            ws.send_json({"type": "stop"})
+            ws.receive_json()
+
+        call_kwargs = mock_runtime.start_session.call_args.kwargs
+        assert "Reviewer" in call_kwargs["system_prompt"]
+        assert "handoff" in call_kwargs["system_prompt"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Error handling
+# ---------------------------------------------------------------------------
+
+
+def test_ws_start_session_error_closes_connection():
+    """If runtime.start_session raises, error is sent and WS closed with 4000."""
+    session_id = uuid.uuid4()
+    session = _make_session_mock(session_id)
+
+    with (
+        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.runtime") as mock_runtime,
+        patch(f"{WS}.get_graph", return_value=_noop_graph()),
+    ):
+        mock_runtime.is_running.return_value = False
+        mock_runtime.start_session = AsyncMock(side_effect=RuntimeError("workdir busy"))
+
+        client = TestClient(app)
+        with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+            data = ws.receive_json()
+            assert data["type"] == "error"
+            assert "workdir busy" in data["error"]
+
+
+def test_ws_graph_error_sends_error_event():
+    """If graph.astream raises, error event is sent and 'done' follows."""
+    session_id = uuid.uuid4()
+    session = _make_session_mock(session_id)
+
+    with (
+        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.runtime") as mock_runtime,
+        patch(f"{WS}.add_message", new_callable=AsyncMock),
+        patch(f"{WS}.get_graph", return_value=_error_graph("LLM timeout")),
+    ):
+        mock_runtime.is_running.return_value = True
+
+        client = TestClient(app)
+        with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+            ws.send_json({"type": "message", "content": "hello"})
+            data = ws.receive_json()
+            assert data["type"] == "error"
+            assert "LLM timeout" in data["error"]
+            # After error, done is sent (interrupted=False)
+            done = ws.receive_json()
+            assert done["type"] == "done"
+
+
+def test_ws_approve_when_not_interrupted_is_unknown():
+    """Approve/reject when not interrupted goes to 'else' → unknown type error."""
+    session_id = uuid.uuid4()
+    session = _make_session_mock(session_id)
+
+    with (
+        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.runtime") as mock_runtime,
+        patch(f"{WS}.get_graph", return_value=_noop_graph()),
+    ):
+        mock_runtime.is_running.return_value = True
+
+        client = TestClient(app)
+        with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+            ws.send_json({"type": "approve"})
+            data = ws.receive_json()
+            assert data["type"] == "error"
+            assert "Unknown type" in data["error"]
