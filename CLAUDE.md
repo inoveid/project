@@ -2,6 +2,11 @@
 
 Web-приложение для управления AI-агентами. Python FastAPI (backend) + React TypeScript (frontend) + PostgreSQL.
 
+## Документация
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) — архитектурная карта: модули, потоки данных, WS protocol, LangGraph workflow, dependency graph, how-to guides
+- [DANGER_ZONES.md](DANGER_ZONES.md) — файлы с высоким blast radius: что проверять после изменений, какие тесты запускать
+
 ## Структура
 
 ```
