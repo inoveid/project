@@ -1,8 +1,8 @@
 # Архитектурный анализ Agent Console: AI-first разработка
 
 **Дата:** 2026-03-08
-**Версия:** 3.0 (после независимой ревизии оркестрации)
-**Метод:** Трёхпроходный анализ — первичный (v1), коррекция (v2), независимая ревизия (v3)
+**Версия:** 4.0 (после критической самопроверки v4)
+**Метод:** Четырёхпроходный анализ — первичный (v1), коррекция (v2), независимая ревизия (v3), критическая самопроверка (v4)
 
 ---
 
@@ -21,6 +21,7 @@
 11. [Требует дополнительного изучения](#11-требует-дополнительного-изучения)
 12. [Ошибки первого прохода анализа](#12-ошибки-первого-прохода-анализа)
 13. [Ошибки второго прохода анализа (ревью v3)](#13-ошибки-второго-прохода-анализа-ревью-v3)
+14. [Ошибки третьего прохода анализа (ревью v4)](#14-ошибки-третьего-прохода-анализа-ревью-v4)
 
 ---
 
@@ -34,12 +35,12 @@
 | Критерий | Оценка | Комментарий |
 |----------|--------|-------------|
 | Структура директорий | 8/10 | Чёткое разделение api/web, слоёная архитектура |
-| Модульность | 6/10 | CRUD-модули хороши; runtime (366), graph_service (303) — монолиты |
+| Модульность | 5/10 | CRUD-модули хороши; runtime (365, 4 класса), graph_service (303) — монолиты; @retry мёртвая логика |
 | Типизация | 9/10 | TypeScript strict, Pydantic v2, SQLAlchemy Mapped |
 | Тестовое покрытие | 3/10 | test_ws.py устарел (P3), 0 тестов graph_service/orchestrator, 100% mock-based |
 | Документация | 6/10 | Хороший CLAUDE.md, но нет ARCHITECTURE.md, WS protocol, state contracts |
-| AI-agent readiness | 6/10 | Конвенции описаны, нет explicit contracts между модулями |
-| Observability | 4/10 | Langfuse — заглушка (25 строк), нет structured logging |
+| AI-agent readiness | 5/10 | Конвенции описаны, нет explicit contracts, inconsistent return types в сервисах |
+| Observability | 4/10 | Langfuse — минимальная интеграция (25 строк init, trace+generation в runtime), нет structured logging |
 | Change isolation | 5/10 | CRUD изолированы; core services сильно связаны, kill-all ломает параллельные сессии |
 | **Общая оценка** | **5/10** | Хорошая база для CRUD; core chat flow без тестов, архитектурные проблемы в оркестрации |
 
@@ -62,8 +63,8 @@
 │       ▼           │useEvaluations│     │workspaces│  │          │
 │  Components(30+)  └──────────────┘     └──────────┘  │          │
 │  ┌──────────┐     ┌──────────────┐                    │          │
-│  │ChatPanel │────→│useChat (338) │──── WebSocket ─────┼──┐      │
-│  │ChatWindow│     │  8 refs      │                    │  │      │
+│  │ChatPanel │────→│useChat (339) │──── WebSocket ─────┼──┐      │
+│  │ChatWindow│     │  9 refs      │                    │  │      │
 │  │HandoffBlk│     │  4 useState  │                    │  │      │
 │  │SessionLst│     │  13 events   │                    │  │      │
 │  └──────────┘     └──────────────┘                    │  │      │
@@ -112,15 +113,16 @@
 │                          └──────────────────────────────┘      │
 │                                        │                        │
 │  ┌──────────────────┐                  │                        │
-│  │Models (8 ORM)    │←─── SQLAlchemy ──┘                        │
+│  │Models (10 ORM)   │←─── SQLAlchemy ──┘                        │
 │  │Schemas (Pydantic)│                                           │
 │  └────────┬─────────┘                                           │
 │           │                                                      │
 │           ▼                                                      │
 │  ┌──────────────────┐  ┌────────────────┐                      │
 │  │PostgreSQL+pgvector│  │LangGraph       │                      │
-│  │ 8 таблиц         │  │Checkpoints (PG)│                      │
+│  │ 11 таблиц        │  │Checkpoints (PG)│                      │
 │  │ ⚠ Нет индексов FK│  └────────────────┘                      │
+│  │ ⚠ Нет HNSW index │                                           │
 │  └──────────────────┘                                           │
 └──────────────────────────────────────────────────────────────────┘
 
@@ -153,8 +155,8 @@
 
 | Файл | Строк | Классы | Функции | Ответственность |
 |------|-------|--------|---------|----------------|
-| runtime.py | 366 | 3 | 12 | CLI subprocess lifecycle, retry, budget, circuit breaker |
-| eval_service.py | 311 | 0 | 14 | EvalCase/EvalRun CRUD, batch execution, comparison |
+| runtime.py | 365 | 4 | 12 | CLI subprocess lifecycle, budget, circuit breaker. ⚠ @retry на _launch_process — мёртвая логика (retry_if TransientAgentError, но _launch_process не бросает его) |
+| eval_service.py | 312 | 0 | 11 | EvalCase/EvalRun CRUD, batch execution, comparison |
 | graph_service.py | 303 | 0 | 7 | LangGraph StateGraph, 3 nodes + 2 routing + build + get_graph, checkpoint, HITL |
 | auth_service.py | 209 | 2 exc | 7 | OAuth2 PKCE, token refresh, ⚠ global state |
 | budget.py | 208 | 4 | 5 | BudgetTracker, cost computation, warning/critical events |
@@ -166,7 +168,7 @@
 | agent_link_service.py | 104 | 3 exc | 7 | AgentLink CRUD + routing |
 | agent_service.py | 104 | 3 exc | 7 | Agent CRUD |
 | session_service.py | 95 | 2 exc | 6 | Session + Message CRUD |
-| telemetry.py | 25 | 0 | 1 | Langfuse singleton (заглушка) |
+| telemetry.py | 25 | 0 | 1 | Langfuse init wrapper (минимальная интеграция: trace+generation в runtime.send_message) |
 
 #### Routers (9 модулей, ~850 строк)
 
@@ -182,9 +184,13 @@
 | sessions.py | 55 | 4 REST | Status lifecycle |
 | auth.py | 51 | 4 REST | OAuth PKCE flow |
 
-#### Models (8 ORM, ~370 строк) & Schemas (Pydantic, ~300 строк)
+#### Models (10 ORM классов, 11 таблиц, ~370 строк) & Schemas (Pydantic, ~300 строк)
+
+10 ORM-моделей: Team, Agent, AgentLink, Session, Message, OAuthToken, EpisodicMemory, SemanticMemory, EvalCase, EvalRun, EvalResult.
 
 Standard Create/Update/Read pattern, Pydantic v2, from_attributes=True.
+
+⚠ **Inconsistent return types в сервисах:** team_service возвращает dict (через _team_to_dict()), agent_service — ORM objects, session_service — mixed (create→Session, get_sessions→list[dict]).
 
 #### Tests (13 файлов)
 
@@ -197,7 +203,7 @@ Standard Create/Update/Read pattern, Pydantic v2, from_attributes=True.
 | Категория | Файлов | Строк | Ключевые файлы |
 |-----------|--------|-------|----------------|
 | Pages | 4 | 487 | Dashboard(141), TeamPage(172), ChatPage(66), EvalDashboard(108) |
-| Hooks | 9 | 734 | useChat(338), useEvaluations(88), useAgents(61) |
+| Hooks | 9 | 734 | useChat(339), useEvaluations(88), useAgents(61) |
 | Components | 30+ | 1,900+ | ChatPanel(202), AgentForm(191), EvalRunDetail(156) |
 | API Layer | 7 | 221 | client.ts(25) + resource modules |
 | Types | 1 | 249 | 28 interfaces/types, 13 WS event types |
@@ -334,11 +340,11 @@ interrupted = False
 
 | Этап | Цель | Реализация | Статус | Что не реализовано |
 |------|------|-----------|--------|-------------------|
-| P1 | AgentRuntime refactor | runtime.py: tenacity retry, exponential backoff, TransientAgentError | Done | Backpressure для pipes не реализован |
-| P2 | Observability | telemetry.py + budget.py: Langfuse trace/span, token pricing | Partial | gen_ai semantic conventions неполные, structured logging отсутствует |
+| P1 | AgentRuntime refactor | runtime.py: tenacity retry, exponential backoff, TransientAgentError | Partial | Backpressure для pipes не реализован. ⚠ @retry на _launch_process — мёртвая логика: метод бросает OSError, но retry ловит только TransientAgentError |
+| P2 | Observability | telemetry.py + budget.py: Langfuse trace+generation в send_message, token pricing | Partial | gen_ai semantic conventions неполные, structured logging отсутствует, budget.record_usage не получает model name (cost opus занижена 5x) |
 | P3 | Automatic Orchestrator | orchestrator_service.py: parse_handoff_block, auto-routing | Replaced | Заменён P4 (LangGraph). handle_handoff() = мёртвый код |
 | P4 | LangGraph Redesign | graph_service.py: StateGraph, PostgreSQL checkpointing, interrupt() | Done | Time-travel debugging UI не реализован |
-| P5 | Vector Memory | memory_service.py: pgvector, Voyage AI, episodic + semantic | Done | Hybrid search (BM25 + dense) — нет, только dense |
+| P5 | Vector Memory | memory_service.py: pgvector, Voyage AI, episodic + semantic | Done | Hybrid search (BM25 + dense) — нет, только dense. ⚠ Нет HNSW index — brute-force O(n) search |
 | P6 | Evaluation Framework | eval_service.py + judge_service.py + golden dataset | Done | Trajectory evaluation не реализована (только outcome) |
 | P7 | MCP Server | mcp-workspace/: tasks, specs tools | Done | Полнофункционален |
 | P8 | Production Hardening | circuit_breaker.py + budget.py | Partial | Stateless Redis — нет. Semantic caching — нет |
@@ -604,6 +610,141 @@ def route_after_agent(state: WorkflowState) -> Literal["notify_handoff", "__end_
 **Severity:** RELIABILITY
 **Fix:** Проверять состояние WebSocket перед отправкой, или оборачивать каждый `ws.send_json()` в try/except с early return.
 
+### 6.19 @retry на _launch_process — мёртвая логика (DESIGN) [v4]
+
+**Файл:** `api/app/services/runtime.py:240-244`
+```python
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type(TransientAgentError),
+)
+async def _launch_process(self, cmd, env, cwd):
+    process = await asyncio.create_subprocess_exec(...)
+    return process
+```
+
+`_launch_process` выполняет только `asyncio.create_subprocess_exec()`, который бросает `OSError`/`FileNotFoundError`, **не** `TransientAgentError`. `TransientAgentError` бросается в `_read_stream` (строка 317), которая вызывается **после** `_launch_process`. Retry-декоратор **никогда не сработает**.
+
+P1 roadmap заявлял "tenacity retry, exponential backoff" как реализованное — фактически retry привязан к неправильному методу.
+
+**Severity:** DESIGN (заявленная функциональность не работает)
+**Fix:** Перенести retry на `send_message()` целиком (оборачивая весь CLI-вызов), или изменить на `retry_if_exception_type(OSError)` для subprocess creation.
+
+### 6.20 stderr_task leak в _read_stream (RELIABILITY) [v4]
+
+**Файл:** `api/app/services/runtime.py:290-310`
+```python
+stderr_task = asyncio.create_task(process.stderr.read()) if process.stderr else None
+async for line in process.stdout:  # если здесь exception...
+    ...
+await process.wait()
+if stderr_task:
+    stderr = await stderr_task  # ...сюда не дойдём
+```
+
+Если исключение произойдёт в цикле `async for` (строки 292-305) до строки 310, `stderr_task` не будет await'нута. Это:
+- Утечка asyncio task
+- `RuntimeWarning: coroutine was never awaited` или `Task was destroyed but it is pending`
+
+**Severity:** RELIABILITY
+**Fix:** Обернуть в try/finally: `finally: if stderr_task: await stderr_task`
+
+### 6.21 process.wait() без timeout (RELIABILITY) [v4]
+
+**Файл:** `api/app/services/runtime.py:307`
+```python
+await process.wait()  # нет timeout — может ждать вечно
+```
+
+Если CLI-процесс зависнет (не завершится и перестанет писать в stdout), `process.wait()` заблокирует coroutine навсегда. В `_kill_process` timeout 5s есть, но `_read_stream` не использует `_kill_process`.
+
+**Severity:** RELIABILITY
+**Fix:** `await asyncio.wait_for(process.wait(), timeout=300)`
+
+### 6.22 Budget не получает model name — cost estimation opus занижена 5x (ACCURACY) [v4]
+
+**Файл:** `api/app/services/runtime.py:141-146`
+```python
+budget_event = self._budget.record_usage(
+    session_id=str(session_id),
+    input_tokens=input_tokens,
+    output_tokens=output_tokens,
+    reported_cost=cost_usd,
+    # model= НЕ передаётся
+)
+```
+
+`record_usage()` принимает `model: Optional[str] = None` (budget.py:148), но runtime не передаёт его. Если `reported_cost` из CLI отсутствует, `compute_cost` использует `DEFAULT_PRICING` ($3/$15 per 1M — sonnet-level). Для opus ($15/$75) стоимость занижена в **5x**.
+
+**Severity:** ACCURACY
+**Fix:** Добавить `model=event.get("model")` в вызов `record_usage()` или извлекать model из CLI output.
+
+### 6.23 pgvector без HNSW index — brute-force search (PERFORMANCE) [v4]
+
+**Файл:** `api/app/models/memory.py`
+```python
+embedding: Mapped[list[float]] = mapped_column(Vector(512), nullable=False)
+```
+
+Колонки `episodic_memory.embedding` и `semantic_memory.embedding` не имеют HNSW-индекса. Поиск через `cosine_distance` выполняется sequential scan (brute-force O(n)). При росте данных — деградация.
+
+Проверено: ни в моделях, ни в миграциях (включая 004_add_evaluation.py) HNSW-индекс **не создаётся**.
+
+**Severity:** PERFORMANCE (при росте данных)
+**Fix:** Alembic миграция:
+```sql
+CREATE INDEX idx_episodic_embedding ON episodic_memory USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX idx_semantic_embedding ON semantic_memory USING hnsw (embedding vector_cosine_ops);
+```
+
+### 6.24 kill-all каскадирует в circuit breaker OPEN (RELIABILITY) [v4]
+
+При side-by-side (2 панели):
+1. Panel A: `send_message()` → kill ALL → убивает процесс Panel B
+2. Panel B: `_read_stream()` получает ошибку → stderr содержит keywords → `TransientAgentError`
+3. `TransientAgentError` → `circuit_breaker.record_failure()`
+4. **5 таких kill-ов в пределах failure_window (60s) → CB переходит в OPEN**
+5. **Обе панели заблокированы** на recovery_timeout (30s)
+
+Анализ v3 обнаружил kill-all (6.1), но **не проследил каскад до circuit breaker**.
+
+**Severity:** RELIABILITY (cascading failure при side-by-side)
+**Fix:** Fix 6.1 (kill current only) автоматически устраняет эту проблему.
+
+### 6.25 eval_service.execute_eval_run() — нет concurrent protection (CORRECTNESS) [v4]
+
+**Файл:** `api/app/services/eval_service.py:127-258`
+
+`execute_eval_run()` устанавливает `status="running"` без проверки текущего статуса. Два одновременных вызова для одного `run_id` создадут дубликаты `EvalResult` записей.
+
+**Severity:** CORRECTNESS
+**Fix:** Проверять текущий status перед execute: `if run.status != "pending": raise ...`
+
+### 6.26 Zero React.memo — все сообщения перерисовываются (PERFORMANCE) [v4]
+
+Во всём фронтенде **0 использований** React.memo, useMemo. ChatMessage, ToolUseBlock, HandoffBlock не мемоизированы. Каждое новое сообщение перерисовывает **ВСЕ** предыдущие сообщения и компоненты. Для длинных сессий (100+ сообщений) — реальная деградация.
+
+useCallback используется в useChat.ts (6 callbacks) и ChatPage.tsx (3 callbacks), но **0** в ChatPanel, ChatWindow, ChatMessage.
+
+**Severity:** PERFORMANCE
+**Fix:** Добавить React.memo на ChatMessage, ToolUseBlock, HandoffBlock. Добавить useMemo для статичных данных.
+
+### 6.27 Linear WS reconnection — thundering herd (RELIABILITY) [v4]
+
+**Файл:** `web/src/hooks/useChat.ts`
+```typescript
+const RECONNECT_DELAY_MS = 2000;
+const MAX_RECONNECT_ATTEMPTS = 5;
+// ...
+setTimeout(connect, RECONNECT_DELAY_MS);  // фиксированный delay
+```
+
+При массовом disconnect (сеть упала) все клиенты reconnect одновременно каждые 2 секунды → thundering herd на backend.
+
+**Severity:** RELIABILITY
+**Fix:** Exponential backoff: `setTimeout(connect, RECONNECT_DELAY_MS * 2 ** reconnectCount.current)`
+
 ---
 
 ## 7. AI-first критерии
@@ -650,8 +791,19 @@ def route_after_agent(state: WorkflowState) -> Literal["notify_handoff", "__end_
 - `auth_service` — lazy import внутри `runtime.send_message()` (не виден в imports)
 - `telemetry.get_langfuse()` — lazy import внутри runtime
 - `config["configurable"]` — WebSocket и DB передаются как нетипизированный dict через LangGraph
-- `runtime = AgentRuntime()` — module-level singleton, не инжектится
-- `_compiled_graph` — module-level singleton, устанавливается в lifespan
+
+Module-level mutable singletons (полный реестр, v4):
+| Singleton | Файл | Mutable state | Проблема |
+|-----------|------|---------------|----------|
+| `runtime` | runtime.py:365 | _processes dict, _budget, _breaker | Не инжектится, не тестируем |
+| `_compiled_graph` | graph_service.py:296 | LangGraph graph | Устанавливается в lifespan |
+| `_langfuse` | telemetry.py:12 | Langfuse client | Нет cleanup при shutdown |
+| `_code_verifier` | auth_service.py:21 | OAuth PKCE verifier | Race condition при параллельных login |
+| `_oauth_state` | auth_service.py:22 | OAuth state | Race condition при параллельных login |
+| `settings` | config.py:29 | — (immutable) | Безопасно |
+| `engine` | database.py:4 | — (immutable) | Безопасно |
+
+5 из 7 singleton'ов имеют mutable state.
 
 **Оценка: 6/10**
 
@@ -670,19 +822,23 @@ def route_after_agent(state: WorkflowState) -> Literal["notify_handoff", "__end_
 ### 7.5 Observability
 
 Что есть:
-- Langfuse trace/span в runtime (опционально, если LANGFUSE_SECRET_KEY)
-- Budget tracking с event emission (warning/critical)
-- Circuit breaker с logging state transitions
+- Langfuse trace + generation в runtime.send_message (runtime.py:111-173) — записывает session_id, input, output, usage (input/output tokens), cost_usd, вызывает flush. Работает при наличии LANGFUSE_SECRET_KEY
+- `logging.getLogger(__name__)` во всех сервисах (runtime, budget, circuit_breaker, telemetry)
+- Budget tracking с event emission и logging (budget.py:162-196)
+- Circuit breaker с logging state transitions (circuit_breaker.py:104, 112, 120-126, 147)
+- Стратегические logger.warning/error/info для CLI ошибок
 
 Что отсутствует:
-- Structured logging (ни один сервис не использует logger для бизнес-событий)
-- Correlation ID / request ID
+- OpenTelemetry — нет вообще
+- Structured logging (JSON format) — все логи через format strings
 - gen_ai semantic conventions в spans
-- Логирование ошибок в WebSocket (отправляются клиенту, не логируются)
+- Correlation ID / request ID между сервисами
+- Вложенные spans для tool calls (один generation на весь send_message)
 - Метрики latency, error rate
 - Dashboard для cost per agent
+- budget.record_usage не получает model name (6.22) — cost estimation неточная
 
-**Оценка: 4/10**
+**Оценка: 4/10** (Langfuse работает но минимально, logging есть но не structured, нет OTel)
 
 ### 7.6 Testability
 
@@ -794,6 +950,32 @@ engine = create_async_engine(settings.database_url, echo=False, pool_pre_ping=Tr
 
 Добавить Error Boundary компонент и обернуть ChatWindow.
 
+**F5. Исправить @retry на _launch_process [v4]**
+
+Файл: `api/app/services/runtime.py:240-244`
+
+Вариант A — перенести retry на send_message (обернуть весь CLI-вызов).
+Вариант B — изменить retry_if_exception_type на OSError для subprocess creation.
+
+**F6. try/finally для stderr_task [v4]**
+
+Файл: `api/app/services/runtime.py:290-310`
+
+Обернуть `async for` в try/finally, await stderr_task в finally.
+
+**F7. Timeout на process.wait() [v4]**
+
+Файл: `api/app/services/runtime.py:307`
+```python
+await asyncio.wait_for(process.wait(), timeout=300)
+```
+
+**F8. Передать model в budget.record_usage() [v4]**
+
+Файл: `api/app/services/runtime.py:141`
+
+Добавить `model=event.get("model")` в вызов record_usage().
+
 ### 9.2 Средние улучшения (2-8 часов)
 
 **M1. Создать ARCHITECTURE.md**
@@ -859,7 +1041,28 @@ def _get_voyage_client() -> voyageai.Client:
     return _voyage_client
 ```
 
-**M7. Lifespan retry**
+**M7. HNSW индекс для pgvector [v4]**
+
+Alembic миграция:
+```python
+op.execute("CREATE INDEX idx_episodic_embedding ON episodic_memory USING hnsw (embedding vector_cosine_ops)")
+op.execute("CREATE INDEX idx_semantic_embedding ON semantic_memory USING hnsw (embedding vector_cosine_ops)")
+```
+
+Без HNSW — brute-force O(n) search. С HNSW — O(log n).
+
+**M8. React.memo на chat-компоненты [v4]**
+
+Обернуть ChatMessage, ToolUseBlock, HandoffBlock в React.memo. Каждое новое сообщение сейчас перерисовывает ВСЕ предыдущие.
+
+**M9. Exponential backoff для WS reconnection [v4]**
+
+Файл: `web/src/hooks/useChat.ts`
+```typescript
+setTimeout(connect, RECONNECT_DELAY_MS * Math.pow(2, reconnectCount.current));
+```
+
+**M10. Lifespan retry**
 
 ```python
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -927,6 +1130,10 @@ logger.info("agent.message.sent", session_id=session_id, tokens=usage.input_toke
 | 3 | Sub-agent sessions не закрываются в БД → добавить stop_session | graph_service.py:116 | 15 мин |
 | 4 | kill-all → kill current session only | runtime.py:84-86 | 15 мин |
 | 5 | pool_pre_ping=True | database.py | 5 мин |
+| 5a | **[v4] Исправить @retry на _launch_process** (мёртвая логика) | runtime.py:240-244 | 15 мин |
+| 5b | **[v4] try/finally для stderr_task** (task leak) | runtime.py:290-310 | 10 мин |
+| 5c | **[v4] Timeout на process.wait()** | runtime.py:307 | 5 мин |
+| 5d | **[v4] Передать model в budget.record_usage()** (cost opus 5x) | runtime.py:141 | 10 мин |
 
 ### P1 — Критично для AI-agent разработки
 
@@ -951,6 +1158,10 @@ logger.info("agent.message.sent", session_id=session_id, tokens=usage.input_toke
 | 17 | Singleton Voyage AI client | 30 мин |
 | 18 | Lifespan retry | 1 час |
 | 19 | Уведомление при MAX_DEPTH (вместо молчаливого END) | 30 мин |
+| 19a | **[v4] HNSW индекс для pgvector** (brute-force → O(log n)) | 30 мин |
+| 19b | **[v4] React.memo на ChatMessage, ToolUseBlock, HandoffBlock** | 30 мин |
+| 19c | **[v4] Exponential backoff для WS reconnection** | 15 мин |
+| 19d | **[v4] Concurrent protection в execute_eval_run()** | 15 мин |
 
 ### P3 — Масштабируемость
 
@@ -968,7 +1179,7 @@ logger.info("agent.message.sent", session_id=session_id, tokens=usage.input_toke
 
 ## 11. Требует дополнительного изучения
 
-1. **pgvector performance** — нет бенчмарков при текущих данных. HNSW index настроен?
+1. **pgvector performance** — нет бенчмарков при текущих данных. HNSW index **не настроен** (подтверждено v4 — brute-force search). Нужен EXPLAIN ANALYZE для cosine_distance при 1000+ записей
 2. **LangGraph checkpoint размер** — как быстро растёт таблица при активном использовании?
 3. **Claude CLI subprocess lifecycle** — что происходит при OOM, zombie processes?
 4. **entrypoint.sh `git config --global --add safe.directory *`** — security implications в production
@@ -992,7 +1203,7 @@ logger.info("agent.message.sent", session_id=session_id, tokens=usage.input_toke
 | 2 | eval_service размер | "150+ строк" | 311 строк | Занижена сложность на 52% |
 | 3 | judge_service размер | "100+ строк" | 198 строк | Занижена сложность на 49% |
 | 4 | useChat useState | "7 useState" | 4 useState | Завышено на 75% |
-| 5 | useChat useRef | "11 refs" | 8 refs | Завышено на 37% |
+| 5 | useChat useRef | "11 refs" | 9 refs (v4 уточнение: v2 перекорректировал до 8, пропустив initialMessagesRef) | Завышено в v1, занижено в v2 |
 | 6 | useChat events | "14 типов" | 13 типов | Завышено на 1 |
 | 7 | Observability после коррекции | "6/10" | 4/10 | Langfuse — заглушка, не интеграция |
 | 8 | SQLAlchemy pool default | "20 connections" | 5 connections | Неверный факт |
@@ -1043,4 +1254,80 @@ logger.info("agent.message.sent", session_id=session_id, tokens=usage.input_toke
 
 ---
 
-*Версия 3.0. Включает результаты двухпроходного анализа (v2) и критической ревизии (v3). Все утверждения верифицированы по исходному коду с указанием файлов и строк.*
+## 14. Ошибки третьего прохода анализа (ревью v4)
+
+Критическая самопроверка v3 с полным перечитыванием всех файлов проекта (backend + frontend + data layer).
+
+### 14.1 Фактические ошибки v3
+
+| # | Ошибка | Заявлено (v3) | Реально | Влияние |
+|---|--------|---------------|---------|---------|
+| 1 | ORM моделей | "8 ORM, ~370 строк" | 10 моделей, 11 таблиц (пропущены EvalCase, EvalRun, EvalResult или OAuthToken+Memory — подсчёт неверен в любом случае) | Занижена сложность data layer на 25% |
+| 2 | runtime.py классов | "3 класса" | 4 класса (пропущен TransientAgentError — ключ для retry и circuit breaker) | Пропущен архитектурно значимый класс |
+| 3 | useChat useRef | "8 refs" (v2 перекорректировал) | 9 refs (пропущен initialMessagesRef) | Метрика колебалась: v1=11, v2=8, v4=9 |
+| 4 | eval_service | "311 строк, 14 функций" | 312 строк, 11 функций | Неточность в двух метриках |
+| 5 | P1 retry как "Done" | "P1: Done" | P1: Partial — @retry привязан к _launch_process, который не бросает TransientAgentError | Заявленная функциональность не работает |
+| 6 | telemetry.py = "заглушка" | "Langfuse — заглушка" | Работающая минимальная интеграция: trace + generation + usage + cost + flush в runtime.send_message | Неверная характеристика |
+| 7 | run_task() = "мёртвый код, удалить" | "30 строк мёртвого кода P3" | Не используется в production, но имеет 3 unit-теста в test_runtime.py:188-253 | Рекомендация удалить без проверки тестов |
+| 8 | runtime.py строк | "366" | 365 строк кода + 1 пустая | Несущественно |
+| 9 | handle_handoff строк | "129" (v3 исправил с 128) | 130 строк (57-185 inclusive) | Несущественно |
+
+### 14.2 Пропущенные проблемы (обнаружены в v4)
+
+| # | Проблема | Severity | Почему пропущена |
+|---|----------|----------|------------------|
+| 1 | @retry на _launch_process — мёртвая логика | DESIGN | Не проверено, бросает ли _launch_process TransientAgentError |
+| 2 | stderr_task leak в _read_stream | RELIABILITY | Не проанализирован exception flow в async for loop |
+| 3 | process.wait() без timeout | RELIABILITY | Не проверены timeout'ы во всех await |
+| 4 | budget.record_usage не получает model | ACCURACY | Не проверены все параметры вызова |
+| 5 | pgvector без HNSW index | PERFORMANCE | Не проверено наличие индексов в моделях и миграциях |
+| 6 | kill-all каскадирует в CB OPEN | RELIABILITY | Каскадный эффект не прослежен |
+| 7 | eval_service нет concurrent protection | CORRECTNESS | execute_eval_run не проанализирован на concurrency |
+| 8 | Zero React.memo во фронтенде | PERFORMANCE | Не проверены паттерны мемоизации |
+| 9 | Linear WS reconnect (thundering herd) | RELIABILITY | reconnect delay не проанализирован на тип (linear vs exponential) |
+| 10 | N+1 query в agent_service | PERFORMANCE | eager loading проверен не во всех сервисах (session_service ✓, agent_service ✗) |
+| 11 | Inconsistent return types в CRUD сервисах | DESIGN | Не проверены типы возврата каждого сервиса |
+
+### 14.3 Уточнённые оценки (v4)
+
+| Критерий | v3 оценка | v4 оценка | Обоснование изменения |
+|----------|-----------|-----------|----------------------|
+| Модульность | 6/10 | **5/10** | Больше проблем чем описано: @retry мёртвый, stderr_task leak, 10 моделей не 8 |
+| AI-agent readiness | 6/10 | **5/10** | Return type inconsistency, 5 mutable singletons, нет contracts |
+| Observability | 4/10 | **4/10** | Подтверждено. Langfuse работает но минимально |
+| Test coverage | 3/10 | **3/10** | Подтверждено |
+| **Общая** | **5/10** | **5/10** | Подтверждено |
+
+### 14.4 Методологические уроки v4
+
+1. **Проверять retry целиком** — не только параметры декоратора, но и соответствие exception type тому, что реально бросает метод
+2. **Считать все классы, включая Exception** — TransientAgentError архитектурно значим, а не "ещё одно исключение"
+3. **Проверять exception flow в async коде** — asyncio.create_task без await в finally — типовая утечка
+4. **Проверять все параметры функций** — record_usage принимает model, но вызов его не передаёт
+5. **Проверять индексы в data layer** — HNSW для pgvector не создан ни в моделях, ни в миграциях
+6. **Считать модели по __init__.py** — models/__init__.py импортирует 10 классов, а не 8
+7. **Трассировать каскадные эффекты** — kill-all → TransientAgentError → circuit_breaker.record_failure → CB OPEN
+8. **Не рекомендовать удаление без grep тестов** — run_task() имеет 3 unit-теста
+9. **Различать "заглушку" и "минимальную интеграцию"** — telemetry.py init'ит реальный клиент, runtime.py его активно использует
+
+### 14.5 Полный реестр найденных проблем по severity
+
+| Severity | v3 | Добавлено v4 | Итого |
+|----------|-----|-------------|-------|
+| CRITICAL | 1 (test_ws.py) | 0 | 1 |
+| BUG | 2 (kill-all, sub-agent sessions) | 0 | 2 |
+| DESIGN | 5 (budget persist, gate_node txn, AsyncSession, SRP, retry dead) | 2 (retry dead ⬆, return type inconsistency) | 6 |
+| RELIABILITY | 2 (pool_pre_ping, lifespan) | 4 (stderr_task, process.wait, CB cascade, WS reconnect) | 6 |
+| PERFORMANCE | 2 (FK indexes, Voyage client) | 3 (HNSW, React.memo, N+1 agent_service) | 5 |
+| UX | 2 (tool_result, MAX_DEPTH) | 0 | 2 |
+| ACCURACY | 0 | 1 (budget model name) | 1 |
+| CORRECTNESS | 0 | 1 (eval concurrent) | 1 |
+| STABILITY | 1 (Error Boundary) | 0 | 1 |
+| MISSING FEATURE | 1 (reconnect resume) | 0 | 1 |
+| TECH DEBT | 1 (dead code) | 0 | 1 |
+| RISK | 1 (auth global state) | 0 | 1 |
+| **Итого** | **18** | **11** | **28** |
+
+---
+
+*Версия 4.0. Включает результаты четырёхпроходного анализа: первичный (v1), коррекция (v2), независимая ревизия оркестрации (v3), критическая самопроверка всего проекта (v4). Все утверждения верифицированы по исходному коду с указанием файлов и строк.*
