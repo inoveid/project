@@ -1,8 +1,8 @@
 # Архитектурный анализ Agent Console: AI-first разработка
 
 **Дата:** 2026-03-08
-**Версия:** 7.0 (после независимого ревью Memory/Eval/MCP v7)
-**Метод:** Семипроходный анализ — первичный (v1), коррекция (v2), независимая ревизия (v3), критическая самопроверка (v4), независимое ревью data layer + frontend + миграции (v5), full-stack ревью Chat/WebSocket pipeline (v6), глубокое ревью Memory/Eval/MCP подсистем (v7)
+**Версия:** 8.0 (после независимого ревью Tests/Infrastructure v8)
+**Метод:** Восьмипроходный анализ — первичный (v1), коррекция (v2), независимая ревизия (v3), критическая самопроверка (v4), независимое ревью data layer + frontend + миграции (v5), full-stack ревью Chat/WebSocket pipeline (v6), глубокое ревью Memory/Eval/MCP подсистем (v7), независимое ревью тестов и инфраструктуры (v8)
 
 ---
 
@@ -25,6 +25,7 @@
 15. [Ошибки четвёртого прохода анализа (ревью v5)](#15-ошибки-четвёртого-прохода-анализа-ревью-v5)
 16. [Ошибки пятого прохода анализа (ревью v6)](#16-ошибки-пятого-прохода-анализа-ревью-v6)
 17. [Ошибки шестого прохода анализа (ревью v7)](#17-ошибки-шестого-прохода-анализа-ревью-v7)
+18. [Ошибки седьмого прохода анализа (ревью v8)](#18-ошибки-седьмого-прохода-анализа-ревью-v8)
 
 ---
 
@@ -40,7 +41,7 @@
 | Структура директорий | 8/10 | Чёткое разделение api/web, слоёная архитектура |
 | Модульность | 5/10 | CRUD-модули хороши; runtime (365, 4 класса), graph_service (303) — монолиты; @retry мёртвая логика |
 | Типизация | 9/10 | TypeScript strict, Pydantic v2, SQLAlchemy Mapped |
-| Тестовое покрытие | 3/10 | test_ws.py устарел (P3), 0 тестов graph_service/orchestrator, 100% mock-based |
+| Тестовое покрытие | 4/10 | 182 backend-теста (13 файлов), test_ws.py полностью нерабочий (ImportError), 0 тестов graph_service/orchestrator/memory, budget+circuit_breaker — качественные pure unit |
 | Документация | 6/10 | Хороший CLAUDE.md, но нет ARCHITECTURE.md, WS protocol, state contracts |
 | AI-agent readiness | 5/10 | Конвенции описаны, нет explicit contracts, inconsistent return types в сервисах |
 | Observability | 4/10 | Langfuse — минимальная интеграция (25 строк init, trace+generation в runtime), нет structured logging |
@@ -195,11 +196,29 @@ Standard Create/Update/Read pattern, Pydantic v2, from_attributes=True.
 
 ⚠ **Inconsistent return types в сервисах:** team_service возвращает dict (через _team_to_dict()), agent_service — ORM objects, session_service — mixed (create→Session, get_sessions→list[dict]).
 
-#### Tests (13 файлов)
+#### Tests (13 файлов, 182 тестовых функции) [v8]
 
-100% mock-based. Нет integration tests.
+Преимущественно mock-based. 0 тестов с реальной БД. Исключения: test_budget.py (19), test_circuit_breaker.py (14) — pure unit без моков; test_agent_link_service.py (12), test_auth_service.py (15) — service-level тесты с мокнутой DB session.
 
-⚠ **test_ws.py устарел:** ссылается на P3-функции (`_parse_handoff_block`, `_stream_response`), которых нет в текущем коде. Тесты для текущего LangGraph-based ws.py, graph_service.py и orchestrator_service.py **отсутствуют**. См. секцию 6.11.
+| Файл | Тестов | Подход |
+|------|--------|--------|
+| test_runtime.py | 20 | Unit, тестирует AgentRuntime (start/stop/parse/build_command/run_task) |
+| test_budget.py | 19 | Pure unit, без моков: BudgetTracker, compute_cost, edge cases |
+| test_evaluations.py | 19 | Router-level mock + schema validation + judge response parsing |
+| test_import_cmd.py | 17 | Mixed: pure unit (parse/discover) + service с мокнутой DB |
+| test_auth_service.py | 15 | Service-level: мокнутый httpx + DB session, тестирует OAuth PKCE |
+| test_agents.py | 14 | Router-level mock |
+| test_circuit_breaker.py | 14 | Pure unit, без моков: state machine CLOSED/OPEN/HALF_OPEN |
+| test_agent_links.py | 12 | Router-level mock + schema validation |
+| test_agent_link_service.py | 12 | Service-level: мокнутая DB session |
+| test_ws.py | 12 | ⚠ **ВСЕ 12 нерабочие** — ImportError при загрузке модуля (6.11) |
+| test_teams.py | 11 | Router-level mock + schema validation |
+| test_auth.py | 9 | Router-level mock |
+| test_sessions.py | 8 | Router-level mock |
+
+⚠ **test_ws.py полностью нерабочий:** `from app.routers.ws import _parse_handoff_block` (строка 9) вызывает ImportError — функция перенесена в orchestrator_service.py. Все 12 тестов не выполняются. См. секцию 6.11.
+
+⚠ **0 тестов** для: graph_service, orchestrator_service, memory_service, MCP server.
 
 ### Frontend (TypeScript) — 5,727 строк
 
@@ -495,24 +514,23 @@ async def _embed(text_input: str) -> list[float]:
 
 **Severity:** DESIGN LIMITATION
 
-### 6.11 test_ws.py устарел — тестирует P3-версию кода (CRITICAL)
+### 6.11 test_ws.py полностью нерабочий — ImportError при загрузке (CRITICAL) [обновлено v8]
 
 **Файл:** `api/tests/test_ws.py`
 
-Тесты WebSocket-handler ссылаются на функции, которые **не существуют** в текущем коде:
+⚠ **Обновление v8:** ранее указывалось «7 из 12 тестов устаревшие». Фактически **ВСЕ 12 тестов** не выполняются, потому что импорт на **уровне файла** (строка 9) вызывает `ImportError`:
 
 ```python
-# test_ws.py:9 — функция не существует в текущем ws.py
+# test_ws.py:9 — ImportError: _parse_handoff_block не существует в ws.py
 from app.routers.ws import _parse_handoff_block
-
-# test_ws.py:148 — _stream_response заменена на _run_graph в P4
-patch(f"{WS_SERVICE}._stream_response", side_effect=mock_stream_response),
 ```
 
-`_parse_handoff_block` была частью P3-версии ws.py, перенесена в orchestrator_service.py как `parse_handoff_block` (без underscore). `_stream_response` заменена на `_run_graph` при переходе на LangGraph (P4). Тесты не обновлены после P4.
+`_parse_handoff_block` перенесена в orchestrator_service.py как `parse_handoff_block` (без underscore, публичная функция). Поскольку import — top-level, pytest не может collect ни один тест из файла. Дополнительно, строка 148 патчит `_stream_response`, которая также не существует (заменена на `_run_graph` в P4, ws.py:5 — комментарий).
+
+**Верификация v8:** ws.py определяет только 3 функции: `websocket_session` (строка 33), `_handle_messages` (строка 89), `_run_graph` (строка 177). Ни `_parse_handoff_block`, ни `_stream_response` — не существуют. `routers/__init__.py` пуст — реэкспорта нет.
 
 Последствия:
-- **7 из 12** тестов в test_ws.py используют устаревшие references (5 handoff-тестов + 2 stream-теста)
+- **12 из 12** тестов не выполняются (не 7 из 12 как заявлялось ранее)
 - **0 тестов** для текущего LangGraph-based WebSocket handler (`_run_graph`, `Command(resume=...)`, interrupt detection)
 - **0 тестов** для `graph_service.py` (подтверждено: файл `test_graph_service.py` не существует)
 - **0 тестов** для `orchestrator_service.py` (подтверждено: файл `test_orchestrator_service.py` не существует)
@@ -890,22 +908,26 @@ if "__interrupt__" in chunk:
 **Severity:** UNKNOWN (требует эксперимента)
 **Fix:** Добавить в раздел 11 (требует изучения). Написать integration test, проверяющий что interrupt корректно детектируется.
 
-### 6.38 Approval flow не покрыт тестами (TEST GAP) [v6]
+### 6.38 Approval flow и другие сценарии не покрыты тестами (TEST GAP) [v6, расширено v8]
 
 **Файл:** `web/src/hooks/useChat.test.ts`
 
-14 тестов покрывают: idle, connect, streaming, done, tool_use, sendMessage, stop, error, reconnect, handoff_start, sub_agent streaming, handoff_done, handoff_cycle, messages filter.
+16 тестов (ранее ошибочно указывалось 14) покрывают: idle, connect, status on open, streaming, done, tool_use, sendMessage, stop, error, reconnect, no-connect-when-disabled, no-reconnect-after-stop, handoff_start, sub_agent streaming, handoff_done, handoff_cycle.
 
-**Не покрыты:**
-- `approval_required` event handling
-- `approveHandoff()` / `rejectHandoff()` — WS отправка approve/reject
+**Не покрыты (расширенный список v8):**
+- `approval_required` event handling, `approveHandoff()`, `rejectHandoff()` — полный HITL approval flow
 - Reconnect state preservation (pendingApproval теряется)
-- Budget events (4 типа)
+- Budget events (4 типа) — budget_warning, budget_exceeded, sub_agent_budget_warning, sub_agent_budget_exceeded
+- `tool_result` event — привязка result к tool_use
+- `sub_agent_tool_use`, `sub_agent_tool_result`, `sub_agent_error` events
+- `sendMessage` при неготовом WS (error "Connection not ready")
+- MAX_RECONNECT_ATTEMPTS (5) — тестируется только один reconnect
+- `ws.onerror` handler и parse error на malformed message
 
-Approval flow — критический HITL path. Отсутствие тестов означает что любой рефакторинг useChat может сломать approve/reject без обнаружения.
+Всего **12 непокрытых сценариев**. Approval flow — критический HITL path.
 
 **Severity:** TEST GAP (критический path без покрытия)
-**Fix:** Добавить тесты: approval_required → pendingApproval state, approveHandoff → WS send, rejectHandoff → WS send, reconnect с pending approval.
+**Fix:** Добавить тесты для approval flow, budget events, tool_result, sub_agent events, error edge cases.
 
 ### 6.39 tool_use и sub_agent_tool_use не вызывают setItems (UX) [v6]
 
@@ -1083,6 +1105,71 @@ refetchInterval: (query) => {
 
 **Severity:** MISLEADING
 **Fix:** Перенести `start_time` перед циклом или замерять отдельно agent_time и judge_time.
+
+### 6.52 `anthropic` пакет не объявлен в requirements.txt (DEPENDENCY) [v8]
+
+**Файл:** `api/app/services/judge_service.py:16` + `api/requirements.txt`
+
+```python
+import anthropic  # judge_service.py:16
+```
+
+Пакет `anthropic` используется в judge_service, но **отсутствует** в requirements.txt. Вероятно, устанавливается как транзитивная зависимость от `langgraph` (который использует `>=` pin). Если при обновлении langgraph транзитивная зависимость изменится — judge_service сломается при импорте без явной ошибки в `pip install`.
+
+**Severity:** DEPENDENCY (скрытая зависимость)
+**Fix:** Добавить `anthropic>=0.40.0` в requirements.txt.
+
+### 6.53 web/Dockerfile не копирует package-lock.json — нерепродуцируемые билды (RELIABILITY) [v8]
+
+**Файл:** `web/Dockerfile:5-6`
+```dockerfile
+COPY package.json ./
+RUN npm install
+```
+
+`package-lock.json` **существует** в web/, но Dockerfile копирует только `package.json`. `npm install` без lockfile разрешает зависимости по-новому при каждом build → нерепродуцируемые билды. Разные разработчики/CI могут получить разные версии.
+
+**Severity:** RELIABILITY (нерепродуцируемый build)
+**Fix:** Добавить `COPY package-lock.json ./` и заменить `npm install` на `npm ci`.
+
+### 6.54 requirements.txt смешивает production и test зависимости (INFRA) [v8]
+
+**Файл:** `api/requirements.txt:10-11`
+```
+pytest==8.3.4
+pytest-asyncio==0.25.0
+```
+
+Test-зависимости (`pytest`, `pytest-asyncio`) в одном файле с production-зависимостями. При `docker compose build` тестовые пакеты попадают в production image.
+
+**Severity:** INFRA (minor — dev-only на данном этапе)
+**Fix:** Вынести в `requirements-dev.txt` и устанавливать отдельно в dev-сценариях.
+
+### 6.55 Непоследовательный version pinning в requirements.txt (RELIABILITY) [v8]
+
+**Файл:** `api/requirements.txt`
+
+Часть зависимостей пиннована строго (`fastapi==0.115.6`, `sqlalchemy==2.0.36`), часть — нестрого (`langgraph>=0.3.0`, `psycopg[binary]>=3.1`, `pgvector>=0.3.0`, `voyageai>=0.3.0`). Нестрогие зависимости могут обновиться при rebuild и сломать совместимость.
+
+**Severity:** RELIABILITY (потенциальные breaking changes при rebuild)
+**Fix:** Пиннировать все зависимости строго, использовать `pip-compile` для lock-файла.
+
+### 6.56 Makefile — нет команд test/lint, неполный .PHONY (INFRA) [v8]
+
+**Файл:** `Makefile`
+
+`.PHONY: dev stop migrate logs import` — пропущены `new-migration`, `logs-api`, `db-shell`. Отсутствуют команды для запуска тестов (`make test`), линтинга (`make lint`), проверки типов. Разработчик должен вручную запускать `docker compose exec api pytest`.
+
+**Severity:** INFRA (DX friction)
+**Fix:** Добавить targets:
+```makefile
+test-api:
+	docker compose -f docker-compose.dev.yml exec api pytest
+test-web:
+	docker compose -f docker-compose.dev.yml exec web npm test
+lint:
+	docker compose -f docker-compose.dev.yml exec web npm run lint
+```
 
 ---
 
@@ -1951,4 +2038,88 @@ Full-stack ревью Chat/WebSocket pipeline: frontend useChat.ts → WebSocket
 
 ---
 
-*Версия 7.0. Включает результаты семипроходного анализа: первичный (v1), коррекция (v2), независимая ревизия оркестрации (v3), критическая самопроверка (v4), независимое ревью data layer + frontend + миграции (v5), full-stack ревью Chat/WebSocket pipeline (v6), глубокое ревью Memory/Eval/MCP подсистем с критической самопроверкой (v7). Выявлены 3 ложноположительные проблемы предыдущих версий (FK-индексы, HNSW, N+1), 4 severity-завышения в v6, 12 новых проблем в v7. Все утверждения верифицированы по исходному коду с указанием файлов и строк.*
+---
+
+## 18. Ошибки седьмого прохода анализа (ревью v8)
+
+Независимое ревью тестовой инфраструктуры (backend + frontend), Docker configuration, Makefile, CI/CD, requirements. Метод: полное чтение 16 файлов, подсчёт тестов через grep, верификация 6 конкретных утверждений, критическая самопроверка собственных выводов.
+
+### 18.1 Ошибки предыдущих проходов, обнаруженные в v8
+
+| # | Ошибка | Заявлено (v1-v7) | Реально (v8) | Влияние |
+|---|--------|------------------|-------------|---------|
+| 1 | **Количество backend-тестов** | «146 backend тестов» | **182** тестовых функции (grep `def test_` по 13 файлам). Undercount на 36 (25%) | Обновлена секция Tests и таблица |
+| 2 | **test_ws.py: «7 из 12 устаревшие»** | 7 из 12 тестов используют устаревшие references | **12 из 12** не выполняются — `ImportError` при загрузке модуля (строка 9: `from app.routers.ws import _parse_handoff_block` — функция не существует) | Обновлена секция 6.11 |
+| 3 | **«100% mock-based»** | Все тесты mock-based | test_budget.py (19) и test_circuit_breaker.py (14) — **pure unit без моков**; test_agent_link_service.py и test_auth_service.py тестируют service-level | Обновлена секция Tests |
+| 4 | **useChat.test.ts: «14 тестов»** | 14 тестов покрывают сценарии | **16** тестовых `it`-блоков | Обновлена секция 6.38 |
+| 5 | **Тестовое покрытие: 3/10** | 3/10 в таблице оценок | Повышено до **4/10**: больше тестов чем заявлено, качественные pure unit для budget/circuit_breaker, service-level тесты для agent_link/auth | Обновлена таблица оценок |
+
+### 18.2 Новые проблемы v8 (сводка)
+
+| # | Секция | Severity | Проблема |
+|---|--------|----------|----------|
+| 1 | 6.52 | DEPENDENCY | `anthropic` не в requirements.txt (скрытая транзитивная зависимость) |
+| 2 | 6.53 | RELIABILITY | web/Dockerfile не копирует package-lock.json → нерепродуцируемые билды |
+| 3 | 6.54 | INFRA | pytest в production requirements.txt |
+| 4 | 6.55 | RELIABILITY | Непоследовательный version pinning (== vs >=) |
+| 5 | 6.56 | INFRA | Makefile: нет test/lint команд, неполный .PHONY |
+
+### 18.3 Детальные результаты верификации
+
+**Утверждение: «Нет CI/CD (.github/ отсутствует)»** — **ВЕРНО**. Проверены: `.github/`, `.gitlab-ci.yml`, `Jenkinsfile`, `.circleci/` — ничего не найдено в проекте (только внутри `web/node_modules/`).
+
+**Утверждение: «Docker: pgvector, port 8000, port 3002»** — **ВЕРНО, НЕПОЛНО**. DB на хост-порту **5434** (не 5432), healthcheck с `pg_isready`, API зависит от `service_healthy`. Ни API, ни Web не имеют собственных healthcheck.
+
+**Утверждение: «entrypoint.sh: git config --global --add safe.directory \*»** — **ВЕРНО**. Строка 15, wildcard `'*'` отключает safe.directory проверку для всех путей. Допустимо для dev, недопустимо для production.
+
+### 18.4 Дополнительные наблюдения v8
+
+1. **conftest.py (11 строк)** создаёт `AsyncClient(transport=ASGITransport(app=app))` — ASGI-уровень тестирования. Но нет shared DB fixture → невозможно быстро добавить integration tests
+2. **pytest.ini: `asyncio_mode = auto`** — async тесты не требуют `@pytest.mark.asyncio`, но многие файлы его используют (лишний бойлерплейт)
+3. **Два паттерна мокирования без единого подхода:** router-level (`patch("app.routers.X.service_func")`) vs service-level (`service_func(mocked_db, ...)`) — выбор зависит от файла
+4. **API Dockerfile устанавливает Node.js 20 + Claude Code CLI** в Python-контейнер (архитектурное решение: runtime.py запускает Claude CLI как subprocess). Увеличивает размер образа, обновление CLI требует rebuild
+5. **docker-compose: DB credentials в plaintext** (`POSTGRES_PASSWORD: postgres`), Langfuse через `${LANGFUSE_SECRET_KEY}` из .env — непоследовательная работа с секретами
+
+### 18.5 Самопроверка v8
+
+При критической самопроверке собственных выводов обнаружены:
+
+1. **Ложное утверждение субагента о test-setup.ts** — агент заявил что `web/src/test-setup.ts` не существует. Файл **существует** (содержит `import "@testing-library/jest-dom/vitest"`). Перепроверка через Glob подтвердила наличие. Вывод не включён в финальный отчёт
+2. **Не прочитан learning_roadmap.md** — задание требовало его чтения. Без этого контекста невозможно оценить, насколько отсутствие тестов для graph_service/memory осознанно запланировано на будущие этапы
+3. **Не запускались тесты** — все выводы основаны на статическом анализе кода. Эмпирическая верификация (pytest, vitest) не проводилась из-за отсутствия локального venv
+4. **Frontend-тесты проанализированы поверхностно** — детальный разбор только для useChat.test.ts (16 тестов, 12 непокрытых сценариев). Остальные 18 файлов не анализировались на глубину покрытия
+
+### 18.6 Обновлённый реестр проблем по severity (v8)
+
+| Severity | v7 total | v8: убрано | v8: добавлено | Итого |
+|----------|----------|-----------|---------------|-------|
+| CRITICAL | 1 | 0 | 0 | 1 |
+| BUG | 5 | 0 | 0 | 5 |
+| DESIGN | 8 | 0 | 0 | 8 |
+| RELIABILITY | 8 | 0 | +2 (6.53 lockfile, 6.55 pinning) | 10 |
+| PERFORMANCE | 5 | 0 | 0 | 5 |
+| UX | 4 | 0 | 0 | 4 |
+| ACCURACY | 1 | 0 | 0 | 1 |
+| CORRECTNESS | 1 | 0 | 0 | 1 |
+| STABILITY | 1 | 0 | 0 | 1 |
+| MISSING FEATURE | 1 | 0 | 0 | 1 |
+| TECH DEBT | 1 | 0 | 0 | 1 |
+| RISK | 1 | 0 | 0 | 1 |
+| COSMETIC | 1 | 0 | 0 | 1 |
+| PROTOCOL GAP | 1 | 0 | 0 | 1 |
+| RESOURCE LEAK | 1 | 0 | 0 | 1 |
+| TEST GAP | 3 | 0 | 0 | 3 |
+| UNKNOWN | 1 | 0 | 0 | 1 |
+| QUALITY | 1 | 0 | 0 | 1 |
+| TYPING | 1 | 0 | 0 | 1 |
+| INCONSISTENCY | 1 | 0 | 0 | 1 |
+| CONFIG | 1 | 0 | 0 | 1 |
+| DURABILITY | 1 | 0 | 0 | 1 |
+| MISLEADING | 1 | 0 | 0 | 1 |
+| DEPENDENCY | 0 | 0 | +1 (6.52 anthropic) | 1 |
+| INFRA | 0 | 0 | +2 (6.54 mixed deps, 6.56 Makefile) | 2 |
+| **Итого** | **50** | **0** | **+5** | **55** |
+
+---
+
+*Версия 8.0. Включает результаты восьмипроходного анализа: первичный (v1), коррекция (v2), независимая ревизия оркестрации (v3), критическая самопроверка (v4), независимое ревью data layer + frontend + миграции (v5), full-stack ревью Chat/WebSocket pipeline (v6), глубокое ревью Memory/Eval/MCP подсистем (v7), независимое ревью тестов и инфраструктуры (v8). Выявлены 3 ложноположительные проблемы предыдущих версий (FK-индексы, HNSW, N+1), 4 severity-завышения в v6, 5 фактических ошибок предыдущих проходов (v8), 5 новых проблем инфраструктуры (v8). Общее число проблем: 55. Все утверждения верифицированы по исходному коду с указанием файлов и строк.*
