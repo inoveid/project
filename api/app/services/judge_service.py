@@ -154,7 +154,7 @@ async def judge_agent_output(
     request: JudgeRequest,
     model: str = "claude-sonnet-4-20250514",
     api_key: str | None = None,
-) -> JudgeResponse:
+) -> tuple[JudgeResponse, dict]:
     """Вызвать LLM-as-Judge для оценки выхода агента.
 
     Args:

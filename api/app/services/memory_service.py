@@ -33,12 +33,12 @@ class MemorySearchResult:
     similarity: float  # 0..1, 1 = идентично
 
 
-async def _embed(text_input: str) -> list[float]:
+async def _embed(text_input: str, input_type: str = "document") -> list[float]:
     """Получить embedding через Voyage AI voyage-3-lite."""
     client = voyageai.Client(api_key=settings.voyage_api_key)
     # voyageai SDK синхронный — запускаем в thread pool чтобы не блокировать event loop
     result = await asyncio.to_thread(
-        client.embed, [text_input], model=EMBEDDING_MODEL, input_type="document"
+        client.embed, [text_input], model=EMBEDDING_MODEL, input_type=input_type
     )
     return result.embeddings[0]
 
@@ -117,7 +117,7 @@ async def search_memories(
 
     Возвращает результаты отсортированные по убыванию сходства.
     """
-    query_embedding = await _embed(query)
+    query_embedding = await _embed(query, input_type="query")
     results: list[MemorySearchResult] = []
 
     if memory_types is None or "episodic" in memory_types:

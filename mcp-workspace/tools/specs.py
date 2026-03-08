@@ -73,8 +73,8 @@ def register_spec_tools(mcp, workspace_root: str) -> None:
         specs_path = _specs_dir(workspace_root)
         filepath = os.path.normpath(os.path.join(specs_path, filename))
 
-        # Prevent path traversal
-        if not filepath.startswith(specs_path):
+        # Prevent path traversal (os.sep prevents sibling-directory bypass)
+        if not filepath.startswith(specs_path + os.sep) and filepath != specs_path:
             return "Error: path traversal not allowed."
 
         if not os.path.isfile(filepath):

@@ -9,9 +9,7 @@ if [ ! -d "/workspace/.git" ]; then
     git -C /workspace config user.name "Agent Console"
 fi
 
-# Mark all directories under /workspace as safe (needed when running as root in Docker).
-# The '*' pattern covers cloned projects like /workspace/my-project.
+# Mark /workspace as safe (needed when running as root in Docker).
 git config --global --add safe.directory /workspace
-git config --global --add safe.directory '*'
 
 exec "$@"

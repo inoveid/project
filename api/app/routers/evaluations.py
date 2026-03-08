@@ -75,7 +75,14 @@ async def create_eval_run(
     async def _run_eval():
         from app.database import async_session
         async with async_session() as session:
-            await eval_service.execute_eval_run(session, run.id, case_ids=case_ids)
+            try:
+                await eval_service.execute_eval_run(session, run.id, case_ids=case_ids)
+            except Exception:
+                from app.models.evaluation import EvalRun
+                run_obj = await session.get(EvalRun, run.id)
+                if run_obj and run_obj.status == "running":
+                    run_obj.status = "failed"
+                    await session.commit()
 
     background_tasks.add_task(_run_eval)
     return run
