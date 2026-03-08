@@ -455,6 +455,29 @@ async def test_stop_session_kills_nested_children(agent_runtime):
 
 
 @pytest.mark.asyncio
+async def test_get_children_returns_copy(agent_runtime):
+    """get_children returns child IDs without modifying internal state."""
+    parent_id = uuid.uuid4()
+    child_id = uuid.uuid4()
+
+    await agent_runtime.start_session(parent_id, "/tmp/a", "test")
+    await agent_runtime.start_session(child_id, "/tmp/b", "test", parent_session_id=parent_id)
+
+    children = agent_runtime.get_children(parent_id)
+    assert children == {child_id}
+    # Mutating returned set doesn't affect internal state
+    children.discard(child_id)
+    assert child_id in agent_runtime._children[parent_id]
+
+
+@pytest.mark.asyncio
+async def test_get_children_empty(agent_runtime):
+    """get_children returns empty set for session without children."""
+    sid = uuid.uuid4()
+    assert agent_runtime.get_children(sid) == set()
+
+
+@pytest.mark.asyncio
 async def test_run_task_no_parent_tracking(agent_runtime, tmp_path):
     """run_task (ephemeral) does not use parent tracking."""
     async def fake_send_message(sid, content):

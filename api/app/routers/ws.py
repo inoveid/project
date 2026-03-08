@@ -22,7 +22,7 @@ from app.services.agent_link_service import get_agent_handoff_targets
 from app.services.graph_service import WorkflowState, get_graph
 from app.services.orchestrator_service import format_handoff_instructions
 from app.services.runtime import runtime
-from app.services.session_service import SessionNotFoundError, add_message, get_session
+from app.services.session_service import SessionNotFoundError, add_message, get_session, stop_session
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,12 @@ async def websocket_session(
         await _handle_messages(websocket, db, session_id, agent, graph, graph_config)
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected for session %s", session_id)
+        # Закрыть orphaned child sessions в БД до того, как stop_session очистит _children
+        for child_id in runtime.get_children(session_id):
+            try:
+                await stop_session(db, child_id)
+            except SessionNotFoundError:
+                pass
         await runtime.stop_session(session_id)
 
 

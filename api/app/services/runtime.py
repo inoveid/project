@@ -204,6 +204,10 @@ class AgentRuntime:
         if running:
             await self._kill_process(running)
 
+    def get_children(self, session_id: uuid.UUID) -> set[uuid.UUID]:
+        """Return a copy of child session IDs (for DB cleanup before stop)."""
+        return set(self._children.get(session_id, set()))
+
     async def stop_session(self, session_id: uuid.UUID) -> None:
         # Рекурсивно остановить все дочерние сессии
         for child_id in self._children.pop(session_id, set()):
