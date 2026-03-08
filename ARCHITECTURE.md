@@ -64,7 +64,7 @@
 │                            │  ├─ circuit_breaker          │     │
 │                            │  └─ telemetry                │     │
 │                            │                              │     │
-│                            │  orchestrator_service        │     │
+│                            │  utils/handoff               │     │
 │                            │  (handoff formatting/parsing)│     │
 │                            └──────────────────────────────┘     │
 │                                       │                         │
@@ -97,12 +97,12 @@
 
 | Модуль | Строк | Ответственность |
 |--------|-------|-----------------|
-| runtime.py | ~419 | CLI subprocess lifecycle, budget tracking, circuit breaker |
+| runtime.py | ~390 | CLI subprocess lifecycle, budget tracking, circuit breaker |
 | eval_service.py | ~312 | EvalCase/EvalRun CRUD, batch execution, comparison |
 | graph_service.py | ~307 | LangGraph StateGraph: 3 nodes, 2 routing functions, checkpoint |
 | auth_service.py | ~209 | OAuth2 PKCE, token refresh |
 | budget.py | ~208 | BudgetTracker, cost computation, warning/critical events |
-| orchestrator_service.py | ~203 | format_handoff_instructions, parse_handoff_block, _build_agent_prompt (все 3 используются в graph_service); handle_handoff — мёртвый код (~129 строк) |
+| utils/handoff.py | ~50 | format_handoff_instructions, parse_handoff_block, build_agent_prompt |
 | memory_service.py | ~199 | pgvector RAG, Voyage AI embeddings |
 | judge_service.py | ~198 | LLM-as-Judge via Anthropic SDK |
 | circuit_breaker.py | ~151 | CLOSED/OPEN/HALF_OPEN state machine |
@@ -207,7 +207,7 @@ Change isolation: **высокая** — каждый ресурс изолир�
 11. Client sends {"type": "approve"} или {"type": "reject"}
 12. ws.py: _run_graph(Command(resume=True/False))
 13. gate_node resumes:
-     → approved: check cycle → create sub-session → _build_agent_prompt
+     → approved: check cycle → create sub-session → build_agent_prompt
        → runtime.start_session (config only) → send "handoff_start"
        → return state с depth+1 → run_agent_node (шаг 7)
      → rejected: END
@@ -215,7 +215,7 @@ Change isolation: **высокая** — каждый ресурс изолир�
 15. ws.py: send {"type": "done"}
 ```
 
-**Файлы (8+):** ws.py, graph_service.py, runtime.py, orchestrator_service.py, auth_service.py, budget.py, circuit_breaker.py, session_service.py.
+**Файлы (8+):** ws.py, graph_service.py, runtime.py, utils/handoff.py, auth_service.py, budget.py, circuit_breaker.py, session_service.py.
 
 Change isolation: **низкая** — изменение любого из 8+ файлов может сломать chat.
 
@@ -470,13 +470,13 @@ ws.py (WebSocket handler)
   ├─→ runtime.stop_session()           — cleanup
   ├─→ session_service                  — CRUD сессий
   ├─→ agent_link_service               — handoff targets
-  └─→ orchestrator_service             — format_handoff_instructions
+  └─→ utils/handoff                     — format_handoff_instructions
 
 graph_service
   ├─→ runtime.send_message()           — CLI subprocess
   ├─→ runtime.start_session()          — sub-agent config
   ├─→ runtime.stop_session()           — sub-agent cleanup
-  ├─→ orchestrator_service             — parse_handoff_block, _build_agent_prompt
+  ├─→ utils/handoff                    — parse_handoff_block, build_agent_prompt
   ├─→ session_service                  — create/get/stop session, add_message
   └─→ agent_link_service               — get_agent_handoff_targets
 
@@ -499,7 +499,6 @@ memory_service
 |-----|-------------------|--------|---------------|
 | `runtime.send_message()` | `auth_service.get_current_access_token` | runtime.py:100 | `from app.services.auth_service import ...` внутри метода |
 | `runtime.send_message()` | `telemetry.get_langfuse` | runtime.py:123 | `from app.services.telemetry import ...` внутри метода |
-| `runtime.run_task()` | `pathlib.Path` | runtime.py:237 | Не влияет на тестирование |
 
 Lazy imports в runtime нужны для избежания циклических зависимостей, но скрывают реальные зависимости от статического анализа.
 
@@ -507,7 +506,7 @@ Lazy imports в runtime нужны для избежания циклическ�
 
 | Singleton | Файл | Mutable | Инициализация |
 |-----------|------|---------|---------------|
-| `runtime` | runtime.py:419 | Да (_processes, _budget, _breaker) | При импорте модуля |
+| `runtime` | runtime.py:390 | Да (_processes, _budget, _breaker) | При импорте модуля |
 | `_compiled_graph` | graph_service.py:301 | Да | В main.py lifespan |
 | `_langfuse` | telemetry.py:12 | Да | При импорте модуля (если `LANGFUSE_SECRET_KEY` установлен) |
 | `_code_verifier` | auth_service.py:21 | Да | При вызове login |

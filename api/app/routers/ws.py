@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.services.agent_link_service import get_agent_handoff_targets
 from app.services.graph_service import WorkflowState, get_graph
-from app.services.orchestrator_service import format_handoff_instructions
+from app.services.utils.handoff import format_handoff_instructions
 from app.services.runtime import runtime
 from app.services.session_service import SessionNotFoundError, add_message, get_session, stop_session
 
