@@ -83,7 +83,7 @@ async def websocket_session(
         await _handle_messages(websocket, db, session_id, agent, graph, graph_config)
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected for session %s", session_id)
-        await runtime.kill_active_process(session_id)
+        await runtime.stop_session(session_id)
 
 
 async def _handle_messages(

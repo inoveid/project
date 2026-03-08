@@ -43,6 +43,7 @@ class AgentRuntime:
 
     def __init__(self) -> None:
         self._processes: dict[uuid.UUID, RunningProcess] = {}
+        self._children: dict[uuid.UUID, set[uuid.UUID]] = {}
         self._budget = BudgetTracker(
             default_session_limit=settings.budget_session_limit_usd,
         )
@@ -60,6 +61,7 @@ class AgentRuntime:
         system_prompt: str,
         claude_session_id: Optional[str] = None,
         allowed_tools: list[str] = None,
+        parent_session_id: Optional[uuid.UUID] = None,
     ) -> None:
         if session_id in self._processes:
             raise AgentRuntimeError(f"Session {session_id} already running")
@@ -80,6 +82,8 @@ class AgentRuntime:
             claude_session_id=claude_session_id,
             allowed_tools=allowed_tools or [],
         )
+        if parent_session_id:
+            self._children.setdefault(parent_session_id, set()).add(session_id)
         self._budget.start_session(str(session_id))
 
     async def send_message(
@@ -201,10 +205,16 @@ class AgentRuntime:
             await self._kill_process(running)
 
     async def stop_session(self, session_id: uuid.UUID) -> None:
+        # Рекурсивно остановить все дочерние сессии
+        for child_id in self._children.pop(session_id, set()):
+            await self.stop_session(child_id)
         running = self._processes.pop(session_id, None)
         if running:
             await self._kill_process(running)
         self._budget.remove_session(str(session_id))
+        # Удалить себя из _children родителя (при нормальном завершении sub-agent)
+        for parent_children in self._children.values():
+            parent_children.discard(session_id)
 
     async def run_task(
         self,

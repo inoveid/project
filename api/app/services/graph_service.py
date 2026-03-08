@@ -28,7 +28,7 @@ from app.services.orchestrator_service import (
     parse_handoff_block,
 )
 from app.services.runtime import runtime
-from app.services.session_service import SessionNotFoundError, add_message, create_session, get_session
+from app.services.session_service import SessionNotFoundError, add_message, create_session, get_session, stop_session
 
 logger = logging.getLogger(__name__)
 
@@ -111,9 +111,10 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
         else:
             await ws.send_json({"type": "error", "error": str(exc)})
 
-    # Sub-агент завершил работу — остановить runtime и уведомить UI
+    # Sub-агент завершил работу — остановить runtime, закрыть в БД и уведомить UI
     if is_sub:
         await runtime.stop_session(session_id)
+        await stop_session(db, session_id)
         await ws.send_json({"type": "handoff_done", "agent_name": state["current_agent_name"]})
 
     # Сохранить результат в БД
@@ -221,7 +222,11 @@ async def gate_node(state: WorkflowState, config: RunnableConfig) -> dict:
 
     # Запустить runtime sub-агента
     workdir = (target.config.get("workdir") or settings.workspace_path) if target.config else settings.workspace_path
-    await runtime.start_session(sub_session.id, workdir, system_prompt, allowed_tools=target.allowed_tools or [])
+    await runtime.start_session(
+        sub_session.id, workdir, system_prompt,
+        parent_session_id=uuid.UUID(state["main_session_id"]),
+        allowed_tools=target.allowed_tools or [],
+    )
 
     # Уведомить UI о начале handoff
     await ws.send_json({

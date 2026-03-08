@@ -373,6 +373,107 @@ def test_parse_event_result_model_none(agent_runtime, session_id):
 
 
 @pytest.mark.asyncio
+async def test_start_session_with_parent(agent_runtime):
+    """start_session with parent_session_id registers child in _children."""
+    parent_id = uuid.uuid4()
+    child_id = uuid.uuid4()
+
+    await agent_runtime.start_session(parent_id, "/tmp/a", "test")
+    await agent_runtime.start_session(child_id, "/tmp/b", "test", parent_session_id=parent_id)
+
+    assert child_id in agent_runtime._children[parent_id]
+    assert agent_runtime.is_running(child_id)
+
+
+@pytest.mark.asyncio
+async def test_stop_session_kills_children(agent_runtime):
+    """stop_session recursively stops all child sessions."""
+    parent_id = uuid.uuid4()
+    child_id = uuid.uuid4()
+
+    await agent_runtime.start_session(parent_id, "/tmp/a", "test")
+    await agent_runtime.start_session(child_id, "/tmp/b", "test", parent_session_id=parent_id)
+
+    await agent_runtime.stop_session(parent_id)
+
+    assert not agent_runtime.is_running(parent_id)
+    assert not agent_runtime.is_running(child_id)
+    assert parent_id not in agent_runtime._children
+
+
+@pytest.mark.asyncio
+async def test_stop_child_removes_from_parent(agent_runtime):
+    """Stopping a child session removes it from parent's _children set."""
+    parent_id = uuid.uuid4()
+    child_id = uuid.uuid4()
+
+    await agent_runtime.start_session(parent_id, "/tmp/a", "test")
+    await agent_runtime.start_session(child_id, "/tmp/b", "test", parent_session_id=parent_id)
+
+    await agent_runtime.stop_session(child_id)
+
+    assert not agent_runtime.is_running(child_id)
+    assert agent_runtime.is_running(parent_id)
+    assert child_id not in agent_runtime._children.get(parent_id, set())
+
+
+@pytest.mark.asyncio
+async def test_double_stop_session_is_safe(agent_runtime):
+    """Calling stop_session twice does not raise."""
+    parent_id = uuid.uuid4()
+    child_id = uuid.uuid4()
+
+    await agent_runtime.start_session(parent_id, "/tmp/a", "test")
+    await agent_runtime.start_session(child_id, "/tmp/b", "test", parent_session_id=parent_id)
+
+    # First: normal sub-agent cleanup
+    await agent_runtime.stop_session(child_id)
+    # Second: parent disconnect triggers recursive cleanup — child already gone
+    await agent_runtime.stop_session(parent_id)
+
+    assert not agent_runtime.is_running(parent_id)
+    assert not agent_runtime.is_running(child_id)
+    assert not agent_runtime._children
+
+
+@pytest.mark.asyncio
+async def test_stop_session_kills_nested_children(agent_runtime):
+    """stop_session handles chain A→B→C (all registered as children of A)."""
+    parent_id = uuid.uuid4()
+    child1_id = uuid.uuid4()
+    child2_id = uuid.uuid4()
+
+    await agent_runtime.start_session(parent_id, "/tmp/a", "test")
+    await agent_runtime.start_session(child1_id, "/tmp/b", "test", parent_session_id=parent_id)
+    await agent_runtime.start_session(child2_id, "/tmp/c", "test", parent_session_id=parent_id)
+
+    await agent_runtime.stop_session(parent_id)
+
+    assert not agent_runtime.is_running(parent_id)
+    assert not agent_runtime.is_running(child1_id)
+    assert not agent_runtime.is_running(child2_id)
+
+
+@pytest.mark.asyncio
+async def test_run_task_no_parent_tracking(agent_runtime, tmp_path):
+    """run_task (ephemeral) does not use parent tracking."""
+    async def fake_send_message(sid, content):
+        return
+        yield  # noqa: unreachable
+
+    with patch.object(agent_runtime, "send_message", side_effect=fake_send_message):
+        async for _ in agent_runtime.run_task(
+            workdir=str(tmp_path),
+            system_prompt="test",
+            task="do something",
+        ):
+            pass
+
+    # No children tracking should exist
+    assert not agent_runtime._children
+
+
+@pytest.mark.asyncio
 async def test_read_stream_cancels_stderr_task_on_exception(agent_runtime, session_id):
     """stderr_task should be cancelled if stdout iteration raises."""
     mock_process = AsyncMock()
