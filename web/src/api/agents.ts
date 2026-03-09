@@ -33,3 +33,7 @@ export function updateAgent(id: string, data: AgentUpdate): Promise<Agent> {
 export function deleteAgent(id: string): Promise<void> {
   return fetchApi<void>(`/agents/${id}`, { method: "DELETE" });
 }
+
+export function getSystemAgent(): Promise<Agent> {
+  return fetchApi<Agent>("/agents/system");
+}
