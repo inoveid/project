@@ -18,6 +18,7 @@
 | `api/app/database.py` | **MEDIUM** | Все DB-зависимые модули (9+ импортеров: все routers, auth_service, eval_service) |
 | `api/app/config.py` | **MEDIUM** | Все модули через `settings` singleton (11+ импортеров) |
 | `api/app/services/product_service.py` (`_do_clone`) | **MEDIUM** | Фоновые clone-задачи: утечки задач, зависшие статусы, stale DB sessions |
+| `web/src/hooks/useSystemAgent.ts` | **LOW** | GlobalChatWidget застрянет в неготовом состоянии (не крашится, просто не работает) |
 
 ### Состояние тестов для danger zones
 
@@ -173,7 +174,7 @@ hooks/chat/
 ├── index.ts              — re-export useChat, ChatStatus, UseChatResult
 ├── useChat.ts (~105)     — публичный API хука, композиция модулей
 ├── useChatSocket.ts (~106) — WebSocket connection + reconnect, инкапсулирует lifecycle
-├── chatEventHandler.ts (~222) — handleEvent switch (13 cases), pure function (без React hooks)
+├── chatEventHandler.ts (~190) — handleEvent switch (13 cases), pure function (без React hooks); makeHandoffItem() — приватная фабрика для handoff/approval_required
 └── chatState.ts (~36)    — типы (ChatStatus, PendingRefs, UseChatResult), константы, makeLocalMessage
 ```
 Backward-compatible re-export: `hooks/useChat.ts` → `hooks/chat/`
@@ -189,6 +190,7 @@ Backward-compatible re-export: `hooks/useChat.ts` → `hooks/chat/`
 **Связанные модули:**
 - `types/index.ts` — `WsIncoming`, `WsOutgoing`, `ChatItem`, `HandoffItem`, `Message`, `ToolUse`
 - `components/ChatPanel.tsx` — основной потребитель hook (импортирует из `hooks/useChat`)
+- `components/GlobalChatWidget.tsx` → `MiniChatWindow.tsx` — второй потребитель (global widget)
 - `components/ChatWindow.tsx` — рендерит `ChatItem[]`
 - `components/HandoffBlock.tsx` — рендерит handoff items
 
@@ -214,6 +216,16 @@ cd web && npm test -- --run chatEventHandler  # 19 unit-тестов (изоли
 cd web && npm test -- --run useChat            # 23 интеграционных теста (через хук)
 cd web && npm test -- --run ChatPanel          # 6 тестов компонента
 ```
+
+---
+
+### 4.5 `web/src/hooks/useAuth.ts` — потребители
+
+`useAuthStatus()` из `useAuth.ts` теперь используется двумя независимыми контекстами:
+- Страницы авторизации (AuthPage и др.) — обычный вызов
+- `GlobalChatWidget` — вызов с дефолтным `polling=false`. Если нужен polling для виджета, передать `useAuthStatus(true)`
+
+Единый `queryKey: ["auth", "status"]` гарантирует что оба потребителя читают из одного кеша TanStack Query — дублирующихся запросов нет.
 
 ---
 

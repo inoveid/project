@@ -11,7 +11,7 @@
 ┌──────────────────────────────────────────────────────────────────┐
 │                     Frontend (React + Vite)                      │
 │                                                                  │
-│  Pages (6)           Hooks (9)             API Layer (9)         │
+│  Pages (6)           Hooks (10)            API Layer (9)         │
 │  ┌──────────────┐   ┌────────────────┐    ┌──────────────┐      │
 │  │ Dashboard    │──→│ useTeams       │──→ │ teams.ts     │──┐   │
 │  │ TeamPage     │   │ useAgents      │    │ agents.ts    │  │   │
@@ -21,16 +21,18 @@
 │  │ BusinessPage │   │ useBusinesses  │    │ agentLinks.ts│  │   │
 │  └──────────────┘   │ useProducts    │    │ businesses.ts│  │   │
 │       │             │ useEvaluations │    │ products.ts  │  │   │
-│       ▼             └────────────────┘    └──────────────┘  │   │
-│  Components (33+)                                            │   │
+│       ▼             │ useSystemAgent │    └──────────────┘  │   │
+│  Components (34+)   └────────────────┘                      │   │
 │  ┌──────────────┐   ┌────────────────┐                      │   │
 │  │ ChatPanel    │──→│ useChat (374)  │──── WebSocket ───────┼─┐ │
 │  │ ChatWindow   │   │  13 WS events  │                      │ │ │
-│  │ HandoffBlock │   └────────────────┘                      │ │ │
+│  │ MiniChatWindow│  └────────────────┘                      │ │ │
+│  │ HandoffBlock │                                           │ │ │
 │  │ SessionList  │                                           │ │ │
 │  └──────────────┘                                           │ │ │
 │                                                             │ │ │
-│  GlobalChatWidget (фиксированный виджет вне Routes)         │ │ │
+│  GlobalChatWidget + MiniChatWindow (fixed bottom-right)     │ │ │
+│    └─ useSystemAgent (localStorage session) + useAuth         │ │ │
 │                                                             │ │ │
 │  Types: types/index.ts (~290 строк, 34 interfaces)         │ │ │
 └─────────────────────────────────────────────────────────────┼─┼─┘
@@ -147,9 +149,9 @@ Pydantic-схемы: паттерн `{Resource}Create`, `{Resource}Update`, `{Re
 | Категория | Файлов | Ключевые |
 |-----------|--------|----------|
 | Pages | 6 | Dashboard, TeamPage, ChatPage, EvalDashboard, BusinessListPage, BusinessPage |
-| Hooks | 9 | useChat (пакет `hooks/chat/`, 5 файлов), useBusinesses, useProducts, useEvaluations, useAgents и др. |
-| Components | 33+ | ChatPanel, AgentForm, EvalRunDetail, BusinessCard, ProductCard, GlobalChatWidget и др. |
-| API Layer | 9 | client.ts (экспортирует BASE_URL) + 8 resource modules |
+| Hooks | 10 | useChat (пакет `hooks/chat/`, 5 файлов), useAuth (auth + polling), useSystemAgent (system session), useBusinesses, useProducts, useEvaluations, useAgents и др. |
+| Components | 34+ | ChatPanel, MiniChatWindow, AgentForm, EvalRunDetail, BusinessCard, ProductCard, GlobalChatWidget и др. |
+| API Layer | 9 | client.ts (экспортирует BASE_URL) + 8 resource modules; `agents.ts` добавлен `getSystemAgent()` |
 | Types | 1 | 34 interfaces/types, 13+ WS event types |
 
 #### MCP Server (автономный, stdio)
@@ -277,6 +279,32 @@ Change isolation: **средняя** (зависит от внешнего Claud
 
 Change isolation: **высокая** — polling изолирован в useProduct, не влияет на другие хуки.
 
+
+
+### 2.6 GlobalChatWidget flow
+
+```
+1. App.tsx рендерит <GlobalChatWidget /> вне <Routes> (все страницы)
+2. useAuthStatus() — GET /api/auth/status каждые 10 сек (из useAuth.ts)
+   → logged_in === false → disabled кнопка (tooltip)
+   → logged_in === true → активный виджет
+3. useSystemAgent():
+   a. useQuery GET /api/agents/system → systemAgent.id
+   b. localStorage.getItem("system_agent_session_id")
+      → есть: GET /api/sessions/{id} → ок → использовать
+              → 404 → localStorage.removeItem → создать новую
+      → нет: POST /api/sessions {agent_id: systemAgent.id} → сохранить в localStorage
+4. Кнопка открывает/закрывает MiniChatWindow (400×560px, fixed bottom-24 right-6)
+5. При открытии: useQuery GET /api/sessions/{sessionId} → session.messages
+   → useChat(sessionId, initialMessages, enabled=true) → WS /api/ws/sessions/{id}
+6. Кнопка "Очистить контекст":
+   → confirm dialog → resetSession() → localStorage.removeItem
+   → useSystemAgent перезапускает инициализацию → новая сессия
+```
+
+**Файлы:** GlobalChatWidget.tsx, MiniChatWindow.tsx, hooks/useSystemAgent.ts, hooks/useAuth.ts, api/agents.ts (getSystemAgent).
+
+Change isolation: **высокая** — виджет изолирован через `fixed` позиционирование, не влияет на layout страниц. useSystemAgent не затрагивает другие хуки.
 
 ---
 
