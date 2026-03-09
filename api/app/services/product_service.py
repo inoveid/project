@@ -75,6 +75,11 @@ async def _do_clone(product_id: uuid.UUID) -> None:
 
     async with async_session() as db:
         product = await get_product(db, product_id)
+        if not product.git_url:
+            product.status = "error"
+            product.clone_error = "git_url is missing"
+            await db.commit()
+            return
         try:
             proc = await asyncio.create_subprocess_exec(
                 "git", "clone", "--depth", "1", product.git_url, product.workspace_path,
