@@ -1,11 +1,10 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ActiveSessions } from "../components/ActiveSessions";
 import { QuickStartChat } from "../components/QuickStartChat";
 import { SummaryCards } from "../components/SummaryCards";
 import { TeamCard } from "../components/TeamCard";
 import { TeamForm } from "../components/TeamForm";
-import { WorkspacePanel } from "../components/WorkspacePanel";
 import {
   useCreateTeam,
   useDeleteTeam,
@@ -84,7 +83,13 @@ export function Dashboard() {
       </section>
 
       <section className="mb-8">
-        <WorkspacePanel />
+        <h2 className="text-lg font-semibold text-gray-900 mb-3">Бизнесы и продукты</h2>
+        <Link
+          to="/businesses"
+          className="inline-block bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700"
+        >
+          Перейти к бизнесам →
+        </Link>
       </section>
 
       <div className="flex items-center justify-between mb-6">

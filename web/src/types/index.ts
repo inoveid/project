@@ -238,6 +238,49 @@ export interface EvalResult {
   created_at: string;
 }
 
+export interface Business {
+  id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  products_count: number;
+}
+
+export interface BusinessCreate {
+  name: string;
+  description?: string;
+}
+
+export interface BusinessUpdate {
+  name?: string;
+  description?: string;
+}
+
+export interface Product {
+  id: string;
+  business_id: string;
+  name: string;
+  description: string | null;
+  git_url: string | null;
+  workspace_path: string;
+  status: 'pending' | 'cloning' | 'ready' | 'error';
+  clone_error: string | null;
+  created_at: string;
+}
+
+export interface ProductCreate {
+  name: string;
+  description?: string;
+  git_url?: string;
+  business_id: string;
+}
+
+export interface ProductUpdate {
+  name?: string;
+  description?: string;
+  git_url?: string;
+}
+
 export interface EvalComparison {
   run_a: { id: string; prompt_version: string | null; pass_rate: number | null };
   run_b: { id: string; prompt_version: string | null; pass_rate: number | null };
