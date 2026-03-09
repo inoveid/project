@@ -90,9 +90,9 @@
 
 ┌──────────────────────────┐    ┌─────────────────────┐
 │  MCP Server (автономный) │    │  External APIs      │
-│  server.py               │    │  ├─ Claude CLI       │
-│  tools/tasks.py          │    │  ├─ Claude API       │
-│  tools/specs.py          │    │  │   (judge_service) │
+│  mcp/server.py           │    │  ├─ Claude CLI       │
+│  mcp/tools/platform.py   │    │  ├─ Claude API       │
+│  HTTP → localhost:8000   │    │  │   (judge_service) │
 │  ─── stdio ──→ Claude    │    │  ├─ Voyage AI        │
 │             Code         │    │  │   (memory_service)│
 └──────────────────────────┘    │  └─ Langfuse (opt)   │
@@ -158,9 +158,10 @@ Pydantic-схемы: паттерн `{Resource}Create`, `{Resource}Update`, `{Re
 
 | Файл | Ответственность |
 |------|-----------------|
-| server.py | FastMCP registration, resources |
-| tools/tasks.py | list_tasks, get_task, update_task_status |
-| tools/specs.py | list_specs, get_spec |
+| mcp/server.py | FastMCP регистрация platform tools, точка входа (`python mcp/server.py`) |
+| mcp/tools/platform.py | 8 инструментов: list/create businesses, products, teams, agents. HTTP → `settings.api_base_url` |
+
+**Важно:** `mcp/tools/platform.py` импортирует `app.config.settings` (зависимость от FastAPI-конфигурации). Пакет `api/mcp/` конфликтует с PyPI-пакетом `mcp` по имени — FastMCP импортируется только через `TYPE_CHECKING`.
 
 ---
 
