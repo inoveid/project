@@ -25,3 +25,4 @@ coverage/
 
 # Claude
 .claude
+web/tsconfig.tsbuildinfo
