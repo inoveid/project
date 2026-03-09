@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useChat } from "../hooks/chat";
 import { useSystemAgent } from "../hooks/useSystemAgent";
-import { useAuthStatus } from "../hooks/useAuthStatus";
+import { useAuthStatus } from "../hooks/useAuth";
 import { getSession } from "../api/sessions";
 import { MiniChatWindow } from "./MiniChatWindow";
 
@@ -42,7 +42,7 @@ function ChatToggleButton({
 
 export function GlobalChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
-  const { authStatus } = useAuthStatus();
+  const { data: authStatus } = useAuthStatus();
   const { sessionId, isReady, resetSession } = useSystemAgent();
 
   const { data: session } = useQuery({

@@ -11,6 +11,23 @@ export interface EventCallbacks {
   setPendingApproval: Dispatch<SetStateAction<ApprovalRequest | null>>;
 }
 
+function makeHandoffItem(
+  itemType: HandoffItem["itemType"],
+  fromAgent: string,
+  toAgent: string,
+  content: string,
+): HandoffItem {
+  return {
+    id: crypto.randomUUID(),
+    itemType,
+    agentName: toAgent,
+    fromAgent,
+    toAgent,
+    content,
+    created_at: new Date().toISOString(),
+  };
+}
+
 function updateStreamingItem(refs: PendingRefs, setItems: Dispatch<SetStateAction<ChatItem[]>>): void {
   setItems((prev) => {
     const idx = prev.findIndex((i) => !isHandoffItem(i) && i.id === "__streaming__");
@@ -119,30 +136,18 @@ export function handleEvent(
         task: event.task,
       });
       setStatus("awaiting_approval");
-      const item: HandoffItem = {
-        id: crypto.randomUUID(),
-        itemType: "approval_required",
-        agentName: event.to_agent,
-        fromAgent: event.from_agent,
-        toAgent: event.to_agent,
-        content: event.task,
-        created_at: new Date().toISOString(),
-      };
-      setItems((prev) => [...prev, item]);
+      setItems((prev) => [
+        ...prev,
+        makeHandoffItem("approval_required", event.from_agent, event.to_agent, event.task),
+      ]);
       break;
     }
 
     case "handoff_start": {
-      const item: HandoffItem = {
-        id: crypto.randomUUID(),
-        itemType: "handoff_start",
-        agentName: event.to_agent,
-        fromAgent: event.from_agent,
-        toAgent: event.to_agent,
-        content: event.task,
-        created_at: new Date().toISOString(),
-      };
-      setItems((prev) => [...prev, item]);
+      setItems((prev) => [
+        ...prev,
+        makeHandoffItem("handoff_start", event.from_agent, event.to_agent, event.task),
+      ]);
       break;
     }
 

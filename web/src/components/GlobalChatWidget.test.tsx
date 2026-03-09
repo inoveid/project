@@ -5,10 +5,10 @@ import { createElement } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { GlobalChatWidget } from "./GlobalChatWidget";
 import * as useSystemAgentModule from "../hooks/useSystemAgent";
-import * as useAuthStatusModule from "../hooks/useAuthStatus";
+import * as useAuthModule from "../hooks/useAuth";
 
 vi.mock("../hooks/useSystemAgent");
-vi.mock("../hooks/useAuthStatus");
+vi.mock("../hooks/useAuth");
 vi.mock("../hooks/chat", () => ({
   useChat: () => ({
     items: [],
@@ -38,10 +38,10 @@ beforeEach(() => {
 
 describe("GlobalChatWidget", () => {
   it("renders disabled button when not authenticated", () => {
-    vi.mocked(useAuthStatusModule.useAuthStatus).mockReturnValue({
-      authStatus: { logged_in: false, email: null, org_name: null, subscription_type: null, auth_method: null },
+    vi.mocked(useAuthModule.useAuthStatus).mockReturnValue({
+      data: { logged_in: false, email: null, org_name: null, subscription_type: null, auth_method: null },
       isLoading: false,
-    });
+    } as ReturnType<typeof useAuthModule.useAuthStatus>);
     vi.mocked(useSystemAgentModule.useSystemAgent).mockReturnValue({
       sessionId: null,
       isReady: false,
@@ -55,10 +55,10 @@ describe("GlobalChatWidget", () => {
   });
 
   it("renders toggle button when authenticated", () => {
-    vi.mocked(useAuthStatusModule.useAuthStatus).mockReturnValue({
-      authStatus: { logged_in: true, email: "u@example.com", org_name: null, subscription_type: null, auth_method: null },
+    vi.mocked(useAuthModule.useAuthStatus).mockReturnValue({
+      data: { logged_in: true, email: "u@example.com", org_name: null, subscription_type: null, auth_method: null },
       isLoading: false,
-    });
+    } as ReturnType<typeof useAuthModule.useAuthStatus>);
     vi.mocked(useSystemAgentModule.useSystemAgent).mockReturnValue({
       sessionId: "session-1",
       isReady: true,
@@ -71,10 +71,10 @@ describe("GlobalChatWidget", () => {
   });
 
   it("opens chat window on button click", async () => {
-    vi.mocked(useAuthStatusModule.useAuthStatus).mockReturnValue({
-      authStatus: { logged_in: true, email: "u@example.com", org_name: null, subscription_type: null, auth_method: null },
+    vi.mocked(useAuthModule.useAuthStatus).mockReturnValue({
+      data: { logged_in: true, email: "u@example.com", org_name: null, subscription_type: null, auth_method: null },
       isLoading: false,
-    });
+    } as ReturnType<typeof useAuthModule.useAuthStatus>);
     vi.mocked(useSystemAgentModule.useSystemAgent).mockReturnValue({
       sessionId: "session-1",
       isReady: true,
