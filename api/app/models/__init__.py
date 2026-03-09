@@ -12,5 +12,7 @@ from app.models.session import Session, Message
 from app.models.oauth_token import OAuthToken
 from app.models.memory import EpisodicMemory, SemanticMemory
 from app.models.evaluation import EvalCase, EvalRun, EvalResult
+from app.models.business import Business
+from app.models.product import Product
 
-__all__ = ["Base", "Team", "Agent", "AgentLink", "Session", "Message", "OAuthToken", "EpisodicMemory", "SemanticMemory", "EvalCase", "EvalRun", "EvalResult"]
+__all__ = ["Base", "Team", "Agent", "AgentLink", "Session", "Message", "OAuthToken", "EpisodicMemory", "SemanticMemory", "EvalCase", "EvalRun", "EvalResult", "Business", "Product"]

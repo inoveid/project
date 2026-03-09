@@ -1,9 +1,11 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.agent import Agent
 from app.schemas.agent import AgentCreate, AgentRead, AgentUpdate
 from app.services.agent_service import (
     AgentDuplicateNameError,
@@ -16,6 +18,7 @@ from app.services.agent_service import (
     get_all_agents,
     update_agent,
 )
+from app.services.system_agent_service import seed_system_agent
 
 router = APIRouter()
 
@@ -23,6 +26,15 @@ router = APIRouter()
 @router.get("/agents", response_model=list[AgentRead])
 async def list_all_agents(db: AsyncSession = Depends(get_db)):
     return await get_all_agents(db)
+
+
+@router.get("/agents/system", response_model=AgentRead)
+async def get_system_agent(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Agent).where(Agent.is_system == True))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        agent = await seed_system_agent(db)
+    return agent
 
 
 @router.get("/teams/{team_id}/agents", response_model=list[AgentRead])
