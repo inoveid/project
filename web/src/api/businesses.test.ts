@@ -80,11 +80,8 @@ describe('businesses API', () => {
 
   it('BusinessConflictError carries productsCount', async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ products_count: 5 }, 409));
-    try {
-      await deleteBusiness('b-1');
-    } catch (err) {
-      expect(err).toBeInstanceOf(BusinessConflictError);
-      expect((err as BusinessConflictError).productsCount).toBe(5);
-    }
+    const err = await deleteBusiness('b-1').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BusinessConflictError);
+    expect((err as BusinessConflictError).productsCount).toBe(5);
   });
 });

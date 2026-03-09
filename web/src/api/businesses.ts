@@ -1,4 +1,4 @@
-import { fetchApi } from './client';
+import { fetchApi, BASE_URL } from './client';
 import type { Business, BusinessCreate, BusinessUpdate } from '../types';
 
 export class BusinessConflictError extends Error {
@@ -41,7 +41,7 @@ export function updateBusiness(id: string, data: BusinessUpdate): Promise<Busine
 
 export async function deleteBusiness(id: string, force = false): Promise<void> {
   const query = force ? '?force=true' : '';
-  const response = await fetch(`/api/businesses/${id}${query}`, {
+  const response = await fetch(`${BASE_URL}/businesses/${id}${query}`, {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
   });

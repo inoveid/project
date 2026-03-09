@@ -24,7 +24,9 @@ export function useProduct(id: string, polling = false) {
     queryKey: [...PRODUCTS_KEY, 'detail', id],
     queryFn: () => getProduct(id),
     enabled: !!id,
-    refetchInterval: polling ? 2000 : false,
+    refetchInterval: polling
+      ? (query) => (query.state.data?.status === 'cloning' ? 2000 : false)
+      : false,
   });
 }
 

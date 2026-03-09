@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ProductCard } from '../components/ProductCard';
 import { useBusiness, useUpdateBusiness } from '../hooks/useBusinesses';
@@ -30,7 +30,7 @@ export function BusinessPage() {
   const { data: business, isLoading, error } = useBusiness(id);
   const updateBusiness = useUpdateBusiness();
 
-  const { data: products, refetch: refetchProducts } = useProducts(id);
+  const { data: products } = useProducts(id);
   const createProduct = useCreateProduct();
   const updateProduct = useUpdateProduct();
 
@@ -39,6 +39,13 @@ export function BusinessPage() {
 
   const [productFormMode, setProductFormMode] = useState<ProductFormMode>({ kind: 'closed' });
   const [productForm, setProductForm] = useState<ProductFormState>(EMPTY_PRODUCT_FORM);
+
+  useEffect(() => {
+    setBusinessFormMode('view');
+    setBusinessForm({ name: '', description: '' });
+    setProductFormMode({ kind: 'closed' });
+    setProductForm(EMPTY_PRODUCT_FORM);
+  }, [id]);
 
   function openBusinessEdit() {
     if (!business) return;
@@ -250,7 +257,7 @@ export function BusinessPage() {
               key={product.id}
               product={product}
               onEdit={openProductEdit}
-              onDeleted={() => void refetchProducts()}
+              onDeleted={() => {}}
             />
           ))}
         </div>
