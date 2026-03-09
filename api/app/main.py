@@ -5,8 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from app.config import settings
-from app.routers import agents, agent_links, auth, evaluations, memory, sessions, teams, workspaces, ws
+from app.database import async_session
+from app.routers import agents, agent_links, auth, businesses, evaluations, memory, products, sessions, teams, ws
 import app.services.graph_service as graph_svc
+from app.services.system_agent_service import seed_system_agent
 
 
 @asynccontextmanager
@@ -20,6 +22,8 @@ async def lifespan(app: FastAPI):
         await checkpointer.setup()
         # Скомпилировать граф с checkpointer и сохранить в module-level singleton
         graph_svc._compiled_graph = graph_svc.build_graph(checkpointer)
+        async with async_session() as db:
+            await seed_system_agent(db)
         yield
 
 
@@ -38,7 +42,8 @@ app.include_router(teams.router, prefix="/api/teams", tags=["teams"])
 app.include_router(agents.router, prefix="/api", tags=["agents"])
 app.include_router(agent_links.router, prefix="/api", tags=["agent_links"])
 app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
-app.include_router(workspaces.router, prefix="/api", tags=["workspaces"])
+app.include_router(businesses.router, prefix="/api", tags=["businesses"])
+app.include_router(products.router, prefix="/api", tags=["products"])
 app.include_router(ws.router, prefix="/api/ws", tags=["websocket"])
 app.include_router(memory.router, prefix="/api", tags=["memory"])
 app.include_router(evaluations.router, prefix="/api", tags=["evaluations"])

@@ -37,7 +37,7 @@
 ┌─────────────────────────────────────────────────────────────┼─┼─┐
 │                     Backend (FastAPI)                        │ │ │
 │                                                             ▼ ▼ │
-│  Routers (9)                Services (14)                       │
+│  Routers (10)               Services (17)                       │
 │  ┌───────────────┐         ┌──────────────────────────────┐     │
 │  │ teams.py      │────────→│ team_service                 │     │
 │  │ agents.py     │────────→│ agent_service                │     │
@@ -46,7 +46,9 @@
 │  │ auth.py       │────────→│ auth_service                 │     │
 │  │ memory.py     │────────→│ memory_service               │     │
 │  │ evaluations.py│────────→│ eval_service → judge_service │     │
-│  │ workspaces.py │         │                              │     │
+│  │ businesses.py │────────→│ business_service             │     │
+│  │ products.py   │────────→│ product_service              │     │
+│  │               │         │ system_agent_service          │     │
 │  └───────────────┘         └──────────────────────────────┘     │
 │                                                                  │
 │  ┌───────────────┐         ┌──────────────────────────────┐     │
@@ -69,7 +71,7 @@
 │                            └──────────────────────────────┘     │
 │                                       │                         │
 │  ┌──────────────────┐                 │                         │
-│  │ Models (11 ORM)  │←── SQLAlchemy ──┘                         │
+│  │ Models (13 ORM)  │←── SQLAlchemy ──┘                         │
 │  │ Schemas (Pydantic)│                                          │
 │  └────────┬─────────┘                                           │
 │           ▼                                                     │
@@ -110,6 +112,9 @@
 | agent_link_service.py | ~104 | AgentLink CRUD + routing |
 | agent_service.py | ~104 | Agent CRUD |
 | session_service.py | ~95 | Session + Message CRUD |
+| business_service.py | ~90 | Business CRUD, force delete, scalar subquery products_count |
+| product_service.py | ~110 | Product CRUD, async git clone (fire-and-forget), status lifecycle |
+| system_agent_service.py | ~25 | System Agent seed (idempotent) |
 | telemetry.py | ~25 | Langfuse init wrapper |
 
 #### Backend — Routers
@@ -119,8 +124,9 @@
 | ws.py | 1 WS | LangGraph streaming, interrupted state machine |
 | evaluations.py | 8 REST | Background task execution |
 | memory.py | 3 REST | Inline Pydantic schemas |
-| agents.py | 6 REST | /agents + /teams/{id}/agents |
-| workspaces.py | 2 REST | Git clone/init |
+| agents.py | 7 REST | /agents + /teams/{id}/agents + /agents/system |
+| businesses.py | 5 REST | Business CRUD (force delete support) |
+| products.py | 6 REST | Product CRUD + POST /clone (fire-and-forget) |
 | teams.py | 5 REST | Standard CRUD |
 | agent_links.py | 3 REST | Team-scoped |
 | sessions.py | 4 REST | Status lifecycle |
@@ -128,7 +134,7 @@
 
 #### Backend — Models & Schemas
 
-11 ORM-моделей: Team, Agent, AgentLink, Session, Message, OAuthToken, EpisodicMemory, SemanticMemory, EvalCase, EvalRun, EvalResult.
+13 ORM-моделей: Team, Agent (+ is_system, nullable team_id/role), AgentLink, Session, Message, OAuthToken, EpisodicMemory, SemanticMemory, EvalCase, EvalRun, EvalResult, Business, Product.
 
 Pydantic-схемы: паттерн `{Resource}Create`, `{Resource}Update`, `{Resource}Read`. Pydantic v2, `from_attributes=True`.
 
@@ -460,7 +466,8 @@ START → run_agent ──→ [route_after_agent] ──→ END
 ```
 main.py (lifespan)
   ├─→ graph_service.build_graph(checkpointer)
-  └─→ graph_service._compiled_graph (singleton)
+  ├─→ graph_service._compiled_graph (singleton)
+  └─→ system_agent_service.seed_system_agent() (idempotent)
 
 ws.py (WebSocket handler)
   ├─→ graph_service.get_graph()        — скомпилированный граф
@@ -489,6 +496,12 @@ runtime (AgentRuntime)
 eval_service
   └─→ judge_service                    — LLM-as-Judge
 
+business_service
+  └─→ (нет внешних зависимостей, только DB)
+
+product_service
+  └─→ database.async_session            — ⚠ прямой импорт в _do_clone() (background task)
+
 memory_service
   └─→ Voyage AI (external)             — embeddings
 ```
@@ -499,6 +512,7 @@ memory_service
 |-----|-------------------|--------|---------------|
 | `runtime.send_message()` | `auth_service.get_current_access_token` | runtime/agent_runner.py | `from app.services.auth_service import ...` внутри метода |
 | `runtime.send_message()` | `telemetry.get_langfuse` | runtime/agent_runner.py | `from app.services.telemetry import ...` внутри метода |
+| `product_service._do_clone()` | `database.async_session` | product_service.py | `from app.database import async_session` внутри фоновой задачи |
 
 Lazy imports в runtime нужны для избежания циклических зависимостей, но скрывают реальные зависимости от статического анализа.
 

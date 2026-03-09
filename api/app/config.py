@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # Budget settings
     budget_session_limit_usd: float = 2.0
 
+    # Clone settings
+    clone_timeout_seconds: int = 300
+
     model_config = {"env_prefix": "AC_", "env_file": ".env"}
 
 

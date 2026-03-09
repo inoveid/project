@@ -12,6 +12,7 @@ class AgentCreate(BaseModel):
     system_prompt: str = Field(..., min_length=1)
     allowed_tools: list[str] = Field(default_factory=list)
     config: dict[str, Any] = Field(default_factory=dict)
+    is_system: bool = False
 
 
 class AgentUpdate(BaseModel):
@@ -25,13 +26,14 @@ class AgentUpdate(BaseModel):
 
 class AgentRead(BaseModel):
     id: uuid.UUID
-    team_id: uuid.UUID
+    team_id: Optional[uuid.UUID]
     name: str
-    role: str
+    role: Optional[str]
     description: Optional[str]
     system_prompt: str
     allowed_tools: list[str]
     config: dict[str, Any]
+    is_system: bool
     created_at: datetime
     updated_at: datetime
 
