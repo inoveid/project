@@ -1,19 +1,18 @@
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from app.config import settings
+
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
-
-BASE_URL = os.environ.get("AC_API_BASE_URL", "http://localhost:8000")
 
 
 async def _api(method: str, path: str, **kwargs: Any) -> Any:
     """Базовый HTTP клиент для вызова API платформы."""
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0) as client:
+    async with httpx.AsyncClient(base_url=settings.api_base_url, timeout=30.0) as client:
         response = await getattr(client, method)(path, **kwargs)
         response.raise_for_status()
         if response.status_code == 204:
@@ -29,7 +28,7 @@ def register_platform_tools(mcp: "FastMCP") -> None:
         return await _api("get", "/api/businesses")
 
     @mcp.tool()
-    async def create_business(name: str, description: str = "") -> dict:
+    async def create_business(name: str, description: str | None = None) -> dict:
         """Создать новый бизнес.
 
         Args:
@@ -37,7 +36,7 @@ def register_platform_tools(mcp: "FastMCP") -> None:
             description: Описание (необязательно)
         """
         return await _api("post", "/api/businesses",
-                          json={"name": name, "description": description or None})
+                          json={"name": name, "description": description})
 
     @mcp.tool()
     async def list_products(business_id: str) -> list[dict]:
@@ -50,7 +49,8 @@ def register_platform_tools(mcp: "FastMCP") -> None:
 
     @mcp.tool()
     async def create_product(business_id: str, name: str,
-                             git_url: str = "", description: str = "") -> dict:
+                             git_url: str | None = None,
+                             description: str | None = None) -> dict:
         """Создать новый продукт в бизнесе.
 
         Args:
@@ -62,8 +62,8 @@ def register_platform_tools(mcp: "FastMCP") -> None:
         return await _api("post", f"/api/businesses/{business_id}/products", json={
             "business_id": business_id,
             "name": name,
-            "git_url": git_url or None,
-            "description": description or None,
+            "git_url": git_url,
+            "description": description,
         })
 
     @mcp.tool()
@@ -72,7 +72,7 @@ def register_platform_tools(mcp: "FastMCP") -> None:
         return await _api("get", "/api/teams")
 
     @mcp.tool()
-    async def create_team(name: str, description: str = "") -> dict:
+    async def create_team(name: str, description: str | None = None) -> dict:
         """Создать новую команду агентов.
 
         Args:
@@ -80,10 +80,10 @@ def register_platform_tools(mcp: "FastMCP") -> None:
             description: Описание (необязательно)
         """
         return await _api("post", "/api/teams",
-                          json={"name": name, "description": description or None})
+                          json={"name": name, "description": description})
 
     @mcp.tool()
-    async def list_agents(team_id: str = "") -> list[dict]:
+    async def list_agents(team_id: str | None = None) -> list[dict]:
         """Получить список агентов. Если team_id указан — только агенты команды.
 
         Args:
@@ -95,7 +95,7 @@ def register_platform_tools(mcp: "FastMCP") -> None:
 
     @mcp.tool()
     async def create_agent(name: str, team_id: str, system_prompt: str,
-                           description: str = "") -> dict:
+                           description: str | None = None) -> dict:
         """Создать нового агента в команде.
 
         Args:
@@ -108,5 +108,5 @@ def register_platform_tools(mcp: "FastMCP") -> None:
             "name": name,
             "team_id": team_id,
             "system_prompt": system_prompt,
-            "description": description or None,
+            "description": description,
         })

@@ -24,7 +24,7 @@ SYSTEM_AGENT_PROMPT = """
 
 
 async def seed_system_agent(db: AsyncSession) -> Agent:
-    result = await db.execute(select(Agent).where(Agent.is_system == True))
+    result = await db.execute(select(Agent).where(Agent.is_system.is_(True)))
     existing = result.scalar_one_or_none()
     if existing:
         existing.system_prompt = SYSTEM_AGENT_PROMPT  # обновляем при рестарте

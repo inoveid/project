@@ -2,6 +2,8 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
+import mcp.tools.platform as platform_module
+
 
 def _make_response(data, status_code=200):
     mock = MagicMock()
@@ -13,7 +15,7 @@ def _make_response(data, status_code=200):
 
 @pytest.fixture(autouse=True)
 def patch_base_url(monkeypatch):
-    monkeypatch.setenv("AC_API_BASE_URL", "http://testserver")
+    monkeypatch.setattr(platform_module.settings, "api_base_url", "http://testserver")
 
 
 class TestPlatformToolsRegistration:
@@ -64,199 +66,79 @@ class TestPlatformToolsFunctions:
     """Тесты вызовов каждого инструмента через замоканный _api."""
 
     @pytest.mark.asyncio
-    async def test_list_businesses(self):
+    async def test_list_businesses(self, registered_platform_tools):
         businesses = [{"id": "b1", "name": "Acme"}]
         with patch("mcp.tools.platform._api", new=AsyncMock(return_value=businesses)):
-            mcp_mock = MagicMock()
-            registered = {}
-
-            def tool_decorator(f):
-                registered[f.__name__] = f
-                return f
-
-            mcp_mock.tool.return_value = tool_decorator
-
-            from mcp.tools.platform import register_platform_tools
-            register_platform_tools(mcp_mock)
-
-            result = await registered["list_businesses"]()
+            result = await registered_platform_tools["list_businesses"]()
         assert result == businesses
 
     @pytest.mark.asyncio
-    async def test_create_business(self):
+    async def test_create_business(self, registered_platform_tools):
         business = {"id": "b1", "name": "Acme", "description": None}
         with patch("mcp.tools.platform._api", new=AsyncMock(return_value=business)):
-            mcp_mock = MagicMock()
-            registered = {}
-
-            def tool_decorator(f):
-                registered[f.__name__] = f
-                return f
-
-            mcp_mock.tool.return_value = tool_decorator
-
-            from mcp.tools.platform import register_platform_tools
-            register_platform_tools(mcp_mock)
-
-            result = await registered["create_business"]("Acme")
+            result = await registered_platform_tools["create_business"]("Acme")
         assert result["name"] == "Acme"
 
     @pytest.mark.asyncio
-    async def test_create_business_with_description(self):
+    async def test_create_business_with_description(self, registered_platform_tools):
         business = {"id": "b1", "name": "Acme", "description": "Corp"}
         api_mock = AsyncMock(return_value=business)
         with patch("mcp.tools.platform._api", new=api_mock):
-            mcp_mock = MagicMock()
-            registered = {}
-
-            def tool_decorator(f):
-                registered[f.__name__] = f
-                return f
-
-            mcp_mock.tool.return_value = tool_decorator
-
-            from mcp.tools.platform import register_platform_tools
-            register_platform_tools(mcp_mock)
-
-            await registered["create_business"]("Acme", "Corp")
+            await registered_platform_tools["create_business"]("Acme", "Corp")
             api_mock.assert_called_once_with(
                 "post", "/api/businesses",
                 json={"name": "Acme", "description": "Corp"}
             )
 
     @pytest.mark.asyncio
-    async def test_list_products(self):
+    async def test_list_products(self, registered_platform_tools):
         products = [{"id": "p1"}]
         with patch("mcp.tools.platform._api", new=AsyncMock(return_value=products)):
-            mcp_mock = MagicMock()
-            registered = {}
-
-            def tool_decorator(f):
-                registered[f.__name__] = f
-                return f
-
-            mcp_mock.tool.return_value = tool_decorator
-
-            from mcp.tools.platform import register_platform_tools
-            register_platform_tools(mcp_mock)
-
-            result = await registered["list_products"]("b1")
+            result = await registered_platform_tools["list_products"]("b1")
         assert result == products
 
     @pytest.mark.asyncio
-    async def test_create_product(self):
+    async def test_create_product(self, registered_platform_tools):
         product = {"id": "p1", "name": "Widget"}
         with patch("mcp.tools.platform._api", new=AsyncMock(return_value=product)):
-            mcp_mock = MagicMock()
-            registered = {}
-
-            def tool_decorator(f):
-                registered[f.__name__] = f
-                return f
-
-            mcp_mock.tool.return_value = tool_decorator
-
-            from mcp.tools.platform import register_platform_tools
-            register_platform_tools(mcp_mock)
-
-            result = await registered["create_product"]("b1", "Widget")
+            result = await registered_platform_tools["create_product"]("b1", "Widget")
         assert result["name"] == "Widget"
 
     @pytest.mark.asyncio
-    async def test_list_teams(self):
+    async def test_list_teams(self, registered_platform_tools):
         teams = [{"id": "t1", "name": "Dev"}]
         with patch("mcp.tools.platform._api", new=AsyncMock(return_value=teams)):
-            mcp_mock = MagicMock()
-            registered = {}
-
-            def tool_decorator(f):
-                registered[f.__name__] = f
-                return f
-
-            mcp_mock.tool.return_value = tool_decorator
-
-            from mcp.tools.platform import register_platform_tools
-            register_platform_tools(mcp_mock)
-
-            result = await registered["list_teams"]()
+            result = await registered_platform_tools["list_teams"]()
         assert result == teams
 
     @pytest.mark.asyncio
-    async def test_create_team(self):
+    async def test_create_team(self, registered_platform_tools):
         team = {"id": "t1", "name": "Dev"}
         with patch("mcp.tools.platform._api", new=AsyncMock(return_value=team)):
-            mcp_mock = MagicMock()
-            registered = {}
-
-            def tool_decorator(f):
-                registered[f.__name__] = f
-                return f
-
-            mcp_mock.tool.return_value = tool_decorator
-
-            from mcp.tools.platform import register_platform_tools
-            register_platform_tools(mcp_mock)
-
-            result = await registered["create_team"]("Dev")
+            result = await registered_platform_tools["create_team"]("Dev")
         assert result["name"] == "Dev"
 
     @pytest.mark.asyncio
-    async def test_list_agents_all(self):
+    async def test_list_agents_all(self, registered_platform_tools):
         agents = [{"id": "a1"}]
         api_mock = AsyncMock(return_value=agents)
         with patch("mcp.tools.platform._api", new=api_mock):
-            mcp_mock = MagicMock()
-            registered = {}
-
-            def tool_decorator(f):
-                registered[f.__name__] = f
-                return f
-
-            mcp_mock.tool.return_value = tool_decorator
-
-            from mcp.tools.platform import register_platform_tools
-            register_platform_tools(mcp_mock)
-
-            result = await registered["list_agents"]()
+            result = await registered_platform_tools["list_agents"]()
         api_mock.assert_called_once_with("get", "/api/agents")
         assert result == agents
 
     @pytest.mark.asyncio
-    async def test_list_agents_by_team(self):
+    async def test_list_agents_by_team(self, registered_platform_tools):
         agents = [{"id": "a1"}]
         api_mock = AsyncMock(return_value=agents)
         with patch("mcp.tools.platform._api", new=api_mock):
-            mcp_mock = MagicMock()
-            registered = {}
-
-            def tool_decorator(f):
-                registered[f.__name__] = f
-                return f
-
-            mcp_mock.tool.return_value = tool_decorator
-
-            from mcp.tools.platform import register_platform_tools
-            register_platform_tools(mcp_mock)
-
-            result = await registered["list_agents"]("t1")
+            result = await registered_platform_tools["list_agents"]("t1")
         api_mock.assert_called_once_with("get", "/api/teams/t1/agents")
         assert result == agents
 
     @pytest.mark.asyncio
-    async def test_create_agent(self):
+    async def test_create_agent(self, registered_platform_tools):
         agent = {"id": "a1", "name": "Bot"}
         with patch("mcp.tools.platform._api", new=AsyncMock(return_value=agent)):
-            mcp_mock = MagicMock()
-            registered = {}
-
-            def tool_decorator(f):
-                registered[f.__name__] = f
-                return f
-
-            mcp_mock.tool.return_value = tool_decorator
-
-            from mcp.tools.platform import register_platform_tools
-            register_platform_tools(mcp_mock)
-
-            result = await registered["create_agent"]("Bot", "t1", "You are Bot.")
+            result = await registered_platform_tools["create_agent"]("Bot", "t1", "You are Bot.")
         assert result["name"] == "Bot"
