@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -22,23 +23,23 @@ def _make_case(name: str = "crud-endpoint-basic") -> dict:
     }
 
 
-def _make_run(name: str = "test-run") -> dict:
-    return {
-        "id": uuid.uuid4(),
-        "name": name,
-        "prompt_version": "v1.0",
-        "prompt_snapshot": "You are a developer.",
-        "model": "claude-sonnet-4-20250514",
-        "status": "completed",
-        "total_cases": 5,
-        "passed_cases": 4,
-        "failed_cases": 1,
-        "pass_rate": 0.8,
-        "metadata_": {},
-        "started_at": datetime.now(timezone.utc),
-        "completed_at": datetime.now(timezone.utc),
-        "created_at": datetime.now(timezone.utc),
-    }
+def _make_run(name: str = "test-run") -> SimpleNamespace:
+    return SimpleNamespace(
+        id=uuid.uuid4(),
+        name=name,
+        prompt_version="v1.0",
+        prompt_snapshot="You are a developer.",
+        model="claude-sonnet-4-20250514",
+        status="completed",
+        total_cases=5,
+        passed_cases=4,
+        failed_cases=1,
+        pass_rate=0.8,
+        metadata_={},
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        created_at=datetime.now(timezone.utc),
+    )
 
 
 def _make_result(run_id: uuid.UUID, case_id: uuid.UUID) -> dict:
@@ -160,7 +161,7 @@ async def test_list_eval_runs(client):
 @pytest.mark.asyncio
 async def test_get_eval_run(client):
     run = _make_run()
-    run_id = run["id"]
+    run_id = run.id
     with patch(f"{SERVICE}.get_run", new_callable=AsyncMock, return_value=run):
         resp = await client.get(f"/api/eval/runs/{run_id}")
     assert resp.status_code == 200
@@ -292,7 +293,7 @@ def test_parse_judge_response_fail():
 async def test_run_eval_sets_failed_on_exception(client):
     """BUG-4: If execute_eval_run raises, the run status must become 'failed'."""
     run = _make_run()
-    run["status"] = "running"
+    run.status = "running"
 
     mock_session = AsyncMock()
     mock_run_obj = AsyncMock()

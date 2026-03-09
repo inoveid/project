@@ -22,6 +22,7 @@ def _make_agent(team_id: Optional[uuid.UUID] = None) -> dict:
         "system_prompt": "You are a developer.",
         "allowed_tools": ["bash", "read"],
         "config": {"model": "claude-sonnet"},
+        "is_system": False,
         "created_at": datetime.now(timezone.utc),
         "updated_at": datetime.now(timezone.utc),
     }
