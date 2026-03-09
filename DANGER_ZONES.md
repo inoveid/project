@@ -13,7 +13,7 @@
 | `api/app/services/graph_service.py` | **HIGH** | Orchestration, handoff, HITL gate, sub-agent lifecycle |
 | `api/app/routers/ws.py` | **HIGH** | Все WebSocket клиенты, reconnect, approve/reject flow |
 | `web/src/hooks/chat/` (пакет) | **HIGH** | Весь chat UI, streaming, handoff визуализация |
-| `web/src/types/index.ts` | **MEDIUM** | Frontend type contracts (29 type declarations (25 interfaces + 4 type aliases), WsIncoming/WsOutgoing) |
+| `web/src/types/index.ts` | **MEDIUM** | Frontend type contracts (35 type declarations (31 interfaces + 4 type aliases), WsIncoming/WsOutgoing) |
 | `api/app/main.py` (lifespan) | **MEDIUM** | Startup, graph init, seed_system_agent, router registration |
 | `api/app/database.py` | **MEDIUM** | Все DB-зависимые модули (9+ импортеров: все routers, auth_service, eval_service) |
 | `api/app/config.py` | **MEDIUM** | Все модули через `settings` singleton (11+ импортеров) |
@@ -217,9 +217,9 @@ cd web && npm test -- --run ChatPanel          # 6 тестов компонен
 
 ---
 
-### 5. `web/src/types/index.ts` (~250 строк) — MEDIUM
+### 5. `web/src/types/index.ts` (~290 строк) — MEDIUM
 
-**Что делает:** Все TypeScript интерфейсы и type unions. 29 type declarations (25 interfaces + 4 type aliases), включая `WsIncoming` (13 event types), `WsOutgoing` (4 message types), `ChatItem`, `HandoffItem`.
+**Что делает:** Все TypeScript интерфейсы и type unions. 35 type declarations (31 interfaces + 4 type aliases), включая `WsIncoming` (13 event types), `WsOutgoing` (4 message types), `ChatItem`, `HandoffItem`.
 
 **Связанные модули:**
 - Импортируется **всеми** frontend-файлами: hooks, components, API layer
@@ -306,6 +306,13 @@ cd api && pytest -v  # все тесты зависят от database setup
 
 ---
 
+
+### 7.5 `web/src/api/client.ts` — экспортируемый BASE_URL
+
+`client.ts` экспортирует `BASE_URL = "/api"`. Используется напрямую в `deleteBusiness()` (businesses.ts) для кастомной обработки 409. Если значение изменится — нужно проверить все прямые импортёры `BASE_URL`.
+
+**Импортёры BASE_URL:** `api/businesses.ts` (1 файл на текущий момент).
+
 ### 8. `api/app/config.py` (30 строк) — MEDIUM
 
 **Что делает:** Pydantic Settings с env-prefix `AC_`. Единственный `settings` singleton, импортируемый 11+ модулями.
@@ -350,6 +357,8 @@ cd api && pytest -v
 - `database.py` — `async_session` используется напрямую (не через `Depends(get_db)`)
 - `config.py` — `settings.clone_timeout_seconds` (default: 300 сек)
 - `routers/products.py` — вызывает `clone_product()`, возвращает `ProductRead` с `status="cloning"`
+
+**Frontend polling:** `useProduct(id, polling=true)` в `ProductCard` автоматически опрашивает сервер каждые 2 сек пока `status === 'cloning'` и останавливается при смене статуса. Изменение имён полей `status`/`clone_error` в `ProductRead` сломает polling и UI.
 
 **Что проверить после изменения:**
 - [ ] POST /clone возвращает 200 с `status="cloning"` немедленно (не блокирует на время clone)

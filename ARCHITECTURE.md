@@ -11,16 +11,18 @@
 ┌──────────────────────────────────────────────────────────────────┐
 │                     Frontend (React + Vite)                      │
 │                                                                  │
-│  Pages (4)           Hooks (8)             API Layer (8)         │
+│  Pages (6)           Hooks (9)             API Layer (9)         │
 │  ┌──────────────┐   ┌────────────────┐    ┌──────────────┐      │
 │  │ Dashboard    │──→│ useTeams       │──→ │ teams.ts     │──┐   │
 │  │ TeamPage     │   │ useAgents      │    │ agents.ts    │  │   │
 │  │ ChatPage     │   │ useSessions    │    │ sessions.ts  │  │   │
 │  │ EvalDashboard│   │ useAuth        │    │ auth.ts      │  │   │
-│  └──────────────┘   │ useAgentLinks  │    │ eval.ts      │  │   │
-│       │             │ useWorkspaces  │    │ agentLinks.ts│  │   │
-│       ▼             │ useEvaluations │    │ workspaces.ts│  │   │
-│  Components (30+)   └────────────────┘    └──────────────┘  │   │
+│  │ BusinessList │   │ useAgentLinks  │    │ eval.ts      │  │   │
+│  │ BusinessPage │   │ useBusinesses  │    │ agentLinks.ts│  │   │
+│  └──────────────┘   │ useProducts    │    │ businesses.ts│  │   │
+│       │             │ useEvaluations │    │ products.ts  │  │   │
+│       ▼             └────────────────┘    └──────────────┘  │   │
+│  Components (33+)                                            │   │
 │  ┌──────────────┐   ┌────────────────┐                      │   │
 │  │ ChatPanel    │──→│ useChat (374)  │──── WebSocket ───────┼─┐ │
 │  │ ChatWindow   │   │  13 WS events  │                      │ │ │
@@ -28,7 +30,9 @@
 │  │ SessionList  │                                           │ │ │
 │  └──────────────┘                                           │ │ │
 │                                                             │ │ │
-│  Types: types/index.ts (250 строк, 28 interfaces)          │ │ │
+│  GlobalChatWidget (фиксированный виджет вне Routes)         │ │ │
+│                                                             │ │ │
+│  Types: types/index.ts (~290 строк, 34 interfaces)         │ │ │
 └─────────────────────────────────────────────────────────────┼─┼─┘
                                                               │ │
                                HTTP REST ─────────────────────┘ │
@@ -142,11 +146,11 @@ Pydantic-схемы: паттерн `{Resource}Create`, `{Resource}Update`, `{Re
 
 | Категория | Файлов | Ключевые |
 |-----------|--------|----------|
-| Pages | 4 | Dashboard, TeamPage, ChatPage, EvalDashboard |
-| Hooks | 8 | useChat (пакет `hooks/chat/`, 5 файлов), useEvaluations, useAgents и др. |
-| Components | 30+ | ChatPanel, AgentForm, EvalRunDetail и др. |
-| API Layer | 8 | client.ts + 7 resource modules |
-| Types | 1 | 28 interfaces/types, 13+ WS event types |
+| Pages | 6 | Dashboard, TeamPage, ChatPage, EvalDashboard, BusinessListPage, BusinessPage |
+| Hooks | 9 | useChat (пакет `hooks/chat/`, 5 файлов), useBusinesses, useProducts, useEvaluations, useAgents и др. |
+| Components | 33+ | ChatPanel, AgentForm, EvalRunDetail, BusinessCard, ProductCard, GlobalChatWidget и др. |
+| API Layer | 9 | client.ts (экспортирует BASE_URL) + 8 resource modules |
+| Types | 1 | 34 interfaces/types, 13+ WS event types |
 
 #### MCP Server (автономный, stdio)
 
@@ -256,6 +260,23 @@ Change isolation: **высокая**.
 **Файлы:** evaluations router, eval_service, judge_service, eval schemas (4 файла).
 
 Change isolation: **средняя** (зависит от внешнего Claude API).
+
+### 2.5 Product clone polling flow
+
+```
+1. Client: POST /api/products/{id}/clone → status="cloning" (немедленно)
+2. Frontend: useCloneProduct() мутирует, setQueryData → status="cloning" в кеше
+3. ProductCard: передаёт polling=true в useProduct(id, polling=true)
+4. useProduct: refetchInterval = (query) => query.state.data?.status === 'cloning' ? 2000 : false
+   → polling каждые 2 сек пока status === 'cloning'
+   → автоматически останавливается когда status становится 'ready' или 'error'
+5. Сервер (backend): _do_clone() обновляет status в БД асинхронно
+```
+
+**Файлы:** api/products.ts, hooks/useProducts.ts, components/ProductCard.tsx, api/app/services/product_service.py.
+
+Change isolation: **высокая** — polling изолирован в useProduct, не влияет на другие хуки.
+
 
 ---
 
