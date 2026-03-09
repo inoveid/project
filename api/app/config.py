@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # Clone settings
     clone_timeout_seconds: int = 300
 
+    # MCP → API вызовы
+    api_base_url: str = "http://localhost:8000"
+
     model_config = {"env_prefix": "AC_", "env_file": ".env"}
 
 

@@ -336,10 +336,11 @@ cd api && pytest -v  # все тесты зависят от database setup
 - `main.py` — `settings.cors_origins`, `settings.database_url`
 - `product_service.py` — `settings.workspace_path`, `settings.clone_timeout_seconds`
 - `auth_service.py`, `memory_service.py`
+- `mcp/tools/platform.py` — `settings.api_base_url` (MCP Server → API HTTP вызовы)
 
 
-**Поля Settings (15 параметров, env-prefix `AC_`):**
-`database_url`, `claude_cli_path`, `workspace_path`, `cors_origins`, `oauth_client_id`, `oauth_authorize_url`, `oauth_token_url`, `oauth_redirect_uri`, `oauth_scopes`, `voyage_api_key`, `cb_failure_threshold`, `cb_recovery_timeout`, `cb_failure_window`, `budget_session_limit_usd`, `clone_timeout_seconds`
+**Поля Settings (16 параметров, env-prefix `AC_`):**
+`database_url`, `claude_cli_path`, `workspace_path`, `cors_origins`, `oauth_client_id`, `oauth_authorize_url`, `oauth_token_url`, `oauth_redirect_uri`, `oauth_scopes`, `voyage_api_key`, `cb_failure_threshold`, `cb_recovery_timeout`, `cb_failure_window`, `budget_session_limit_usd`, `clone_timeout_seconds`, `api_base_url`
 
 **Что проверить после изменения:**
 - [ ] Приложение стартует с текущими env-переменными
