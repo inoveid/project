@@ -486,4 +486,83 @@ describe("useChat", () => {
       expect(item.toolUses?.[0]?.result).toBe("ok");
     }
   });
+
+  it("approval_required sets pendingApproval state", () => {
+    const { result } = renderHook(() => useChat("s-1", [], true));
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.simulateOpen());
+
+    act(() =>
+      ws.simulateMessage({
+        type: "approval_required",
+        from_agent: "orchestrator",
+        to_agent: "coder",
+        task: "Write the feature",
+      }),
+    );
+
+    expect(result.current.pendingApproval).not.toBeNull();
+    expect(result.current.status).toBe("awaiting_approval");
+  });
+
+  it("approval_required shows agent info in pendingApproval", () => {
+    const { result } = renderHook(() => useChat("s-1", [], true));
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.simulateOpen());
+
+    act(() =>
+      ws.simulateMessage({
+        type: "approval_required",
+        from_agent: "orchestrator",
+        to_agent: "coder",
+        task: "Write the feature",
+      }),
+    );
+
+    expect(result.current.pendingApproval?.fromAgent).toBe("orchestrator");
+    expect(result.current.pendingApproval?.toAgent).toBe("coder");
+    expect(result.current.pendingApproval?.task).toBe("Write the feature");
+  });
+
+  it("approveHandoff sends approve message via WebSocket", () => {
+    const { result } = renderHook(() => useChat("s-1", [], true));
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.simulateOpen());
+
+    act(() =>
+      ws.simulateMessage({
+        type: "approval_required",
+        from_agent: "orchestrator",
+        to_agent: "coder",
+        task: "Write the feature",
+      }),
+    );
+    act(() => result.current.approveHandoff());
+
+    expect(ws.sent).toHaveLength(1);
+    expect(JSON.parse(ws.sent[0]!)).toEqual({ type: "approve" });
+    expect(result.current.pendingApproval).toBeNull();
+    expect(result.current.status).toBe("typing");
+  });
+
+  it("rejectHandoff sends reject message via WebSocket", () => {
+    const { result } = renderHook(() => useChat("s-1", [], true));
+    const ws = MockWebSocket.instances[0]!;
+    act(() => ws.simulateOpen());
+
+    act(() =>
+      ws.simulateMessage({
+        type: "approval_required",
+        from_agent: "orchestrator",
+        to_agent: "coder",
+        task: "Write the feature",
+      }),
+    );
+    act(() => result.current.rejectHandoff());
+
+    expect(ws.sent).toHaveLength(1);
+    expect(JSON.parse(ws.sent[0]!)).toEqual({ type: "reject" });
+    expect(result.current.pendingApproval).toBeNull();
+    expect(result.current.status).toBe("connected");
+  });
 });
