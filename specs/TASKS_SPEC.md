@@ -35,7 +35,7 @@ Business → Product → Task ← Team
 | description | text, nullable | Описание |
 | product_id | UUID FK → products, nullable | Продукт (даёт workdir) |
 | team_id | UUID FK → teams, nullable | Команда-исполнитель |
-| starting_agent_id | UUID FK → agents, nullable | Агент с которого начинается задача |
+| workflow_id | UUID FK → workflows, nullable | Workflow (связка агентов) для выполнения задачи |
 | status | str | Статус (см. ниже) |
 | created_at | datetime | |
 
@@ -59,8 +59,8 @@ backlog → in_progress → awaiting_user → in_progress (цикл)
 
 | Переход | Триггер |
 |---------|---------|
-| `backlog → in_progress` | Кнопка, drag, System Agent — после валидации |
-| `in_progress → awaiting_user` | WS событие `approval_required` (автоматически) |
+| `backlog → in_progress` | Кнопка, drag, System Agent — после валидации (workflow валиден) |
+| `in_progress → awaiting_user` | MCP handoff tool с `requires_approval=true` (автоматически) |
 | `awaiting_user → in_progress` | WS событие approve (автоматически) |
 | `in_progress → done` | Ручной drag или последний агент завершил |
 | `in_progress → error` | WS событие `error` (автоматически) |
@@ -72,7 +72,8 @@ backlog → in_progress → awaiting_user → in_progress (цикл)
 - description заполнен
 - product_id заполнен
 - team_id заполнен
-- starting_agent_id заполнен
+- workflow_id заполнен
+- workflow валиден (starting_agent_id и starting_prompt заполнены в workflow)
 
 ---
 
@@ -133,13 +134,15 @@ else:
 
 В `ws.py`, при получении WS-событий от агента — обновлять `task.status`:
 
-| WS событие | task.status |
-|------------|-------------|
-| `approval_required` | `awaiting_user` |
+| Событие | task.status |
+|---------|-------------|
+| MCP handoff tool с `requires_approval=true` | `awaiting_user` |
+| MCP handoff tool с `requires_approval=false` | остаётся `in_progress` (auto-переход) |
 | approve (`Command(resume=True)`) | `in_progress` |
 | `error` | `error` |
+| Конечный агент завершил работу (нет исходящих рёбер) | `done` |
 
-`done` и `in_progress` при старте — управляются вручную или через drag.
+`in_progress` при старте — управляется вручную или через drag.
 
 ---
 
@@ -152,10 +155,10 @@ else:
 3. **System Agent** — команда в GlobalChatWidget (System Agent вызывает API)
 
 Все три способа запускают одинаковую логику:
-1. Проверить валидацию (все поля заполнены)
+1. Проверить валидацию (все поля заполнены, workflow валиден)
 2. `task.status → in_progress`
-3. Создать Session с `task_id = task.id`, `agent_id = task.starting_agent_id`
-4. WS-соединение открывается, агент получает `task.description` как первое сообщение
+3. Создать Session с `task_id = task.id`, `agent_id = workflow.starting_agent_id`
+4. WS-соединение открывается, агент получает `workflow.starting_prompt` (с подстановкой переменных `{{task_title}}`, `{{task_description}}`) как первое сообщение
 
 ---
 
@@ -180,14 +183,14 @@ class TaskCreate(BaseModel):
     description: str | None = None
     product_id: UUID | None = None
     team_id: UUID | None = None
-    starting_agent_id: UUID | None = None
+    workflow_id: UUID | None = None
 
 class TaskUpdate(BaseModel):
     title: str | None = None
     description: str | None = None
     product_id: UUID | None = None
     team_id: UUID | None = None
-    starting_agent_id: UUID | None = None
+    workflow_id: UUID | None = None
 
 class TaskStatusUpdate(BaseModel):
     status: str  # валидируется по разрешённым переходам
@@ -198,7 +201,7 @@ class TaskRead(BaseModel):
     description: str | None
     product_id: UUID | None
     team_id: UUID | None
-    starting_agent_id: UUID | None
+    workflow_id: UUID | None
     status: str
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
@@ -271,10 +274,12 @@ class TaskRead(BaseModel):
 - Title (text input)
 - Description (textarea)
 - Team (select из teams)
-- Starting Agent (select из агентов выбранной команды)
+- Workflow (select из workflow выбранной команды)
 - Status (read-only badge + кнопки действий)
 
-Кнопка "Начать" если задача в `backlog` и валидна.
+Starting Agent отображается read-only (берётся из выбранного workflow).
+
+Кнопка "Начать" если задача в `backlog` и валидна (workflow заполнен и валиден).
 
 ### Вкладка "Чаты"
 
