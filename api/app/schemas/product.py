@@ -11,7 +11,7 @@ class ProductCreate(BaseModel):
     name: str
     description: Optional[str] = None
     git_url: Optional[str] = None
-    business_id: uuid.UUID
+    business_id: Optional[uuid.UUID] = None
 
 
 class ProductUpdate(BaseModel):
