@@ -3,6 +3,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi import HTTPException
 
 SERVICE = "app.routers.businesses"
 
@@ -42,12 +43,10 @@ async def test_create_business(client):
 async def test_get_business(client):
     biz = make_business()
     bid = biz["id"]
-    with (
-        patch(f"{SERVICE}.get_business", new_callable=AsyncMock, return_value=biz),
-        patch(f"{SERVICE}._to_read", new_callable=AsyncMock, return_value=biz),
-    ):
+    with patch(f"{SERVICE}.get_business", new_callable=AsyncMock, return_value=biz):
         resp = await client.get(f"/api/businesses/{bid}")
     assert resp.status_code == 200
+    assert resp.json()["name"] == "Acme Corp"
 
 
 @pytest.mark.asyncio
@@ -74,3 +73,13 @@ async def test_delete_business_force(client):
     with patch(f"{SERVICE}.delete_business", new_callable=AsyncMock, return_value=None):
         resp = await client.delete(f"/api/businesses/{bid}?force=true")
     assert resp.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_delete_business_with_products_no_force(client):
+    bid = uuid.uuid4()
+    exc = HTTPException(status_code=409, detail={"products_count": 2})
+    with patch(f"{SERVICE}.delete_business", new_callable=AsyncMock, side_effect=exc):
+        resp = await client.delete(f"/api/businesses/{bid}")
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["products_count"] == 2

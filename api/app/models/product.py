@@ -23,6 +23,7 @@ class Product(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     git_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     workspace_path: Mapped[str] = mapped_column(Text, nullable=False)
+    # Допустимые значения: pending | cloning | ready | error
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     clone_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

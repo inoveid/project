@@ -32,8 +32,7 @@ async def create_business_endpoint(
 async def get_business_endpoint(
     business_id: uuid.UUID, db: AsyncSession = Depends(get_db)
 ):
-    business = await get_business(db, business_id)
-    return await _to_read(db, business)
+    return await get_business(db, business_id)
 
 
 @router.put("/businesses/{business_id}", response_model=BusinessRead)
@@ -52,8 +51,3 @@ async def delete_business_endpoint(
     db: AsyncSession = Depends(get_db),
 ):
     await delete_business(db, business_id, force=force)
-
-
-async def _to_read(db: AsyncSession, business):
-    from app.services.business_service import _business_read
-    return await _business_read(db, business)

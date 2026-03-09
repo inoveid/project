@@ -1,8 +1,10 @@
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
+
+ProductStatus = Literal["pending", "cloning", "ready", "error"]
 
 
 class ProductCreate(BaseModel):
@@ -25,7 +27,7 @@ class ProductRead(BaseModel):
     description: Optional[str]
     git_url: Optional[str]
     workspace_path: str
-    status: str
+    status: ProductStatus
     clone_error: Optional[str]
     created_at: datetime
 

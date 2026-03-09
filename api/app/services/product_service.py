@@ -69,15 +69,47 @@ async def delete_product(db: AsyncSession, product_id: uuid.UUID) -> None:
     await db.commit()
 
 
+async def _do_clone(product_id: uuid.UUID) -> None:
+    """Фоновая задача: выполняет git clone и обновляет статус в своей сессии."""
+    from app.database import async_session
+
+    async with async_session() as db:
+        product = await get_product(db, product_id)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "clone", "--depth", "1", product.git_url, product.workspace_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                _, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(),
+                    timeout=settings.clone_timeout_seconds,
+                )
+                if proc.returncode != 0:
+                    product.status = "error"
+                    product.clone_error = stderr_bytes.decode().strip()
+                else:
+                    product.status = "ready"
+                    product.clone_error = None
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.communicate()
+                product.status = "error"
+                product.clone_error = "Clone timed out"
+        except Exception as e:
+            product.status = "error"
+            product.clone_error = str(e)
+        await db.commit()
+
+
 async def clone_product(db: AsyncSession, product_id: uuid.UUID) -> Product:
     product = await get_product(db, product_id)
 
     if not product.git_url:
         raise HTTPException(status_code=400, detail="Product has no git_url")
-
     if product.status == "cloning":
         raise HTTPException(status_code=409, detail="Product is already being cloned")
-
     if product.status == "error":
         shutil.rmtree(product.workspace_path, ignore_errors=True)
         os.makedirs(product.workspace_path, exist_ok=True)
@@ -85,27 +117,7 @@ async def clone_product(db: AsyncSession, product_id: uuid.UUID) -> Product:
     product.status = "cloning"
     product.clone_error = None
     await db.commit()
-
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "git", "clone", "--depth", "1", product.git_url, product.workspace_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr_bytes = await asyncio.wait_for(
-            proc.communicate(),
-            timeout=settings.clone_timeout_seconds,
-        )
-        if proc.returncode != 0:
-            product.status = "error"
-            product.clone_error = stderr_bytes.decode().strip()
-        else:
-            product.status = "ready"
-            product.clone_error = None
-    except asyncio.TimeoutError:
-        product.status = "error"
-        product.clone_error = "Clone timed out"
-
-    await db.commit()
     await db.refresh(product)
+
+    asyncio.create_task(_do_clone(product.id))
     return product

@@ -3,6 +3,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi import HTTPException
 
 SERVICE = "app.routers.products"
 
@@ -75,9 +76,27 @@ async def test_delete_product(client):
 
 @pytest.mark.asyncio
 async def test_clone_product(client):
-    product = make_product(status="ready", git_url="https://github.com/example/repo")
+    product = make_product(status="cloning", git_url="https://github.com/example/repo")
     pid = product["id"]
     with patch(f"{SERVICE}.clone_product", new_callable=AsyncMock, return_value=product):
         resp = await client.post(f"/api/products/{pid}/clone")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "ready"
+    assert resp.json()["status"] == "cloning"
+
+
+@pytest.mark.asyncio
+async def test_clone_product_no_git_url(client):
+    pid = uuid.uuid4()
+    exc = HTTPException(status_code=400, detail="Product has no git_url")
+    with patch(f"{SERVICE}.clone_product", new_callable=AsyncMock, side_effect=exc):
+        resp = await client.post(f"/api/products/{pid}/clone")
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_clone_product_already_cloning(client):
+    pid = uuid.uuid4()
+    exc = HTTPException(status_code=409, detail="Product is already being cloned")
+    with patch(f"{SERVICE}.clone_product", new_callable=AsyncMock, side_effect=exc):
+        resp = await client.post(f"/api/products/{pid}/clone")
+    assert resp.status_code == 409
