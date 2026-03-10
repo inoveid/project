@@ -281,6 +281,41 @@ export interface ProductUpdate {
   git_url?: string;
 }
 
+// ── Task types ──────────────────────────────────────────────────────────────
+
+export type TaskStatus = 'backlog' | 'in_progress' | 'awaiting_user' | 'done' | 'error';
+
+export interface Task {
+  id: string;
+  title: string;
+  description: string | null;
+  product_id: string | null;
+  team_id: string | null;
+  workflow_id: string | null;
+  status: TaskStatus;
+  created_at: string;
+}
+
+export interface TaskCreate {
+  title: string;
+  description?: string;
+  product_id?: string;
+  team_id?: string;
+  workflow_id?: string;
+}
+
+export interface TaskUpdate {
+  title?: string;
+  description?: string;
+  product_id?: string;
+  team_id?: string;
+  workflow_id?: string;
+}
+
+export interface TaskStatusUpdate {
+  status: TaskStatus;
+}
+
 export interface EvalComparison {
   run_a: { id: string; prompt_version: string | null; pass_rate: number | null };
   run_b: { id: string; prompt_version: string | null; pass_rate: number | null };

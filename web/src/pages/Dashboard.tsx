@@ -1,148 +1,352 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { ActiveSessions } from "../components/ActiveSessions";
-import { QuickStartChat } from "../components/QuickStartChat";
-import { SummaryCards } from "../components/SummaryCards";
-import { TeamCard } from "../components/TeamCard";
-import { TeamForm } from "../components/TeamForm";
-import {
-  useCreateTeam,
-  useDeleteTeam,
-  useTeams,
-  useUpdateTeam,
-} from "../hooks/useTeams";
-import { useSessions } from "../hooks/useSessions";
-import type { Team } from "../types";
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { useBusinesses } from '../hooks/useBusinesses';
+import { useProducts } from '../hooks/useProducts';
+import { useTeams } from '../hooks/useTeams';
+import { useTasks, useCreateTask, useUpdateTaskStatus } from '../hooks/useTasks';
+import { KanbanColumn } from '../components/tasks/KanbanColumn';
+import { TaskCard } from '../components/tasks/TaskCard';
+import { CreateTaskModal } from '../components/tasks/CreateTaskModal';
+import { ToastContainer, showToast } from '../components/tasks/Toast';
+import { isTransitionAllowed, getTransitionError } from '../components/tasks/statusConfig';
+import type { Task, TaskStatus } from '../types';
 
-type FormMode =
-  | { kind: "closed" }
-  | { kind: "create" }
-  | { kind: "edit"; team: Team };
+const STORAGE_KEY = 'dashboard_filters';
+
+interface DashboardFilters {
+  businessId: string | null;
+  productId: string | null;
+  teamId: string | null;
+}
+
+function loadFilters(): DashboardFilters {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return { businessId: null, productId: null, teamId: null };
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) {
+      return { businessId: null, productId: null, teamId: null };
+    }
+    const obj = parsed as Record<string, unknown>;
+    return {
+      businessId: typeof obj.businessId === 'string' ? obj.businessId : null,
+      productId: typeof obj.productId === 'string' ? obj.productId : null,
+      teamId: typeof obj.teamId === 'string' ? obj.teamId : null,
+    };
+  } catch {
+    return { businessId: null, productId: null, teamId: null };
+  }
+}
+
+function saveFilters(filters: DashboardFilters) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(filters));
+}
+
+const COLUMNS: Array<{ status: TaskStatus; title: string }> = [
+  { status: 'backlog', title: 'Backlog' },
+  { status: 'in_progress', title: 'In Progress' },
+  { status: 'awaiting_user', title: 'Ждёт решения' },
+];
 
 export function Dashboard() {
-  const navigate = useNavigate();
-  const { data: teams, isLoading, error } = useTeams();
-  const { data: sessions } = useSessions();
-  const createTeam = useCreateTeam();
-  const updateTeam = useUpdateTeam();
-  const deleteTeam = useDeleteTeam();
-  const [formMode, setFormMode] = useState<FormMode>({ kind: "closed" });
+  const [filters, setFilters] = useState<DashboardFilters>(loadFilters);
+  const [showDone, setShowDone] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [activeDragTask, setActiveDragTask] = useState<Task | null>(null);
 
-  function handleDelete(id: string) {
-    if (window.confirm("Delete this team?")) {
-      deleteTeam.mutate(id, {
-        onError: (err: Error) => alert(err.message),
-      });
+  const { data: businesses } = useBusinesses();
+  const { data: products } = useProducts(filters.businessId ?? '');
+  const { data: teams } = useTeams();
+  const { data: tasks, isLoading: tasksLoading } = useTasks(filters.productId);
+  const createTask = useCreateTask();
+  const updateTaskStatus = useUpdateTaskStatus();
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+  );
+
+  useEffect(() => {
+    saveFilters(filters);
+  }, [filters]);
+
+  // Reset product when business changes
+  const handleBusinessChange = useCallback((businessId: string) => {
+    setFilters({ businessId: businessId || null, productId: null, teamId: filters.teamId });
+  }, [filters.teamId]);
+
+  const handleProductChange = useCallback((productId: string) => {
+    setFilters((prev) => ({ ...prev, productId: productId || null }));
+  }, []);
+
+  const handleTeamChange = useCallback((teamId: string) => {
+    setFilters((prev) => ({ ...prev, teamId: teamId || null }));
+  }, []);
+
+  // Group tasks by status
+  const tasksByStatus = useMemo(() => {
+    const grouped: Record<TaskStatus, Task[]> = {
+      backlog: [],
+      in_progress: [],
+      awaiting_user: [],
+      done: [],
+      error: [],
+    };
+    if (!tasks) return grouped;
+
+    const filteredTasks = filters.teamId
+      ? tasks.filter((t) => t.team_id === filters.teamId)
+      : tasks;
+
+    for (const task of filteredTasks) {
+      grouped[task.status].push(task);
     }
+    return grouped;
+  }, [tasks, filters.teamId]);
+
+  const hasErrorTasks = tasksByStatus.error.length > 0;
+
+  // Drag handlers
+  function handleDragStart(event: DragStartEvent) {
+    const task = event.active.data.current?.task as Task | undefined;
+    setActiveDragTask(task ?? null);
   }
 
-  function handleEdit(team: Team) {
-    setFormMode({ kind: "edit", team });
-  }
+  function handleDragEnd(event: DragEndEvent) {
+    setActiveDragTask(null);
+    const { active, over } = event;
+    if (!over) return;
 
-  if (isLoading) {
-    return <p className="text-gray-500">Loading teams...</p>;
-  }
+    const task = active.data.current?.task as Task | undefined;
+    const targetStatus = over.data.current?.status as TaskStatus | undefined;
+    if (!task || !targetStatus || task.status === targetStatus) return;
 
-  if (error) {
-    return (
-      <p className="text-red-600">Failed to load teams: {error.message}</p>
+    if (!isTransitionAllowed(task.status, targetStatus)) {
+      const errorMsg = getTransitionError(task.status, targetStatus);
+      if (errorMsg) showToast(errorMsg);
+      return;
+    }
+
+    // Backlog → in_progress requires valid task
+    if (task.status === 'backlog' && targetStatus === 'in_progress' && !task.product_id) {
+      showToast('Задача должна иметь привязку к продукту');
+      return;
+    }
+
+    updateTaskStatus.mutate(
+      { id: task.id, status: targetStatus },
+      {
+        onError: (err: Error) => {
+          showToast(`Ошибка: ${err.message}`);
+        },
+      },
     );
   }
 
-  const teamsCount = teams?.length ?? 0;
-  const agentsCount = teams?.reduce((sum, t) => sum + t.agents_count, 0) ?? 0;
-  const activeSessions = sessions ?? [];
-  const activeMutation = formMode.kind === "create" ? createTeam : updateTeam;
+  function handleStartTask(taskId: string) {
+    updateTaskStatus.mutate(
+      { id: taskId, status: 'in_progress' },
+      {
+        onError: (err: Error) => showToast(`Ошибка: ${err.message}`),
+      },
+    );
+  }
+
+  function handleTaskClick(_task: Task) {
+    // Заглушка до TASK-047
+  }
+
+  const filtersSelected = !!filters.businessId && !!filters.productId;
 
   return (
-    <div>
-      <SummaryCards
-        teamsCount={teamsCount}
-        agentsCount={agentsCount}
-        activeSessionsCount={activeSessions.length}
+    <div className="flex flex-col h-full">
+      <FilterBar
+        businesses={businesses ?? []}
+        products={products ?? []}
+        teams={teams ?? []}
+        filters={filters}
+        onBusinessChange={handleBusinessChange}
+        onProductChange={handleProductChange}
+        onTeamChange={handleTeamChange}
       />
 
-      <section className="mb-8">
-        <h2 className="text-lg font-semibold text-gray-900 mb-3">
-          Quick Start
-        </h2>
-        <QuickStartChat
-          onSessionCreated={(id) => navigate(`/chat/${id}`)}
-        />
-      </section>
+      {!filtersSelected && (
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-gray-400 text-sm">
+            Выберите бизнес и продукт, чтобы увидеть задачи
+          </p>
+        </div>
+      )}
 
-      <section className="mb-8">
-        <h2 className="text-lg font-semibold text-gray-900 mb-3">
-          Active Sessions
-        </h2>
-        <ActiveSessions
-          sessions={activeSessions}
-          onOpenChat={(id) => navigate(`/chat/${id}`)}
-        />
-      </section>
+      {filtersSelected && tasksLoading && (
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-gray-400 text-sm">Загрузка задач...</p>
+        </div>
+      )}
 
-      <section className="mb-8">
-        <h2 className="text-lg font-semibold text-gray-900 mb-3">Бизнесы и продукты</h2>
-        <Link
-          to="/businesses"
-          className="inline-block bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700"
-        >
-          Перейти к бизнесам →
-        </Link>
-      </section>
+      {filtersSelected && !tasksLoading && (
+        <>
+          <div className="flex items-center gap-3 px-4 py-2">
+            <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showDone}
+                onChange={(e) => setShowDone(e.target.checked)}
+                className="rounded"
+              />
+              Показать завершённые
+            </label>
+          </div>
 
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-lg font-semibold text-gray-900">Teams</h2>
-        {formMode.kind === "closed" && (
-          <button
-            onClick={() => setFormMode({ kind: "create" })}
-            className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700"
+          <DndContext
+            sensors={sensors}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
           >
-            Create Team
-          </button>
-        )}
-      </div>
+            <div className="flex-1 overflow-x-auto px-4 pb-4">
+              <div className="flex gap-4 min-h-0">
+                {COLUMNS.map((col) => (
+                  <KanbanColumn
+                    key={col.status}
+                    title={col.title}
+                    status={col.status}
+                    tasks={tasksByStatus[col.status]}
+                    onTaskClick={handleTaskClick}
+                    onStartTask={col.status === 'backlog' ? handleStartTask : undefined}
+                    showAddButton={col.status === 'backlog'}
+                    onAddClick={col.status === 'backlog' ? () => setShowCreateModal(true) : undefined}
+                  />
+                ))}
 
-      {formMode.kind !== "closed" && (
-        <div className="mb-6">
-          <TeamForm
-            initial={formMode.kind === "edit" ? formMode.team : undefined}
-            onCreate={(data) => {
-              createTeam.mutate(data, {
-                onSuccess: () => setFormMode({ kind: "closed" }),
-              });
-            }}
-            onUpdate={(data) => {
-              if (formMode.kind !== "edit") return;
-              updateTeam.mutate(
-                { id: formMode.team.id, data },
-                { onSuccess: () => setFormMode({ kind: "closed" }) },
-              );
-            }}
-            onCancel={() => setFormMode({ kind: "closed" })}
-            isLoading={activeMutation.isPending}
-            error={activeMutation.error?.message ?? null}
-          />
-        </div>
+                {showDone && (
+                  <KanbanColumn
+                    title="Готово"
+                    status="done"
+                    tasks={tasksByStatus.done}
+                    onTaskClick={handleTaskClick}
+                  />
+                )}
+
+                {hasErrorTasks && (
+                  <KanbanColumn
+                    title="Ошибка"
+                    status="error"
+                    tasks={tasksByStatus.error}
+                    onTaskClick={handleTaskClick}
+                  />
+                )}
+              </div>
+            </div>
+
+            <DragOverlay>
+              {activeDragTask && (
+                <TaskCard
+                  task={activeDragTask}
+                  onClick={() => undefined}
+                />
+              )}
+            </DragOverlay>
+          </DndContext>
+        </>
       )}
 
-      {teams && teams.length > 0 ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {teams.map((team) => (
-            <TeamCard
-              key={team.id}
-              team={team}
-              onEdit={handleEdit}
-              onDelete={handleDelete}
-            />
-          ))}
-        </div>
-      ) : (
-        <p className="text-gray-500">
-          No teams yet. Create your first team to get started.
-        </p>
+      {showCreateModal && filters.productId && (
+        <CreateTaskModal
+          productId={filters.productId}
+          isLoading={createTask.isPending}
+          onSubmit={(data) => {
+            createTask.mutate(data, {
+              onSuccess: () => setShowCreateModal(false),
+              onError: (err: Error) => showToast(`Ошибка: ${err.message}`),
+            });
+          }}
+          onClose={() => setShowCreateModal(false)}
+        />
       )}
+
+      <ToastContainer />
     </div>
+  );
+}
+
+// ── FilterBar ────────────────────────────────────────────────────────────────
+
+interface FilterBarProps {
+  businesses: Array<{ id: string; name: string }>;
+  products: Array<{ id: string; name: string }>;
+  teams: Array<{ id: string; name: string }>;
+  filters: DashboardFilters;
+  onBusinessChange: (id: string) => void;
+  onProductChange: (id: string) => void;
+  onTeamChange: (id: string) => void;
+}
+
+function FilterBar({
+  businesses,
+  products,
+  teams,
+  filters,
+  onBusinessChange,
+  onProductChange,
+  onTeamChange,
+}: FilterBarProps) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-gray-200 bg-white">
+      <Select
+        label="Business"
+        value={filters.businessId ?? ''}
+        options={businesses.map((b) => ({ value: b.id, label: b.name }))}
+        onChange={onBusinessChange}
+        placeholder="Выбрать..."
+      />
+
+      <Select
+        label="Product"
+        value={filters.productId ?? ''}
+        options={products.map((p) => ({ value: p.id, label: p.name }))}
+        onChange={onProductChange}
+        placeholder="Выбрать..."
+        disabled={!filters.businessId}
+      />
+
+      <Select
+        label="Team"
+        value={filters.teamId ?? ''}
+        options={teams.map((t) => ({ value: t.id, label: t.name }))}
+        onChange={onTeamChange}
+        placeholder="Все"
+      />
+    </div>
+  );
+}
+
+// ── Select helper ────────────────────────────────────────────────────────────
+
+interface SelectProps {
+  label: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+  placeholder: string;
+  disabled?: boolean;
+}
+
+function Select({ label, value, options, onChange, placeholder, disabled }: SelectProps) {
+  return (
+    <label className="flex items-center gap-1.5 text-sm text-gray-600">
+      {label}:
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
+      >
+        <option value="">{placeholder}</option>
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
