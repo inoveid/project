@@ -5,7 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.schemas.task import TaskRead
-from app.schemas.workflow import WorkflowCreate, WorkflowRead, WorkflowUpdate
+from app.schemas.workflow import (
+    WorkflowCreate,
+    WorkflowLockStatusRequest,
+    WorkflowLockStatusResponse,
+    WorkflowRead,
+    WorkflowUpdate,
+)
 from app.services.workflow_service import (
     AgentNotInTeamError,
     DuplicateWorkflowError,
@@ -14,6 +20,7 @@ from app.services.workflow_service import (
     create_workflow,
     delete_workflow,
     get_active_tasks,
+    get_locked_workflow_ids,
     get_workflow,
     get_workflows,
     update_workflow,
@@ -74,6 +81,16 @@ async def update_workflow_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
     except DuplicateWorkflowError as e:
         raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post(
+    "/workflows/lock-status", response_model=WorkflowLockStatusResponse
+)
+async def check_lock_status(
+    data: WorkflowLockStatusRequest, db: AsyncSession = Depends(get_db)
+):
+    locked = await get_locked_workflow_ids(db, data.workflow_ids)
+    return WorkflowLockStatusResponse(locked_ids=list(locked))
 
 
 @router.get(

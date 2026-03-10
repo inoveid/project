@@ -75,7 +75,17 @@ export function validateAll(
     issues.push(...validateWorkflow(workflow, edges, agents));
   }
 
-  // Team-level info
+  // Collect all agent IDs that participate in at least one workflow
+  const participatingAgentIds = new Set<string>();
+  for (const wf of workflows) {
+    participatingAgentIds.add(wf.starting_agent_id);
+  }
+  for (const edge of edges) {
+    participatingAgentIds.add(edge.from_agent_id);
+    participatingAgentIds.add(edge.to_agent_id);
+  }
+
+  // Team-level checks
   for (const teamId of teamIds) {
     const teamAgents = agents.filter((a) => a.team_id === teamId);
     const teamWorkflows = workflows.filter((w) => w.team_id === teamId);
@@ -94,6 +104,19 @@ export function validateAll(
         message: "Team has no workflows",
         nodeId: teamId,
       });
+    }
+
+    // Agents that belong to a team with workflows but aren't part of any
+    if (teamWorkflows.length > 0) {
+      for (const agent of teamAgents) {
+        if (!participatingAgentIds.has(agent.id)) {
+          issues.push({
+            type: "warning",
+            message: `Agent '${agent.name}' is not part of any workflow`,
+            nodeId: agent.id,
+          });
+        }
+      }
     }
   }
 

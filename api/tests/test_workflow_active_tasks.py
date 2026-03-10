@@ -20,7 +20,8 @@ def _make_task(workflow_id: uuid.UUID, status: str = "in_progress") -> dict:
     }
 
 
-SERVICE = "app.routers.workflows"
+WORKFLOW_SERVICE = "app.routers.workflows"
+SERVICE = WORKFLOW_SERVICE
 
 
 @pytest.mark.asyncio
@@ -63,3 +64,37 @@ async def test_active_tasks_workflow_not_found(client):
     ):
         resp = await client.get(f"/api/workflows/{wid}/active-tasks")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_lock_status_returns_locked_ids(client):
+    wid1 = uuid.uuid4()
+    wid2 = uuid.uuid4()
+    with patch(
+        f"{WORKFLOW_SERVICE}.get_locked_workflow_ids",
+        new_callable=AsyncMock,
+        return_value={wid1},
+    ):
+        resp = await client.post(
+            "/api/workflows/lock-status",
+            json={"workflow_ids": [str(wid1), str(wid2)]},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert str(wid1) in data["locked_ids"]
+    assert str(wid2) not in data["locked_ids"]
+
+
+@pytest.mark.asyncio
+async def test_lock_status_empty(client):
+    with patch(
+        f"{WORKFLOW_SERVICE}.get_locked_workflow_ids",
+        new_callable=AsyncMock,
+        return_value=set(),
+    ):
+        resp = await client.post(
+            "/api/workflows/lock-status",
+            json={"workflow_ids": []},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["locked_ids"] == []

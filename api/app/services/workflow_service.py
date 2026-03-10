@@ -106,7 +106,7 @@ async def get_active_tasks(
     db: AsyncSession, workflow_id: uuid.UUID
 ) -> list["Task"]:
     """Return tasks with status in_progress or awaiting_user for a workflow."""
-    from app.models.task import Task
+    from app.models.task import Task  # lazy: avoid circular import
 
     await get_workflow(db, workflow_id)  # raises WorkflowNotFoundError if missing
 
@@ -122,9 +122,30 @@ async def get_active_tasks(
     return list(result.scalars().all())
 
 
+async def get_locked_workflow_ids(
+    db: AsyncSession, workflow_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """Return the subset of workflow_ids that have active tasks (locked)."""
+    from app.models.task import Task  # lazy: avoid circular import
+
+    if not workflow_ids:
+        return set()
+
+    stmt = (
+        select(Task.workflow_id)
+        .where(
+            Task.workflow_id.in_(workflow_ids),
+            Task.status.in_(["in_progress", "awaiting_user"]),
+        )
+        .distinct()
+    )
+    result = await db.execute(stmt)
+    return set(result.scalars().all())
+
+
 async def validate_workflow(db: AsyncSession, workflow_id: uuid.UUID) -> bool:
     """Check that starting_agent exists and workflow has at least one edge."""
-    from app.models.workflow_edge import WorkflowEdge
+    from app.models.workflow_edge import WorkflowEdge  # lazy: avoid circular import
 
     workflow = await get_workflow(db, workflow_id)
 

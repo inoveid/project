@@ -29,3 +29,11 @@ class WorkflowRead(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class WorkflowLockStatusRequest(BaseModel):
+    workflow_ids: list[uuid.UUID] = Field(..., max_length=100)
+
+
+class WorkflowLockStatusResponse(BaseModel):
+    locked_ids: list[uuid.UUID]

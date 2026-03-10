@@ -122,4 +122,28 @@ describe("validateAll", () => {
     const info = issues.filter((i) => i.type === "info");
     expect(info).toHaveLength(0);
   });
+
+  it("warns about agent not part of any workflow", () => {
+    const wf = makeWorkflow({ starting_agent_id: "agent-1" });
+    const agents = [
+      makeAgent({ id: "agent-1" }),
+      makeAgent({ id: "agent-2", name: "Idle" }),
+    ];
+    const edges = [
+      makeEdge({ from_agent_id: "agent-1", to_agent_id: "agent-3" }),
+    ];
+    const issues = validateAll([wf], edges, agents, ["team-1"]);
+    const notInWf = issues.filter(
+      (i) => i.type === "warning" && i.nodeId === "agent-2",
+    );
+    expect(notInWf).toHaveLength(1);
+    expect(notInWf[0].message).toContain("not part of any workflow");
+  });
+
+  it("does not warn about idle agent when team has no workflows", () => {
+    const agents = [makeAgent({ id: "agent-1" })];
+    const issues = validateAll([], [], agents, ["team-1"]);
+    const warnings = issues.filter((i) => i.type === "warning");
+    expect(warnings).toHaveLength(0);
+  });
 });

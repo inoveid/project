@@ -66,3 +66,12 @@ export function deleteWorkflowEdge(id: string): Promise<void> {
 export function getWorkflowActiveTasks(workflowId: string): Promise<Task[]> {
   return fetchApi<Task[]>(`/workflows/${workflowId}/active-tasks`);
 }
+
+export function getWorkflowLockStatus(
+  workflowIds: string[],
+): Promise<{ locked_ids: string[] }> {
+  return fetchApi<{ locked_ids: string[] }>("/workflows/lock-status", {
+    method: "POST",
+    body: JSON.stringify({ workflow_ids: workflowIds }),
+  });
+}

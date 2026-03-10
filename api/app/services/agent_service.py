@@ -98,6 +98,7 @@ async def can_delete_agent(
 
     Returns (can_delete, reason). reason is None when deletion is allowed.
     """
+    # lazy: avoid circular import
     from app.models.session import Session
     from app.models.task import Task
     from app.models.workflow import Workflow
@@ -140,7 +141,14 @@ async def can_delete_agent(
     return True, None
 
 
+class AgentDeletionBlockedError(Exception):
+    pass
+
+
 async def delete_agent(db: AsyncSession, agent_id: uuid.UUID) -> None:
+    can_del, reason = await can_delete_agent(db, agent_id)
+    if not can_del:
+        raise AgentDeletionBlockedError(reason)
     agent = await get_agent(db, agent_id)
     await db.delete(agent)
     await db.commit()

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type { Task } from "../types";
-import { getWorkflowActiveTasks } from "../api/workflows";
+import { getWorkflowActiveTasks, getWorkflowLockStatus } from "../api/workflows";
 
 interface WorkflowLockState {
   isLocked: boolean;
@@ -34,21 +34,18 @@ export function useWorkflowLock(workflowId: string | null): WorkflowLockState {
 }
 
 /**
- * Batch version: checks lock state for multiple workflows at once.
+ * Batch version: checks lock state for multiple workflows in a single HTTP request.
  *
  * Returns a Map<workflowId, boolean> indicating which are locked.
  */
 export function useWorkflowLocks(workflowIds: string[]): Map<string, boolean> {
+  const sortedIds = [...workflowIds].sort();
   const queries = useQuery({
-    queryKey: ["workflow-locks", ...workflowIds.sort()],
+    queryKey: ["workflow-locks", ...sortedIds],
     queryFn: async () => {
-      const results = await Promise.all(
-        workflowIds.map(async (id) => {
-          const tasks = await getWorkflowActiveTasks(id);
-          return [id, tasks.length > 0] as const;
-        }),
-      );
-      return new Map(results);
+      const { locked_ids } = await getWorkflowLockStatus(workflowIds);
+      const lockedSet = new Set(locked_ids);
+      return new Map(workflowIds.map((id) => [id, lockedSet.has(id)]));
     },
     enabled: workflowIds.length > 0,
     refetchInterval: 30_000,

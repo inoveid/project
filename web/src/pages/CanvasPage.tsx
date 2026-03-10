@@ -159,14 +159,18 @@ export function CanvasPage() {
 
   // Delete edges via keyboard
   const handleEdgesDelete = useCallback((deletedEdges: Edge[]) => {
+    const blocked: string[] = [];
     for (const edge of deletedEdges) {
       const rawId = stripNodePrefix(edge.id, "edge-");
       const edgeData = allEdges.find((e) => e.id === rawId);
       if (edgeData && lockedWorkflowIds.has(edgeData.workflow_id)) {
-        alert("Cannot delete edge: workflow is being used by an active task.");
-        return;
+        blocked.push(rawId);
+        continue;
       }
       void mutations.handleDeleteEdge(rawId);
+    }
+    if (blocked.length > 0) {
+      alert("Some edges could not be deleted: workflow is being used by an active task.");
     }
   }, [mutations, allEdges, lockedWorkflowIds]);
 

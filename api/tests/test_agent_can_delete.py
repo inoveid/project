@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.agent_service import AgentNotFoundError
+from app.services.agent_service import AgentDeletionBlockedError, AgentNotFoundError
 
 
 SERVICE = "app.routers.agents"
@@ -66,3 +66,17 @@ async def test_can_delete_agent_not_found(client):
     ):
         resp = await client.get(f"/api/agents/{aid}/can-delete")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_agent_blocked_returns_409(client):
+    aid = uuid.uuid4()
+    reason = "Agent 'Coder' has active sessions"
+    with patch(
+        f"{SERVICE}.delete_agent",
+        new_callable=AsyncMock,
+        side_effect=AgentDeletionBlockedError(reason),
+    ):
+        resp = await client.delete(f"/api/agents/{aid}")
+    assert resp.status_code == 409
+    assert reason in resp.json()["detail"]

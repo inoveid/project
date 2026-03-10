@@ -6,8 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.agent import Agent
-from app.schemas.agent import AgentCreate, AgentRead, AgentUpdate
+from app.schemas.agent import AgentCanDeleteResponse, AgentCreate, AgentRead, AgentUpdate
 from app.services.agent_service import (
+    AgentDeletionBlockedError,
     AgentDuplicateNameError,
     AgentNotFoundError,
     TeamNotFoundError,
@@ -64,13 +65,13 @@ async def create_agent_endpoint(
         raise HTTPException(status_code=409, detail=str(e))
 
 
-@router.get("/agents/{agent_id}/can-delete")
+@router.get("/agents/{agent_id}/can-delete", response_model=AgentCanDeleteResponse)
 async def check_agent_deletable(
     agent_id: uuid.UUID, db: AsyncSession = Depends(get_db)
 ):
     try:
-        can_delete, reason = await can_delete_agent(db, agent_id)
-        return {"can_delete": can_delete, "reason": reason}
+        can_del, reason = await can_delete_agent(db, agent_id)
+        return AgentCanDeleteResponse(can_delete=can_del, reason=reason)
     except AgentNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -107,3 +108,5 @@ async def delete_agent_endpoint(
         await delete_agent(db, agent_id)
     except AgentNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except AgentDeletionBlockedError as e:
+        raise HTTPException(status_code=409, detail=str(e))

@@ -52,3 +52,8 @@ class AgentRead(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class AgentCanDeleteResponse(BaseModel):
+    can_delete: bool
+    reason: Optional[str] = None
