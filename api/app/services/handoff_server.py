@@ -12,6 +12,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
+from enum import Enum
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,22 +32,28 @@ class HandoffTool:
 
     name: str
     description: str
-    edge_id: uuid.UUID
-    to_agent_id: uuid.UUID
     to_agent_name: str
     requires_approval: bool
+    edge_id: uuid.UUID | None = None
+    to_agent_id: uuid.UUID | None = None
     prompt_template: str | None = None
     prompt_id: str | None = None
+
+
+class HandoffResultType(str, Enum):
+    """Discriminated type for handoff outcomes — exactly one per result."""
+
+    FORWARDED = "forwarded"
+    AWAITING_APPROVAL = "awaiting_approval"
+    BLOCKED = "blocked"
+    COMPLETED = "completed"
 
 
 @dataclass
 class HandoffResult:
     """Result of handling a handoff tool call."""
 
-    forwarded: bool = False
-    awaiting_approval: bool = False
-    blocked: bool = False
-    completed: bool = False
+    result_type: HandoffResultType
     reason: str = ""
     to_agent_id: uuid.UUID | None = None
     to_agent_name: str = ""
@@ -155,8 +162,6 @@ async def generate_handoff_tools(
         tools.append(HandoffTool(
             name=COMPLETE_TASK_TOOL_NAME,
             description="Complete the current task. Call when your work is done.",
-            edge_id=uuid.UUID(int=0),
-            to_agent_id=uuid.UUID(int=0),
             to_agent_name="",
             requires_approval=False,
         ))
@@ -271,11 +276,16 @@ async def handle_handoff_tool_call(
     task_id: uuid.UUID | None,
     workflow_id: uuid.UUID,
     agent_id: uuid.UUID,
+    tools: list[HandoffTool] | None = None,
 ) -> HandoffResult:
     """
     Handle a handoff tool call from an agent.
 
-    1. Find edge by tool_name and agent_id
+    Args:
+        tools: Pre-generated handoff tools. If None, will be generated (extra DB query).
+
+    Flow:
+    1. Find edge by tool_name
     2. Check max_cycles for to_agent
     3. If max_cycles exceeded → blocked
     4. If requires_approval → awaiting_approval
@@ -284,31 +294,38 @@ async def handle_handoff_tool_call(
     # Handle complete_task
     if tool_name == COMPLETE_TASK_TOOL_NAME:
         return HandoffResult(
-            completed=True,
+            result_type=HandoffResultType.COMPLETED,
             reason="Task completed by agent",
             tool_args=tool_args,
         )
 
-    # Generate tools to find the matching one
-    tools = await generate_handoff_tools(db, agent_id, workflow_id)
+    # Use pre-generated tools or generate fresh
+    if tools is None:
+        tools = await generate_handoff_tools(db, agent_id, workflow_id)
     tool = next((t for t in tools if t.name == tool_name), None)
 
     if not tool:
         return HandoffResult(
-            blocked=True,
+            result_type=HandoffResultType.BLOCKED,
             reason=f"Unknown handoff tool: {tool_name}",
         )
 
     # Check max_cycles
     if task_id:
-        visits = await count_agent_visits(db, task_id, tool.to_agent_id)
         target_agent = await db.get(Agent, tool.to_agent_id)
-        max_cycles = target_agent.max_cycles if target_agent else 3
-
-        if visits >= max_cycles:
+        if not target_agent:
             return HandoffResult(
-                blocked=True,
-                reason=f"max_cycles ({max_cycles}) reached for agent {tool.to_agent_name}",
+                result_type=HandoffResultType.BLOCKED,
+                reason=f"Target agent {tool.to_agent_name} not found in database",
+                to_agent_id=tool.to_agent_id,
+                to_agent_name=tool.to_agent_name,
+            )
+
+        visits = await count_agent_visits(db, task_id, tool.to_agent_id)
+        if visits >= target_agent.max_cycles:
+            return HandoffResult(
+                result_type=HandoffResultType.BLOCKED,
+                reason=f"max_cycles ({target_agent.max_cycles}) reached for agent {tool.to_agent_name}",
                 to_agent_id=tool.to_agent_id,
                 to_agent_name=tool.to_agent_name,
             )
@@ -321,7 +338,7 @@ async def handle_handoff_tool_call(
 
     if tool.requires_approval:
         return HandoffResult(
-            awaiting_approval=True,
+            result_type=HandoffResultType.AWAITING_APPROVAL,
             to_agent_id=tool.to_agent_id,
             to_agent_name=tool.to_agent_name,
             prompt=prompt,
@@ -331,7 +348,7 @@ async def handle_handoff_tool_call(
         )
 
     return HandoffResult(
-        forwarded=True,
+        result_type=HandoffResultType.FORWARDED,
         to_agent_id=tool.to_agent_id,
         to_agent_name=tool.to_agent_name,
         prompt=prompt,

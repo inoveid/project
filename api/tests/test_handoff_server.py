@@ -8,6 +8,7 @@ import pytest
 from app.services.handoff_server import (
     COMPLETE_TASK_TOOL_NAME,
     HandoffResult,
+    HandoffResultType,
     HandoffTool,
     count_agent_visits,
     format_handoff_tools_prompt,
@@ -104,8 +105,6 @@ def test_format_handoff_tools_prompt_complete_only():
         HandoffTool(
             name=COMPLETE_TASK_TOOL_NAME,
             description="Complete the task",
-            edge_id=uuid.UUID(int=0),
-            to_agent_id=uuid.UUID(int=0),
             to_agent_name="",
             requires_approval=False,
         ),
@@ -185,6 +184,8 @@ async def test_generate_handoff_tools_terminal_node():
     tools = await generate_handoff_tools(db, agent_id, workflow_id)
     assert len(tools) == 1
     assert tools[0].name == COMPLETE_TASK_TOOL_NAME
+    assert tools[0].edge_id is None
+    assert tools[0].to_agent_id is None
 
 
 @pytest.mark.asyncio
@@ -243,10 +244,10 @@ async def test_resolve_prompt_from_template():
     tool = HandoffTool(
         name="forward",
         description="Forward",
-        edge_id=uuid.uuid4(),
-        to_agent_id=uuid.uuid4(),
         to_agent_name="QA",
         requires_approval=False,
+        edge_id=uuid.uuid4(),
+        to_agent_id=uuid.uuid4(),
         prompt_template="Review {{task_title}}",
     )
     task = MagicMock()
@@ -263,10 +264,10 @@ async def test_resolve_prompt_fallback_to_args():
     tool = HandoffTool(
         name="forward",
         description="Forward",
-        edge_id=uuid.uuid4(),
-        to_agent_id=uuid.uuid4(),
         to_agent_name="QA",
         requires_approval=False,
+        edge_id=uuid.uuid4(),
+        to_agent_id=uuid.uuid4(),
     )
     db = AsyncMock()
     result = await resolve_handoff_prompt(db, tool, None, {"comment": "Please test"})
@@ -279,10 +280,10 @@ async def test_resolve_prompt_from_prompt_id():
     tool = HandoffTool(
         name="forward",
         description="Forward",
-        edge_id=uuid.uuid4(),
-        to_agent_id=to_agent_id,
         to_agent_name="QA",
         requires_approval=False,
+        edge_id=uuid.uuid4(),
+        to_agent_id=to_agent_id,
         prompt_id="review-prompt",
     )
 
@@ -316,24 +317,23 @@ async def test_handle_complete_task():
         workflow_id=uuid.uuid4(),
         agent_id=uuid.uuid4(),
     )
-    assert result.completed is True
+    assert result.result_type == HandoffResultType.COMPLETED
     assert result.tool_args == {"summary": "All done"}
 
 
 @pytest.mark.asyncio
 async def test_handle_unknown_tool():
     db = AsyncMock()
-    # Mock generate_handoff_tools to return empty
-    with patch(f"{HS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]):
-        result = await handle_handoff_tool_call(
-            db,
-            tool_name="nonexistent",
-            tool_args={},
-            task_id=None,
-            workflow_id=uuid.uuid4(),
-            agent_id=uuid.uuid4(),
-        )
-    assert result.blocked is True
+    result = await handle_handoff_tool_call(
+        db,
+        tool_name="nonexistent",
+        tool_args={},
+        task_id=None,
+        workflow_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        tools=[],  # P1: pass empty tools directly
+    )
+    assert result.result_type == HandoffResultType.BLOCKED
     assert "Unknown" in result.reason
 
 
@@ -355,17 +355,17 @@ async def test_handle_requires_approval():
     db = AsyncMock()
     db.get.return_value = None  # no task
 
-    with patch(f"{HS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[tool]):
-        result = await handle_handoff_tool_call(
-            db,
-            tool_name="forward_to_reviewer",
-            tool_args={"comment": "Review this"},
-            task_id=None,
-            workflow_id=workflow_id,
-            agent_id=agent_id,
-        )
+    result = await handle_handoff_tool_call(
+        db,
+        tool_name="forward_to_reviewer",
+        tool_args={"comment": "Review this"},
+        task_id=None,
+        workflow_id=workflow_id,
+        agent_id=agent_id,
+        tools=[tool],  # P1: pass tools directly
+    )
 
-    assert result.awaiting_approval is True
+    assert result.result_type == HandoffResultType.AWAITING_APPROVAL
     assert result.to_agent_name == "Reviewer"
 
 
@@ -387,17 +387,17 @@ async def test_handle_auto_forward():
     db = AsyncMock()
     db.get.return_value = None  # no task
 
-    with patch(f"{HS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[tool]):
-        result = await handle_handoff_tool_call(
-            db,
-            tool_name="forward_to_qa",
-            tool_args={"comment": "Run tests"},
-            task_id=None,
-            workflow_id=workflow_id,
-            agent_id=agent_id,
-        )
+    result = await handle_handoff_tool_call(
+        db,
+        tool_name="forward_to_qa",
+        tool_args={"comment": "Run tests"},
+        task_id=None,
+        workflow_id=workflow_id,
+        agent_id=agent_id,
+        tools=[tool],  # P1: pass tools directly
+    )
 
-    assert result.forwarded is True
+    assert result.result_type == HandoffResultType.FORWARDED
     assert result.to_agent_name == "QA"
 
 
@@ -423,10 +423,7 @@ async def test_handle_max_cycles_exceeded():
     db = AsyncMock()
     db.get.return_value = target_agent
 
-    with (
-        patch(f"{HS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[tool]),
-        patch(f"{HS}.count_agent_visits", new_callable=AsyncMock, return_value=2),
-    ):
+    with patch(f"{HS}.count_agent_visits", new_callable=AsyncMock, return_value=2):
         result = await handle_handoff_tool_call(
             db,
             tool_name="forward_to_dev",
@@ -434,7 +431,76 @@ async def test_handle_max_cycles_exceeded():
             task_id=task_id,
             workflow_id=workflow_id,
             agent_id=agent_id,
+            tools=[tool],  # P1: pass tools directly
         )
 
-    assert result.blocked is True
+    assert result.result_type == HandoffResultType.BLOCKED
     assert "max_cycles" in result.reason
+
+
+@pytest.mark.asyncio
+async def test_handle_target_agent_not_found():
+    """P3: Block if target agent is not in the database."""
+    agent_id = uuid.uuid4()
+    to_agent_id = uuid.uuid4()
+    workflow_id = uuid.uuid4()
+    task_id = uuid.uuid4()
+
+    tool = HandoffTool(
+        name="forward_to_ghost",
+        description="Forward to Ghost",
+        edge_id=uuid.uuid4(),
+        to_agent_id=to_agent_id,
+        to_agent_name="Ghost",
+        requires_approval=False,
+    )
+
+    db = AsyncMock()
+    db.get.return_value = None  # agent not found
+
+    result = await handle_handoff_tool_call(
+        db,
+        tool_name="forward_to_ghost",
+        tool_args={},
+        task_id=task_id,
+        workflow_id=workflow_id,
+        agent_id=agent_id,
+        tools=[tool],
+    )
+
+    assert result.result_type == HandoffResultType.BLOCKED
+    assert "not found" in result.reason
+
+
+# ---------------------------------------------------------------------------
+# P14: serialize → route round-trip
+# ---------------------------------------------------------------------------
+
+
+def test_serialize_route_roundtrip():
+    """Ensure serialized result_type matches what route_after_agent checks."""
+    from app.services.graph_service import _serialize_handoff_result, route_after_agent
+
+    for rt, expected_route in [
+        (HandoffResultType.COMPLETED, "complete"),
+        (HandoffResultType.BLOCKED, "blocked"),
+        (HandoffResultType.AWAITING_APPROVAL, "notify_handoff"),
+        (HandoffResultType.FORWARDED, "auto_handoff"),
+    ]:
+        hr = HandoffResult(result_type=rt, to_agent_name="X")
+        serialized = _serialize_handoff_result(hr)
+        state = {
+            "handoff_result": serialized,
+            "depth": 0,
+            "main_session_id": "",
+            "current_session_id": "",
+            "current_agent_id": "",
+            "current_agent_name": "",
+            "workflow_id": None,
+            "task_id": None,
+            "task": "",
+            "chain": [],
+            "gateway_approved": None,
+            "messages": [],
+        }
+        assert route_after_agent(state) == expected_route, f"Failed for {rt}"

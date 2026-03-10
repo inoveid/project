@@ -135,6 +135,35 @@ async def _try_update_task_status(
         logger.error("Task %s status update to %s failed: %s", task_id, new_status, exc)
 
 
+async def _handle_graph_result(
+    websocket: WebSocket,
+    db: AsyncSession,
+    task_id: uuid.UUID | None,
+    interrupted: bool,
+    completed: bool,
+    errored: bool,
+) -> bool:
+    """
+    Handle graph result: update task status and send done event.
+
+    Returns the new `interrupted` state.
+    """
+    if errored:
+        # Error already sent by _run_graph; task status already set to "error"
+        await websocket.send_json({"type": "done"})
+        return False
+
+    if interrupted:
+        await _try_update_task_status(db, task_id, "awaiting_user")
+        return True
+
+    if completed:
+        await _try_update_task_status(db, task_id, "done")
+
+    await websocket.send_json({"type": "done"})
+    return False
+
+
 async def _handle_messages(
     websocket: WebSocket,
     db: AsyncSession,
@@ -194,34 +223,28 @@ async def _handle_messages(
                 "messages": [],
             }
 
-            interrupted, completed = await _run_graph(graph, initial_state, graph_config)
-            if interrupted:
-                await _try_update_task_status(db, task_id, "awaiting_user")
-            elif completed:
-                await _try_update_task_status(db, task_id, "done")
-                await websocket.send_json({"type": "done"})
-            else:
-                await websocket.send_json({"type": "done"})
+            result = await _run_graph(graph, initial_state, graph_config)
+            interrupted = await _handle_graph_result(
+                websocket, db, task_id, *result,
+            )
 
         elif msg_type == "approve" and interrupted:
             await _try_update_task_status(db, task_id, "in_progress")
-            interrupted, completed = await _run_graph(
+            result = await _run_graph(
                 graph, Command(resume=True), graph_config
             )
-            if interrupted:
-                await _try_update_task_status(db, task_id, "awaiting_user")
-            elif completed:
-                await _try_update_task_status(db, task_id, "done")
-                await websocket.send_json({"type": "done"})
-            else:
-                await websocket.send_json({"type": "done"})
+            interrupted = await _handle_graph_result(
+                websocket, db, task_id, *result,
+            )
 
         elif msg_type == "reject" and interrupted:
-            interrupted, completed = await _run_graph(
+            await _try_update_task_status(db, task_id, "in_progress")
+            result = await _run_graph(
                 graph, Command(resume=False), graph_config
             )
-            if not interrupted:
-                await websocket.send_json({"type": "done"})
+            interrupted = await _handle_graph_result(
+                websocket, db, task_id, *result,
+            )
 
         elif msg_type == "message" and interrupted:
             await websocket.send_json({
@@ -233,14 +256,15 @@ async def _handle_messages(
             await websocket.send_json({"type": "error", "error": f"Unknown type: {msg_type}"})
 
 
-async def _run_graph(graph, input, config: dict) -> tuple[bool, bool]:
+async def _run_graph(graph, input, config: dict) -> tuple[bool, bool, bool]:
     """
     Stream graph until completion or interrupt.
 
-    Returns (interrupted, completed):
-    - (True, False) if graph paused at interrupt
-    - (False, True) if task_completed event was seen
-    - (False, False) if graph finished normally
+    Returns (interrupted, completed, errored):
+    - (True, False, False) if graph paused at interrupt
+    - (False, True, False) if task_completed event was seen
+    - (False, False, True) if graph raised an exception
+    - (False, False, False) if graph finished normally
     """
     websocket: WebSocket = config["configurable"]["websocket"]
     db: AsyncSession = config["configurable"]["db"]
@@ -250,10 +274,10 @@ async def _run_graph(graph, input, config: dict) -> tuple[bool, bool]:
     try:
         async for chunk in graph.astream(input, config, stream_mode="values"):
             if "__interrupt__" in chunk:
-                return True, False
+                return True, False, False
             # Check if task was completed via complete_task tool
             hr = chunk.get("handoff_result")
-            if isinstance(hr, dict) and hr.get("completed"):
+            if isinstance(hr, dict) and hr.get("result_type") == "completed":
                 completed = True
     except WebSocketDisconnect:
         raise
@@ -261,5 +285,6 @@ async def _run_graph(graph, input, config: dict) -> tuple[bool, bool]:
         logger.error("Graph execution error: %s", exc)
         await websocket.send_json({"type": "error", "error": str(exc)})
         await _try_update_task_status(db, task_id, "error")
+        return False, False, True
 
-    return False, completed
+    return False, completed, False

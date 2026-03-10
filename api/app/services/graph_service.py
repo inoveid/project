@@ -28,6 +28,7 @@ from app.config import settings
 from app.schemas.session import SessionCreate
 from app.services.handoff_server import (
     HandoffResult,
+    HandoffResultType,
     format_handoff_tools_prompt,
     generate_handoff_tools,
     handle_handoff_tool_call,
@@ -93,6 +94,7 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
 
     full_text = ""
     tool_uses: list[dict] = []
+    agent_error = False
 
     try:
         async for event in runtime.send_message(session_id, state["task"]):
@@ -113,6 +115,7 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
             else:
                 await ws.send_json(event)
     except Exception as exc:
+        agent_error = True
         logger.error("Agent %s error: %s", state["current_agent_name"], exc)
         if is_sub:
             await ws.send_json({
@@ -123,11 +126,23 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
         else:
             await ws.send_json({"type": "error", "error": str(exc)})
 
-    # Sub-agent done — stop runtime, close DB session, notify UI
+    # Sub-agent done — stop runtime, close DB session, notify UI (P7: try/finally)
     if is_sub:
-        await runtime.stop_session(session_id)
-        await stop_session(db, session_id)
-        await ws.send_json({"type": "handoff_done", "agent_name": state["current_agent_name"]})
+        try:
+            await runtime.stop_session(session_id)
+            await stop_session(db, session_id)
+        except Exception as cleanup_exc:
+            logger.exception("Sub-agent cleanup failed for %s: %s", session_id, cleanup_exc)
+        finally:
+            await ws.send_json({"type": "handoff_done", "agent_name": state["current_agent_name"]})
+
+    # Early return on agent error — no handoff to process (P6)
+    if agent_error:
+        return {
+            "messages": state["messages"],
+            "handoff_result": None,
+            "gateway_approved": None,
+        }
 
     # Save result to DB
     if full_text or tool_uses:
@@ -184,13 +199,18 @@ async def _resolve_handoff(
     tool_name = parsed.get("tool", "")
     tool_args = {k: v for k, v in parsed.items() if k != "tool"}
 
+    # Pre-generate tools once and pass to avoid redundant DB query (P1)
+    wf_id = uuid.UUID(workflow_id)
+    tools = await generate_handoff_tools(db, agent_id, wf_id)
+
     return await handle_handoff_tool_call(
         db,
         tool_name=tool_name,
         tool_args=tool_args,
         task_id=uuid.UUID(task_id) if task_id else None,
-        workflow_id=uuid.UUID(workflow_id),
+        workflow_id=wf_id,
         agent_id=agent_id,
+        tools=tools,
     )
 
 
@@ -199,10 +219,7 @@ def _serialize_handoff_result(result: HandoffResult | None) -> dict | None:
     if result is None:
         return None
     return {
-        "forwarded": result.forwarded,
-        "awaiting_approval": result.awaiting_approval,
-        "blocked": result.blocked,
-        "completed": result.completed,
+        "result_type": result.result_type.value,
         "reason": result.reason,
         "to_agent_id": str(result.to_agent_id) if result.to_agent_id else None,
         "to_agent_name": result.to_agent_name,
@@ -299,6 +316,10 @@ async def blocked_node(state: WorkflowState, config: RunnableConfig) -> dict:
     return {"handoff_result": None, "gateway_approved": None}
 
 
+# ---------------------------------------------------------------------------
+# Sub-session creation (decomposed — P5)
+# ---------------------------------------------------------------------------
+
 async def _create_sub_session(
     db: AsyncSession, ws: WebSocket, state: WorkflowState, hr: dict
 ) -> dict:
@@ -309,6 +330,17 @@ async def _create_sub_session(
     target = await db.get(Agent, target_id)
     if not target:
         logger.warning("Handoff target agent %s not found", target_id)
+        return {"gateway_approved": False, "handoff_result": None}
+
+    # Check for repeated cycle in chain (P8)
+    current_name = state["current_agent_name"]
+    if _has_repeated_cycle(state["chain"], current_name, target.name):
+        logger.warning("Cycle detected: %s → %s already in chain", current_name, target.name)
+        await ws.send_json({
+            "type": "max_cycles_reached",
+            "agent_name": target.name,
+            "reason": f"Cycle detected: {current_name} → {target.name} repeated in chain",
+        })
         return {"gateway_approved": False, "handoff_result": None}
 
     prompt = hr.get("prompt", "") or hr.get("tool_args", {}).get("comment", "")
@@ -322,25 +354,10 @@ async def _create_sub_session(
         await db.refresh(sub_session)
     await add_message(db, sub_session.id, "user", prompt)
 
-    # Build system prompt for sub-agent
-    system_prompt = target.system_prompt
-
-    # Add handoff tools for the sub-agent if workflow context exists
-    workflow_id = state.get("workflow_id")
-    if workflow_id:
-        sub_tools = await generate_handoff_tools(db, target.id, uuid.UUID(workflow_id))
-        tools_prompt = format_handoff_tools_prompt(sub_tools)
-        if tools_prompt:
-            system_prompt += tools_prompt
-
-    # Add chain context
-    current_pair = [state["current_agent_name"], target.name]
-    chain = state["chain"] + [current_pair]
-    chain_str = " → ".join(f"{a}→{b}" for a, b in chain)
-    system_prompt += f"\n\n## Handoff Chain Context\nChain so far: {chain_str} → {target.name} (you)"
-
-    # Resolve workdir
-    workdir = (target.config.get("workdir") or settings.workspace_path) if target.config else settings.workspace_path
+    # Build system prompt with handoff tools and chain context
+    tools_prompt = await _generate_sub_tools(db, target.id, state.get("workflow_id"))
+    system_prompt = _build_sub_agent_prompt(target, state, tools_prompt)
+    workdir = _resolve_sub_agent_workdir(target)
 
     await runtime.start_session(
         sub_session.id, workdir, system_prompt,
@@ -350,11 +367,12 @@ async def _create_sub_session(
 
     await ws.send_json({
         "type": "handoff_start",
-        "from_agent": state["current_agent_name"],
+        "from_agent": current_name,
         "to_agent": target.name,
         "task": prompt,
     })
 
+    chain = state["chain"] + [[current_name, target.name]]
     return {
         "gateway_approved": True,
         "current_session_id": str(sub_session.id),
@@ -365,6 +383,41 @@ async def _create_sub_session(
         "chain": chain,
         "handoff_result": None,
     }
+
+
+def _build_sub_agent_prompt(target, state: WorkflowState, tools_prompt: str) -> str:
+    """Build system prompt for a sub-agent including handoff tools and chain context."""
+    system_prompt = target.system_prompt
+
+    if tools_prompt:
+        system_prompt += tools_prompt
+
+    current_pair = [state["current_agent_name"], target.name]
+    chain = state["chain"] + [current_pair]
+    chain_str = " → ".join(f"{a}→{b}" for a, b in chain)
+    system_prompt += f"\n\n## Handoff Chain Context\nChain so far: {chain_str} → {target.name} (you)"
+
+    return system_prompt
+
+
+async def _generate_sub_tools(db: AsyncSession, agent_id, workflow_id: str | None) -> str:
+    """Generate handoff tools prompt for a sub-agent."""
+    if not workflow_id:
+        return ""
+    sub_tools = await generate_handoff_tools(db, agent_id, uuid.UUID(workflow_id))
+    return format_handoff_tools_prompt(sub_tools)
+
+
+def _resolve_sub_agent_workdir(target) -> str:
+    """Determine workdir for a sub-agent."""
+    if target.config:
+        return target.config.get("workdir") or settings.workspace_path
+    return settings.workspace_path
+
+
+def _has_repeated_cycle(chain: list, from_name: str, to_name: str) -> bool:
+    """Check if this exact transition already occurred in the chain (indicates a loop)."""
+    return [from_name, to_name] in chain
 
 
 # ---------------------------------------------------------------------------
@@ -379,13 +432,14 @@ def route_after_agent(
     if not hr or state["depth"] >= MAX_DEPTH:
         return END
 
-    if hr.get("completed"):
+    rt = hr.get("result_type")
+    if rt == HandoffResultType.COMPLETED:
         return "complete"
-    if hr.get("blocked"):
+    if rt == HandoffResultType.BLOCKED:
         return "blocked"
-    if hr.get("awaiting_approval"):
+    if rt == HandoffResultType.AWAITING_APPROVAL:
         return "notify_handoff"
-    if hr.get("forwarded"):
+    if rt == HandoffResultType.FORWARDED:
         return "auto_handoff"
     return END
 

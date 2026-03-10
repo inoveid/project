@@ -9,6 +9,7 @@ from app.services.graph_service import (
     END,
     MAX_DEPTH,
     WorkflowState,
+    _has_repeated_cycle,
     auto_handoff_node,
     blocked_node,
     complete_node,
@@ -18,6 +19,7 @@ from app.services.graph_service import (
     route_after_gate,
     run_agent_node,
 )
+from app.services.handoff_server import HandoffResultType
 
 GS = "app.services.graph_service"
 
@@ -59,12 +61,9 @@ def _make_config(ws=None, db=None) -> dict:
 
 
 def _make_handoff_result(**overrides) -> dict:
-    """Create a serialized HandoffResult dict."""
+    """Create a serialized HandoffResult dict with result_type enum."""
     base = {
-        "forwarded": False,
-        "awaiting_approval": False,
-        "blocked": False,
-        "completed": False,
+        "result_type": HandoffResultType.FORWARDED.value,
         "reason": "",
         "to_agent_id": str(uuid.uuid4()),
         "to_agent_name": "Reviewer",
@@ -88,37 +87,37 @@ def test_route_after_agent_no_handoff():
 
 
 def test_route_after_agent_awaiting_approval():
-    hr = _make_handoff_result(awaiting_approval=True)
+    hr = _make_handoff_result(result_type=HandoffResultType.AWAITING_APPROVAL.value)
     state = _make_state(handoff_result=hr)
     assert route_after_agent(state) == "notify_handoff"
 
 
 def test_route_after_agent_auto_forward():
-    hr = _make_handoff_result(forwarded=True)
+    hr = _make_handoff_result(result_type=HandoffResultType.FORWARDED.value)
     state = _make_state(handoff_result=hr)
     assert route_after_agent(state) == "auto_handoff"
 
 
 def test_route_after_agent_completed():
-    hr = _make_handoff_result(completed=True)
+    hr = _make_handoff_result(result_type=HandoffResultType.COMPLETED.value)
     state = _make_state(handoff_result=hr)
     assert route_after_agent(state) == "complete"
 
 
 def test_route_after_agent_blocked():
-    hr = _make_handoff_result(blocked=True)
+    hr = _make_handoff_result(result_type=HandoffResultType.BLOCKED.value)
     state = _make_state(handoff_result=hr)
     assert route_after_agent(state) == "blocked"
 
 
 def test_route_after_agent_max_depth():
-    hr = _make_handoff_result(forwarded=True)
+    hr = _make_handoff_result(result_type=HandoffResultType.FORWARDED.value)
     state = _make_state(handoff_result=hr, depth=MAX_DEPTH)
     assert route_after_agent(state) == END
 
 
 def test_route_after_agent_depth_below_max():
-    hr = _make_handoff_result(forwarded=True)
+    hr = _make_handoff_result(result_type=HandoffResultType.FORWARDED.value)
     state = _make_state(handoff_result=hr, depth=MAX_DEPTH - 1)
     assert route_after_agent(state) == "auto_handoff"
 
@@ -141,6 +140,25 @@ def test_route_after_gate_rejected():
 def test_route_after_gate_none():
     state = _make_state(gateway_approved=None)
     assert route_after_gate(state) == END
+
+
+# ---------------------------------------------------------------------------
+# _has_repeated_cycle (P8)
+# ---------------------------------------------------------------------------
+
+
+def test_has_repeated_cycle_detects_repeat():
+    chain = [["Dev", "Reviewer"], ["Reviewer", "Dev"]]
+    assert _has_repeated_cycle(chain, "Dev", "Reviewer") is True
+
+
+def test_has_repeated_cycle_no_repeat():
+    chain = [["Dev", "Reviewer"]]
+    assert _has_repeated_cycle(chain, "Reviewer", "QA") is False
+
+
+def test_has_repeated_cycle_empty_chain():
+    assert _has_repeated_cycle([], "Dev", "Reviewer") is False
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +236,11 @@ async def test_run_agent_node_resolves_handoff():
     config = _make_config(ws=ws, db=db)
 
     from app.services.handoff_server import HandoffResult
-    mock_hr = HandoffResult(forwarded=True, to_agent_name="Reviewer", prompt="Review it")
+    mock_hr = HandoffResult(
+        result_type=HandoffResultType.FORWARDED,
+        to_agent_name="Reviewer",
+        prompt="Review it",
+    )
 
     async def fake_send_message(sid, content):
         yield {"type": "assistant_text", "content": "Done"}
@@ -234,7 +256,7 @@ async def test_run_agent_node_resolves_handoff():
 
         result = await run_agent_node(state, config)
 
-    assert result["handoff_result"]["forwarded"] is True
+    assert result["handoff_result"]["result_type"] == "forwarded"
     assert result["handoff_result"]["to_agent_name"] == "Reviewer"
 
 
@@ -303,7 +325,8 @@ async def test_run_agent_node_sub_agent_prefixes_events():
 
 
 @pytest.mark.asyncio
-async def test_run_agent_node_error_sends_error_event():
+async def test_run_agent_node_error_returns_early():
+    """P6: On error, node returns early with no handoff — graph routes to END."""
     ws = AsyncMock()
     db = AsyncMock()
     state = _make_state(depth=0)
@@ -315,19 +338,56 @@ async def test_run_agent_node_error_sends_error_event():
 
     with (
         patch(f"{GS}.runtime") as mock_runtime,
-        patch(f"{GS}.add_message", new_callable=AsyncMock),
+        patch(f"{GS}.add_message", new_callable=AsyncMock) as mock_add,
         patch(f"{GS}.get_session", new_callable=AsyncMock),
-        patch(f"{GS}._resolve_handoff", new_callable=AsyncMock, return_value=None),
+        patch(f"{GS}._resolve_handoff", new_callable=AsyncMock) as mock_resolve,
     ):
         mock_runtime.send_message = failing_send_message
         mock_runtime.get_claude_session_id.return_value = None
 
-        await run_agent_node(state, config)
+        result = await run_agent_node(state, config)
 
+    # Error event sent
     sent = [c.args[0] for c in ws.send_json.call_args_list]
     error_events = [e for e in sent if e.get("type") == "error"]
     assert len(error_events) == 1
     assert "rate limit" in error_events[0]["error"].lower()
+
+    # Early return: no DB save, no handoff resolution
+    mock_add.assert_not_called()
+    mock_resolve.assert_not_called()
+    assert result["handoff_result"] is None
+
+
+@pytest.mark.asyncio
+async def test_run_agent_node_sub_agent_cleanup_on_error():
+    """P7: Sub-agent cleanup uses try/finally — handoff_done always sent."""
+    ws = AsyncMock()
+    db = AsyncMock()
+    state = _make_state(depth=1, current_agent_name="SubAgent")
+    config = _make_config(ws=ws, db=db)
+
+    async def failing_send_message(sid, content):
+        raise RuntimeError("Sub-agent crashed")
+        yield  # noqa: unreachable
+
+    mock_stop = AsyncMock(side_effect=RuntimeError("Cleanup also failed"))
+
+    with (
+        patch(f"{GS}.runtime") as mock_runtime,
+        patch(f"{GS}.add_message", new_callable=AsyncMock),
+        patch(f"{GS}.stop_session", mock_stop),
+    ):
+        mock_runtime.send_message = failing_send_message
+        mock_runtime.stop_session = AsyncMock()
+
+        result = await run_agent_node(state, config)
+
+    # handoff_done sent even though cleanup failed
+    sent = [c.args[0] for c in ws.send_json.call_args_list]
+    handoff_done = [e for e in sent if e.get("type") == "handoff_done"]
+    assert len(handoff_done) == 1
+    assert result["handoff_result"] is None
 
 
 @pytest.mark.asyncio
@@ -481,7 +541,11 @@ async def test_run_agent_node_sub_agent_duplicates_to_main_session():
 @pytest.mark.asyncio
 async def test_notify_handoff_node_sends_approval_required():
     ws = AsyncMock()
-    hr = _make_handoff_result(awaiting_approval=True, to_agent_name="Reviewer", prompt="Review PR")
+    hr = _make_handoff_result(
+        result_type=HandoffResultType.AWAITING_APPROVAL.value,
+        to_agent_name="Reviewer",
+        prompt="Review PR",
+    )
     state = _make_state(
         current_agent_name="Dev",
         handoff_result=hr,
@@ -507,7 +571,7 @@ async def test_notify_handoff_node_sends_approval_required():
 async def test_gate_node_reject_returns_end():
     ws = AsyncMock()
     db = AsyncMock()
-    hr = _make_handoff_result(awaiting_approval=True)
+    hr = _make_handoff_result(result_type=HandoffResultType.AWAITING_APPROVAL.value)
     state = _make_state(handoff_result=hr)
     config = _make_config(ws=ws, db=db)
 
@@ -534,7 +598,7 @@ async def test_gate_node_approve_creates_sub_session():
     sub_session.task_id = None
 
     hr = _make_handoff_result(
-        awaiting_approval=True,
+        result_type=HandoffResultType.AWAITING_APPROVAL.value,
         to_agent_id=str(target.id),
         to_agent_name="Reviewer",
         prompt="Please review",
@@ -574,7 +638,10 @@ async def test_gate_node_approve_creates_sub_session():
 async def test_gate_node_target_not_found():
     ws = AsyncMock()
     db = AsyncMock()
-    hr = _make_handoff_result(awaiting_approval=True, to_agent_id=str(uuid.uuid4()))
+    hr = _make_handoff_result(
+        result_type=HandoffResultType.AWAITING_APPROVAL.value,
+        to_agent_id=str(uuid.uuid4()),
+    )
     state = _make_state(handoff_result=hr)
     config = _make_config(ws=ws, db=db)
 
@@ -606,7 +673,7 @@ async def test_auto_handoff_creates_sub_session():
     sub_session.task_id = None
 
     hr = _make_handoff_result(
-        forwarded=True,
+        result_type=HandoffResultType.FORWARDED.value,
         to_agent_id=str(target.id),
         to_agent_name="QA",
         prompt="Run tests",
@@ -632,6 +699,49 @@ async def test_auto_handoff_creates_sub_session():
     mock_runtime.start_session.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_auto_handoff_cycle_detected():
+    """P8: Repeated cycle in chain blocks the handoff."""
+    ws = AsyncMock()
+    db = AsyncMock()
+    target = MagicMock()
+    target.id = uuid.uuid4()
+    target.name = "Reviewer"
+    target.system_prompt = "You review."
+    target.config = {}
+    target.allowed_tools = []
+
+    hr = _make_handoff_result(
+        result_type=HandoffResultType.FORWARDED.value,
+        to_agent_id=str(target.id),
+        to_agent_name="Reviewer",
+    )
+    # Chain already contains Dev→Reviewer
+    state = _make_state(
+        handoff_result=hr,
+        current_agent_name="Dev",
+        chain=[["Dev", "Reviewer"], ["Reviewer", "Dev"]],
+    )
+    config = _make_config(ws=ws, db=db)
+
+    with (
+        patch(f"{GS}.create_session", new_callable=AsyncMock) as mock_create,
+        patch(f"{GS}.runtime") as mock_runtime,
+    ):
+        mock_runtime.start_session = AsyncMock()
+        db.get.return_value = target
+
+        result = await auto_handoff_node(state, config)
+
+    assert result["gateway_approved"] is False
+    mock_create.assert_not_called()
+    # max_cycles_reached event sent
+    sent = [c.args[0] for c in ws.send_json.call_args_list]
+    cycle_events = [e for e in sent if e.get("type") == "max_cycles_reached"]
+    assert len(cycle_events) == 1
+    assert "Cycle" in cycle_events[0]["reason"]
+
+
 # ---------------------------------------------------------------------------
 # complete_node
 # ---------------------------------------------------------------------------
@@ -640,7 +750,10 @@ async def test_auto_handoff_creates_sub_session():
 @pytest.mark.asyncio
 async def test_complete_node_sends_task_completed():
     ws = AsyncMock()
-    hr = _make_handoff_result(completed=True, tool_args={"summary": "All done"})
+    hr = _make_handoff_result(
+        result_type=HandoffResultType.COMPLETED.value,
+        tool_args={"summary": "All done"},
+    )
     state = _make_state(handoff_result=hr, current_agent_name="Dev")
     config = _make_config(ws=ws)
 
@@ -662,7 +775,9 @@ async def test_complete_node_sends_task_completed():
 async def test_blocked_node_sends_max_cycles():
     ws = AsyncMock()
     hr = _make_handoff_result(
-        blocked=True, reason="max_cycles (3) reached for agent Dev", to_agent_name="Dev"
+        result_type=HandoffResultType.BLOCKED.value,
+        reason="max_cycles (3) reached for agent Dev",
+        to_agent_name="Dev",
     )
     state = _make_state(handoff_result=hr)
     config = _make_config(ws=ws)

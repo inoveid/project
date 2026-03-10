@@ -555,7 +555,8 @@ def test_ws_start_session_error_closes_connection():
             assert "workdir busy" in data["error"]
 
 
-def test_ws_graph_error_sends_error_event():
+def test_ws_graph_error_sends_error_and_done():
+    """P11: Graph error sends error event followed by done event."""
     session_id = uuid.uuid4()
     session = _make_session_mock(session_id)
 
@@ -685,6 +686,44 @@ def test_ws_approve_sets_task_in_progress():
             with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
                 ws.send_json({"type": "message", "content": "start"})
                 ws.send_json({"type": "approve"})
+                ws.receive_json()  # done
+
+            calls = mock_update_task.call_args_list
+            statuses = [c.args[2] for c in calls]
+            assert "awaiting_user" in statuses
+            assert "in_progress" in statuses
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_ws_reject_sets_task_in_progress():
+    """P10: Reject updates task status to in_progress."""
+    session_id = uuid.uuid4()
+    task_id = uuid.uuid4()
+    session = _make_session_mock(session_id, task_id=task_id)
+    g = _capturing_graph()
+
+    mock_update_task = AsyncMock()
+
+    _override_db_with_mock()
+    try:
+        with (
+            patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+            patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
+            patch(f"{WS}.runtime") as mock_runtime,
+            patch(f"{WS}.add_message", new_callable=AsyncMock),
+            patch(f"{WS}.get_graph", return_value=g),
+            patch(f"{WS}.stop_session", new_callable=AsyncMock),
+            patch(f"{WS}.update_task_status", mock_update_task),
+        ):
+            mock_runtime.is_running.return_value = True
+            mock_runtime.stop_session = AsyncMock()
+            mock_runtime.get_children.return_value = set()
+
+            client = TestClient(app)
+            with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+                ws.send_json({"type": "message", "content": "start"})
+                ws.send_json({"type": "reject"})
                 ws.receive_json()  # done
 
             calls = mock_update_task.call_args_list
