@@ -15,6 +15,12 @@ class AgentCreate(BaseModel):
     is_system: bool = False
 
 
+class AgentPrompt(BaseModel):
+    id: str
+    name: str
+    content: str
+
+
 class AgentUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     role: Optional[str] = Field(None, min_length=1, max_length=100)
@@ -22,7 +28,7 @@ class AgentUpdate(BaseModel):
     system_prompt: Optional[str] = Field(None, min_length=1)
     allowed_tools: Optional[list[str]] = None
     config: Optional[dict[str, Any]] = None
-    prompts: Optional[list] = None
+    prompts: Optional[list[AgentPrompt]] = None
 
 
 class AgentRead(BaseModel):
@@ -34,7 +40,7 @@ class AgentRead(BaseModel):
     system_prompt: str
     allowed_tools: list[str]
     config: dict[str, Any]
-    prompts: list = Field(default_factory=list)
+    prompts: list[AgentPrompt] = Field(default_factory=list)
     is_system: bool
     created_at: datetime
     updated_at: datetime

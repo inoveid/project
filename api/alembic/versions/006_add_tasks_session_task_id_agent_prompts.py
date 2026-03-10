@@ -58,6 +58,11 @@ def upgrade() -> None:
             server_default=sa.func.now(),
         ),
     )
+    op.create_check_constraint(
+        "ck_tasks_status",
+        "tasks",
+        "status IN ('backlog', 'in_progress', 'awaiting_user', 'done', 'error')",
+    )
     op.create_index("idx_tasks_product_id", "tasks", ["product_id"])
     op.create_index("idx_tasks_team_id", "tasks", ["team_id"])
 

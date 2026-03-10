@@ -13,7 +13,7 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,7 +52,7 @@ async def websocket_session(
     if handoff_targets:
         system_prompt = system_prompt + format_handoff_instructions(handoff_targets)
 
-    # Определить workdir: из task → product → workspace_path, fallback на agent.config
+    # Определить workdir: из task → product → workspace_path
     workdir = ""
     if session.task_id:
         await db.refresh(session, ["task"])
@@ -60,6 +60,7 @@ async def websocket_session(
             await db.refresh(session.task, ["product"])
             if session.task.product:
                 workdir = session.task.product.workspace_path
+    # Fallback: legacy sessions without task use agent.config.workdir
     if not workdir:
         workdir = agent.config.get("workdir", "") if agent.config else ""
 
@@ -79,20 +80,21 @@ async def websocket_session(
             return
 
     # LangGraph config: thread_id = session_id для checkpointing
-    # Все non-serializable объекты (websocket, db) передаются через configurable —
+    # Все non-serializable объекты (websocket, db, task_id) передаются через configurable —
     # они НЕ персистируются в checkpoint, нужно передавать при каждом astream()
     graph_config = {
         "configurable": {
             "thread_id": str(session_id),
             "websocket": websocket,
             "db": db,
+            "task_id": session.task_id,
         },
         "recursion_limit": 20,
     }
     graph = get_graph()
 
     try:
-        await _handle_messages(websocket, db, session_id, session.task_id, agent, graph, graph_config)
+        await _handle_messages(websocket, db, session_id, agent, graph, graph_config)
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected for session %s", session_id)
         # Закрыть orphaned child sessions в БД до того, как stop_session очистит _children
@@ -114,15 +116,18 @@ async def _try_update_task_status(
         return
     try:
         await update_task_status(db, task_id, new_status)
+    except HTTPException as exc:
+        # Expected: invalid transition (e.g. already in target status)
+        logger.info("Task %s status update to %s skipped: %s", task_id, new_status, exc.detail)
     except Exception as exc:
-        logger.warning("Failed to update task %s status to %s: %s", task_id, new_status, exc)
+        # Unexpected: DB error, bug — log as error for investigation
+        logger.error("Task %s status update to %s failed: %s", task_id, new_status, exc)
 
 
 async def _handle_messages(
     websocket: WebSocket,
     db: AsyncSession,
     session_id: uuid.UUID,
-    task_id: uuid.UUID | None,
     agent,
     graph,
     graph_config: dict,
@@ -137,6 +142,7 @@ async def _handle_messages(
     - {"type": "stop"}                       — остановить агента
     """
     interrupted = False  # True когда граф паузирован в gate_node (ждёт approve/reject)
+    task_id = graph_config["configurable"]["task_id"]
 
     while True:
         raw = await websocket.receive_text()
@@ -175,7 +181,7 @@ async def _handle_messages(
                 "messages": [],
             }
 
-            interrupted = await _run_graph(websocket, db, task_id, graph, initial_state, graph_config)
+            interrupted = await _run_graph(graph, initial_state, graph_config)
             if interrupted:
                 await _try_update_task_status(db, task_id, "awaiting_user")
             else:
@@ -186,7 +192,7 @@ async def _handle_messages(
             # gate_node: interrupt() вернёт True → создаст sub-агента → run_agent
             await _try_update_task_status(db, task_id, "in_progress")
             interrupted = await _run_graph(
-                websocket, db, task_id, graph, Command(resume=True), graph_config
+                graph, Command(resume=True), graph_config
             )
             if interrupted:
                 await _try_update_task_status(db, task_id, "awaiting_user")
@@ -197,7 +203,7 @@ async def _handle_messages(
             # Возобновить граф с approval=False
             # gate_node: interrupt() вернёт False → отменит handoff → END
             interrupted = await _run_graph(
-                websocket, db, task_id, graph, Command(resume=False), graph_config
+                graph, Command(resume=False), graph_config
             )
             if not interrupted:
                 await websocket.send_json({"type": "done"})
@@ -212,19 +218,16 @@ async def _handle_messages(
             await websocket.send_json({"type": "error", "error": f"Unknown type: {msg_type}"})
 
 
-async def _run_graph(
-    websocket: WebSocket,
-    db: AsyncSession,
-    task_id: uuid.UUID | None,
-    graph,
-    input,
-    config: dict,
-) -> bool:
+async def _run_graph(graph, input, config: dict) -> bool:
     """
     Стримить граф до завершения или interrupt().
 
     Возвращает True если граф паузировался (interrupt), False если завершился.
     """
+    websocket: WebSocket = config["configurable"]["websocket"]
+    db: AsyncSession = config["configurable"]["db"]
+    task_id: uuid.UUID | None = config["configurable"]["task_id"]
+
     try:
         async for chunk in graph.astream(input, config, stream_mode="values"):
             if "__interrupt__" in chunk:
