@@ -71,4 +71,32 @@ describe('CreateTaskModal', () => {
     );
     expect(screen.getByText('Создание...')).toBeInTheDocument();
   });
+
+  it('closes on Escape key', () => {
+    const onClose = vi.fn();
+    render(
+      <CreateTaskModal productId="p-1" onSubmit={vi.fn()} onClose={onClose} isLoading={false} />,
+    );
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('does not close on Escape while loading', () => {
+    const onClose = vi.fn();
+    render(
+      <CreateTaskModal productId="p-1" onSubmit={vi.fn()} onClose={onClose} isLoading={true} />,
+    );
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('closes on backdrop click', () => {
+    const onClose = vi.fn();
+    const { container } = render(
+      <CreateTaskModal productId="p-1" onSubmit={vi.fn()} onClose={onClose} isLoading={false} />,
+    );
+    const backdrop = container.querySelector('[role="presentation"]');
+    if (backdrop) fireEvent.click(backdrop);
+    expect(onClose).toHaveBeenCalled();
+  });
 });

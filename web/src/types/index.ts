@@ -316,6 +316,21 @@ export interface TaskStatusUpdate {
   status: TaskStatus;
 }
 
+const TASK_STATUSES: ReadonlySet<string> = new Set<TaskStatus>([
+  'backlog', 'in_progress', 'awaiting_user', 'done', 'error',
+]);
+
+export function isTaskStatus(value: unknown): value is TaskStatus {
+  return typeof value === 'string' && TASK_STATUSES.has(value);
+}
+
+export function isTask(value: unknown): value is Task {
+  if (typeof value !== 'object' || value === null) return false;
+  if (!('id' in value) || !('title' in value) || !('status' in value)) return false;
+  const { id, title, status } = value as Task;
+  return typeof id === 'string' && typeof title === 'string' && isTaskStatus(status);
+}
+
 export interface EvalComparison {
   run_a: { id: string; prompt_version: string | null; pass_rate: number | null };
   run_b: { id: string; prompt_version: string | null; pass_rate: number | null };

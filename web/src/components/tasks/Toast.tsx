@@ -6,6 +6,11 @@ interface ToastMessage {
   type: 'error' | 'success';
 }
 
+/**
+ * Singleton pattern: showToast() is bound to the last mounted ToastContainer.
+ * Limitation: only one ToastContainer should exist at a time.
+ * Calls before mount are silently ignored.
+ */
 let toastId = 0;
 let addToastFn: ((msg: Omit<ToastMessage, 'id'>) => void) | null = null;
 

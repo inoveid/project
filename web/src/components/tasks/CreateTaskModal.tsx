@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 interface CreateTaskModalProps {
   productId: string;
@@ -10,6 +10,14 @@ interface CreateTaskModalProps {
 export function CreateTaskModal({ productId, onSubmit, onClose, isLoading }: CreateTaskModalProps) {
   const [title, setTitle] = useState('');
 
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !isLoading) onClose();
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, isLoading]);
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = title.trim();
@@ -17,8 +25,16 @@ export function CreateTaskModal({ productId, onSubmit, onClose, isLoading }: Cre
     onSubmit({ title: trimmed, product_id: productId });
   }
 
+  function handleBackdropClick(e: React.MouseEvent) {
+    if (e.target === e.currentTarget && !isLoading) onClose();
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      onClick={handleBackdropClick}
+      role="presentation"
+    >
       <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
         <h2 className="text-lg font-semibold mb-4">Новая задача</h2>
         <form onSubmit={handleSubmit}>

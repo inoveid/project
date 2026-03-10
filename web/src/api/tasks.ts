@@ -2,7 +2,7 @@ import { fetchApi } from './client';
 import type { Task, TaskCreate, TaskUpdate, TaskStatus } from '../types';
 
 export function getTasks(productId: string): Promise<Task[]> {
-  return fetchApi<Task[]>(`/products/${productId}/tasks`);
+  return fetchApi<Task[]>(`/tasks?product_id=${encodeURIComponent(productId)}`);
 }
 
 export function getTask(id: string): Promise<Task> {
@@ -18,7 +18,7 @@ export function createTask(data: TaskCreate): Promise<Task> {
 
 export function updateTask(id: string, data: TaskUpdate): Promise<Task> {
   return fetchApi<Task>(`/tasks/${id}`, {
-    method: 'PATCH',
+    method: 'PUT',
     body: JSON.stringify(data),
   });
 }

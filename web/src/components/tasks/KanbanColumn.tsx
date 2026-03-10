@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import type { Task, TaskStatus } from '../../types';
 import { TaskCard } from './TaskCard';
@@ -25,6 +25,9 @@ export function KanbanColumn({
   onAddClick,
 }: KanbanColumnProps) {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+  // Reset pagination when the task list identity changes (e.g. filter switch)
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [tasks]);
 
   const { isOver, setNodeRef } = useDroppable({
     id: status,

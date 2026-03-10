@@ -7,9 +7,11 @@ import { useTasks, useCreateTask, useUpdateTaskStatus } from '../hooks/useTasks'
 import { KanbanColumn } from '../components/tasks/KanbanColumn';
 import { TaskCard } from '../components/tasks/TaskCard';
 import { CreateTaskModal } from '../components/tasks/CreateTaskModal';
+import { FilterBar } from '../components/tasks/FilterBar';
 import { ToastContainer, showToast } from '../components/tasks/Toast';
 import { isTransitionAllowed, getTransitionError } from '../components/tasks/statusConfig';
 import type { Task, TaskStatus } from '../types';
+import { isTask, isTaskStatus } from '../types';
 
 const STORAGE_KEY = 'dashboard_filters';
 
@@ -19,22 +21,30 @@ interface DashboardFilters {
   teamId: string | null;
 }
 
+const EMPTY_FILTERS: DashboardFilters = { businessId: null, productId: null, teamId: null };
+
+function isNullOrString(v: unknown): v is string | null {
+  return v === null || typeof v === 'string';
+}
+
+function isDashboardFilters(value: unknown): value is DashboardFilters {
+  if (typeof value !== 'object' || value === null) return false;
+  if (!('businessId' in value) || !('productId' in value) || !('teamId' in value)) return false;
+  return (
+    isNullOrString(value.businessId) &&
+    isNullOrString(value.productId) &&
+    isNullOrString(value.teamId)
+  );
+}
+
 function loadFilters(): DashboardFilters {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { businessId: null, productId: null, teamId: null };
+    if (!raw) return EMPTY_FILTERS;
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) {
-      return { businessId: null, productId: null, teamId: null };
-    }
-    const obj = parsed as Record<string, unknown>;
-    return {
-      businessId: typeof obj.businessId === 'string' ? obj.businessId : null,
-      productId: typeof obj.productId === 'string' ? obj.productId : null,
-      teamId: typeof obj.teamId === 'string' ? obj.teamId : null,
-    };
+    return isDashboardFilters(parsed) ? parsed : EMPTY_FILTERS;
   } catch {
-    return { businessId: null, productId: null, teamId: null };
+    return EMPTY_FILTERS;
   }
 }
 
@@ -65,14 +75,11 @@ export function Dashboard() {
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
   );
 
-  useEffect(() => {
-    saveFilters(filters);
-  }, [filters]);
+  useEffect(() => { saveFilters(filters); }, [filters]);
 
-  // Reset product when business changes
   const handleBusinessChange = useCallback((businessId: string) => {
-    setFilters({ businessId: businessId || null, productId: null, teamId: filters.teamId });
-  }, [filters.teamId]);
+    setFilters((prev) => ({ businessId: businessId || null, productId: null, teamId: prev.teamId }));
+  }, []);
 
   const handleProductChange = useCallback((productId: string) => {
     setFilters((prev) => ({ ...prev, productId: productId || null }));
@@ -82,33 +89,21 @@ export function Dashboard() {
     setFilters((prev) => ({ ...prev, teamId: teamId || null }));
   }, []);
 
-  // Group tasks by status
   const tasksByStatus = useMemo(() => {
     const grouped: Record<TaskStatus, Task[]> = {
-      backlog: [],
-      in_progress: [],
-      awaiting_user: [],
-      done: [],
-      error: [],
+      backlog: [], in_progress: [], awaiting_user: [], done: [], error: [],
     };
     if (!tasks) return grouped;
-
-    const filteredTasks = filters.teamId
-      ? tasks.filter((t) => t.team_id === filters.teamId)
-      : tasks;
-
-    for (const task of filteredTasks) {
-      grouped[task.status].push(task);
-    }
+    const filtered = filters.teamId ? tasks.filter((t) => t.team_id === filters.teamId) : tasks;
+    for (const task of filtered) { grouped[task.status].push(task); }
     return grouped;
   }, [tasks, filters.teamId]);
 
   const hasErrorTasks = tasksByStatus.error.length > 0;
 
-  // Drag handlers
   function handleDragStart(event: DragStartEvent) {
-    const task = event.active.data.current?.task as Task | undefined;
-    setActiveDragTask(task ?? null);
+    const maybeTask: unknown = event.active.data.current?.task;
+    setActiveDragTask(isTask(maybeTask) ? maybeTask : null);
   }
 
   function handleDragEnd(event: DragEndEvent) {
@@ -116,38 +111,32 @@ export function Dashboard() {
     const { active, over } = event;
     if (!over) return;
 
-    const task = active.data.current?.task as Task | undefined;
-    const targetStatus = over.data.current?.status as TaskStatus | undefined;
-    if (!task || !targetStatus || task.status === targetStatus) return;
+    const maybeTask: unknown = active.data.current?.task;
+    const maybeStatus: unknown = over.data.current?.status;
+    if (!isTask(maybeTask) || !isTaskStatus(maybeStatus)) return;
+    if (maybeTask.status === maybeStatus) return;
 
-    if (!isTransitionAllowed(task.status, targetStatus)) {
-      const errorMsg = getTransitionError(task.status, targetStatus);
+    if (!isTransitionAllowed(maybeTask.status, maybeStatus)) {
+      const errorMsg = getTransitionError(maybeTask.status, maybeStatus);
       if (errorMsg) showToast(errorMsg);
       return;
     }
 
-    // Backlog → in_progress requires valid task
-    if (task.status === 'backlog' && targetStatus === 'in_progress' && !task.product_id) {
+    if (maybeTask.status === 'backlog' && maybeStatus === 'in_progress' && !maybeTask.product_id) {
       showToast('Задача должна иметь привязку к продукту');
       return;
     }
 
     updateTaskStatus.mutate(
-      { id: task.id, status: targetStatus },
-      {
-        onError: (err: Error) => {
-          showToast(`Ошибка: ${err.message}`);
-        },
-      },
+      { id: maybeTask.id, status: maybeStatus },
+      { onError: (err: Error) => showToast(`Ошибка: ${err.message}`) },
     );
   }
 
   function handleStartTask(taskId: string) {
     updateTaskStatus.mutate(
       { id: taskId, status: 'in_progress' },
-      {
-        onError: (err: Error) => showToast(`Ошибка: ${err.message}`),
-      },
+      { onError: (err: Error) => showToast(`Ошибка: ${err.message}`) },
     );
   }
 
@@ -171,9 +160,7 @@ export function Dashboard() {
 
       {!filtersSelected && (
         <div className="flex-1 flex items-center justify-center">
-          <p className="text-gray-400 text-sm">
-            Выберите бизнес и продукт, чтобы увидеть задачи
-          </p>
+          <p className="text-gray-400 text-sm">Выберите бизнес и продукт, чтобы увидеть задачи</p>
         </div>
       )}
 
@@ -184,69 +171,20 @@ export function Dashboard() {
       )}
 
       {filtersSelected && !tasksLoading && (
-        <>
-          <div className="flex items-center gap-3 px-4 py-2">
-            <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showDone}
-                onChange={(e) => setShowDone(e.target.checked)}
-                className="rounded"
-              />
-              Показать завершённые
-            </label>
-          </div>
-
-          <DndContext
-            sensors={sensors}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-          >
-            <div className="flex-1 overflow-x-auto px-4 pb-4">
-              <div className="flex gap-4 min-h-0">
-                {COLUMNS.map((col) => (
-                  <KanbanColumn
-                    key={col.status}
-                    title={col.title}
-                    status={col.status}
-                    tasks={tasksByStatus[col.status]}
-                    onTaskClick={handleTaskClick}
-                    onStartTask={col.status === 'backlog' ? handleStartTask : undefined}
-                    showAddButton={col.status === 'backlog'}
-                    onAddClick={col.status === 'backlog' ? () => setShowCreateModal(true) : undefined}
-                  />
-                ))}
-
-                {showDone && (
-                  <KanbanColumn
-                    title="Готово"
-                    status="done"
-                    tasks={tasksByStatus.done}
-                    onTaskClick={handleTaskClick}
-                  />
-                )}
-
-                {hasErrorTasks && (
-                  <KanbanColumn
-                    title="Ошибка"
-                    status="error"
-                    tasks={tasksByStatus.error}
-                    onTaskClick={handleTaskClick}
-                  />
-                )}
-              </div>
-            </div>
-
-            <DragOverlay>
-              {activeDragTask && (
-                <TaskCard
-                  task={activeDragTask}
-                  onClick={() => undefined}
-                />
-              )}
-            </DragOverlay>
-          </DndContext>
-        </>
+        <KanbanBoard
+          columns={COLUMNS}
+          tasksByStatus={tasksByStatus}
+          showDone={showDone}
+          hasErrorTasks={hasErrorTasks}
+          activeDragTask={activeDragTask}
+          sensors={sensors}
+          onShowDoneChange={setShowDone}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onTaskClick={handleTaskClick}
+          onStartTask={handleStartTask}
+          onAddClick={() => setShowCreateModal(true)}
+        />
       )}
 
       {showCreateModal && filters.productId && (
@@ -268,85 +206,69 @@ export function Dashboard() {
   );
 }
 
-// ── FilterBar ────────────────────────────────────────────────────────────────
+// ── KanbanBoard (extracted to keep Dashboard under 200 lines) ────────────────
 
-interface FilterBarProps {
-  businesses: Array<{ id: string; name: string }>;
-  products: Array<{ id: string; name: string }>;
-  teams: Array<{ id: string; name: string }>;
-  filters: DashboardFilters;
-  onBusinessChange: (id: string) => void;
-  onProductChange: (id: string) => void;
-  onTeamChange: (id: string) => void;
+interface KanbanBoardProps {
+  columns: Array<{ status: TaskStatus; title: string }>;
+  tasksByStatus: Record<TaskStatus, Task[]>;
+  showDone: boolean;
+  hasErrorTasks: boolean;
+  activeDragTask: Task | null;
+  sensors: ReturnType<typeof useSensors>;
+  onShowDoneChange: (show: boolean) => void;
+  onDragStart: (event: DragStartEvent) => void;
+  onDragEnd: (event: DragEndEvent) => void;
+  onTaskClick: (task: Task) => void;
+  onStartTask: (taskId: string) => void;
+  onAddClick: () => void;
 }
 
-function FilterBar({
-  businesses,
-  products,
-  teams,
-  filters,
-  onBusinessChange,
-  onProductChange,
-  onTeamChange,
-}: FilterBarProps) {
+function KanbanBoard({
+  columns, tasksByStatus, showDone, hasErrorTasks, activeDragTask,
+  sensors, onShowDoneChange, onDragStart, onDragEnd,
+  onTaskClick, onStartTask, onAddClick,
+}: KanbanBoardProps) {
   return (
-    <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-gray-200 bg-white">
-      <Select
-        label="Business"
-        value={filters.businessId ?? ''}
-        options={businesses.map((b) => ({ value: b.id, label: b.name }))}
-        onChange={onBusinessChange}
-        placeholder="Выбрать..."
-      />
+    <>
+      <div className="flex items-center gap-3 px-4 py-2">
+        <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showDone}
+            onChange={(e) => onShowDoneChange(e.target.checked)}
+            className="rounded"
+          />
+          Показать завершённые
+        </label>
+      </div>
 
-      <Select
-        label="Product"
-        value={filters.productId ?? ''}
-        options={products.map((p) => ({ value: p.id, label: p.name }))}
-        onChange={onProductChange}
-        placeholder="Выбрать..."
-        disabled={!filters.businessId}
-      />
-
-      <Select
-        label="Team"
-        value={filters.teamId ?? ''}
-        options={teams.map((t) => ({ value: t.id, label: t.name }))}
-        onChange={onTeamChange}
-        placeholder="Все"
-      />
-    </div>
-  );
-}
-
-// ── Select helper ────────────────────────────────────────────────────────────
-
-interface SelectProps {
-  label: string;
-  value: string;
-  options: Array<{ value: string; label: string }>;
-  onChange: (value: string) => void;
-  placeholder: string;
-  disabled?: boolean;
-}
-
-function Select({ label, value, options, onChange, placeholder, disabled }: SelectProps) {
-  return (
-    <label className="flex items-center gap-1.5 text-sm text-gray-600">
-      {label}:
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        className="border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
-      >
-        <option value="">{placeholder}</option>
-        {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-    </label>
+      <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
+        <div className="flex-1 overflow-x-auto px-4 pb-4">
+          <div className="flex gap-4 min-h-0">
+            {columns.map((col) => (
+              <KanbanColumn
+                key={col.status}
+                title={col.title}
+                status={col.status}
+                tasks={tasksByStatus[col.status]}
+                onTaskClick={onTaskClick}
+                onStartTask={col.status === 'backlog' ? onStartTask : undefined}
+                showAddButton={col.status === 'backlog'}
+                onAddClick={col.status === 'backlog' ? onAddClick : undefined}
+              />
+            ))}
+            {showDone && (
+              <KanbanColumn title="Готово" status="done" tasks={tasksByStatus.done} onTaskClick={onTaskClick} />
+            )}
+            {hasErrorTasks && (
+              <KanbanColumn title="Ошибка" status="error" tasks={tasksByStatus.error} onTaskClick={onTaskClick} />
+            )}
+          </div>
+        </div>
+        <DragOverlay>
+          {activeDragTask && <TaskCard task={activeDragTask} onClick={() => undefined} />}
+        </DragOverlay>
+      </DndContext>
+    </>
   );
 }

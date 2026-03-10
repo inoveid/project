@@ -23,7 +23,11 @@ export function isTaskValid(task: { product_id: string | null }): boolean {
   return task.product_id !== null;
 }
 
-/** Allowed drag transitions: from → to[] */
+/**
+ * Drag-only transitions (subset of backend VALID_TRANSITIONS).
+ * awaiting_user and error statuses are set by the system, not by user drag.
+ * Backend also allows: in_progress → awaiting_user, in_progress → error.
+ */
 const ALLOWED_TRANSITIONS: Partial<Record<TaskStatus, TaskStatus[]>> = {
   backlog: ['in_progress'],
   in_progress: ['done'],
