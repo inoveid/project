@@ -29,6 +29,7 @@ def _make_session_mock(session_id, agent_id=None):
     session.agent_id = agent_id
     session.status = "active"
     session.claude_session_id = None
+    session.task_id = None
     session.agent = agent
     session.messages = []
     return session

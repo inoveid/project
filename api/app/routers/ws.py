@@ -23,6 +23,7 @@ from app.services.graph_service import WorkflowState, get_graph
 from app.services.utils.handoff import format_handoff_instructions
 from app.services.runtime import runtime
 from app.services.session_service import SessionNotFoundError, add_message, get_session, stop_session
+from app.services.task_service import update_task_status
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +52,23 @@ async def websocket_session(
     if handoff_targets:
         system_prompt = system_prompt + format_handoff_instructions(handoff_targets)
 
+    # Определить workdir: из task → product → workspace_path, fallback на agent.config
+    workdir = ""
+    if session.task_id:
+        await db.refresh(session, ["task"])
+        if session.task and session.task.product_id:
+            await db.refresh(session.task, ["product"])
+            if session.task.product:
+                workdir = session.task.product.workspace_path
+    if not workdir:
+        workdir = agent.config.get("workdir", "") if agent.config else ""
+
     # Запустить runtime главного агента (один раз, живёт всю сессию)
     if not runtime.is_running(session_id):
         try:
             await runtime.start_session(
                 session_id=session_id,
-                workdir=agent.config.get("workdir", "") if agent.config else "",
+                workdir=workdir,
                 system_prompt=system_prompt,
                 claude_session_id=session.claude_session_id,
                 allowed_tools=agent.allowed_tools or [],
@@ -80,7 +92,7 @@ async def websocket_session(
     graph = get_graph()
 
     try:
-        await _handle_messages(websocket, db, session_id, agent, graph, graph_config)
+        await _handle_messages(websocket, db, session_id, session.task_id, agent, graph, graph_config)
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected for session %s", session_id)
         # Закрыть orphaned child sessions в БД до того, как stop_session очистит _children
@@ -92,10 +104,25 @@ async def websocket_session(
         await runtime.stop_session(session_id)
 
 
+async def _try_update_task_status(
+    db: AsyncSession,
+    task_id: uuid.UUID | None,
+    new_status: str,
+) -> None:
+    """Update task status silently — errors must not break the WS flow."""
+    if not task_id:
+        return
+    try:
+        await update_task_status(db, task_id, new_status)
+    except Exception as exc:
+        logger.warning("Failed to update task %s status to %s: %s", task_id, new_status, exc)
+
+
 async def _handle_messages(
     websocket: WebSocket,
     db: AsyncSession,
     session_id: uuid.UUID,
+    task_id: uuid.UUID | None,
     agent,
     graph,
     graph_config: dict,
@@ -148,24 +175,29 @@ async def _handle_messages(
                 "messages": [],
             }
 
-            interrupted = await _run_graph(websocket, graph, initial_state, graph_config)
-            if not interrupted:
+            interrupted = await _run_graph(websocket, db, task_id, graph, initial_state, graph_config)
+            if interrupted:
+                await _try_update_task_status(db, task_id, "awaiting_user")
+            else:
                 await websocket.send_json({"type": "done"})
 
         elif msg_type == "approve" and interrupted:
             # Возобновить граф с approval=True
             # gate_node: interrupt() вернёт True → создаст sub-агента → run_agent
+            await _try_update_task_status(db, task_id, "in_progress")
             interrupted = await _run_graph(
-                websocket, graph, Command(resume=True), graph_config
+                websocket, db, task_id, graph, Command(resume=True), graph_config
             )
-            if not interrupted:
+            if interrupted:
+                await _try_update_task_status(db, task_id, "awaiting_user")
+            else:
                 await websocket.send_json({"type": "done"})
 
         elif msg_type == "reject" and interrupted:
             # Возобновить граф с approval=False
             # gate_node: interrupt() вернёт False → отменит handoff → END
             interrupted = await _run_graph(
-                websocket, graph, Command(resume=False), graph_config
+                websocket, db, task_id, graph, Command(resume=False), graph_config
             )
             if not interrupted:
                 await websocket.send_json({"type": "done"})
@@ -180,7 +212,14 @@ async def _handle_messages(
             await websocket.send_json({"type": "error", "error": f"Unknown type: {msg_type}"})
 
 
-async def _run_graph(websocket: WebSocket, graph, input, config: dict) -> bool:
+async def _run_graph(
+    websocket: WebSocket,
+    db: AsyncSession,
+    task_id: uuid.UUID | None,
+    graph,
+    input,
+    config: dict,
+) -> bool:
     """
     Стримить граф до завершения или interrupt().
 
@@ -196,5 +235,6 @@ async def _run_graph(websocket: WebSocket, graph, input, config: dict) -> bool:
     except Exception as exc:
         logger.error("Graph execution error: %s", exc)
         await websocket.send_json({"type": "error", "error": str(exc)})
+        await _try_update_task_status(db, task_id, "error")
 
     return False

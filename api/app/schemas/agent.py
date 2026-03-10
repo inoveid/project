@@ -22,6 +22,7 @@ class AgentUpdate(BaseModel):
     system_prompt: Optional[str] = Field(None, min_length=1)
     allowed_tools: Optional[list[str]] = None
     config: Optional[dict[str, Any]] = None
+    prompts: Optional[list] = None
 
 
 class AgentRead(BaseModel):
@@ -33,6 +34,7 @@ class AgentRead(BaseModel):
     system_prompt: str
     allowed_tools: list[str]
     config: dict[str, Any]
+    prompts: list = Field(default_factory=list)
     is_system: bool
     created_at: datetime
     updated_at: datetime

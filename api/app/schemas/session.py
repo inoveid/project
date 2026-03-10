@@ -23,6 +23,7 @@ class MessageRead(BaseModel):
 class SessionRead(BaseModel):
     id: uuid.UUID
     agent_id: uuid.UUID
+    task_id: Optional[uuid.UUID] = None
     status: str
     claude_session_id: Optional[str] = None
     created_at: datetime

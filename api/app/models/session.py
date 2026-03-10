@@ -38,8 +38,14 @@ class Session(Base):
     stopped_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    task_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tasks.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     agent = relationship("Agent", back_populates="sessions")
+    task = relationship("Task", back_populates="sessions")
     messages = relationship(
         "Message", back_populates="session", cascade="all, delete-orphan"
     )

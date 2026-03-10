@@ -14,5 +14,6 @@ from app.models.memory import EpisodicMemory, SemanticMemory
 from app.models.evaluation import EvalCase, EvalRun, EvalResult
 from app.models.business import Business
 from app.models.product import Product
+from app.models.task import Task
 
-__all__ = ["Base", "Team", "Agent", "AgentLink", "Session", "Message", "OAuthToken", "EpisodicMemory", "SemanticMemory", "EvalCase", "EvalRun", "EvalResult", "Business", "Product"]
+__all__ = ["Base", "Team", "Agent", "AgentLink", "Session", "Message", "OAuthToken", "EpisodicMemory", "SemanticMemory", "EvalCase", "EvalRun", "EvalResult", "Business", "Product", "Task"]
