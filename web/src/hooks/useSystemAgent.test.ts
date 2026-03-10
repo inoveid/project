@@ -35,6 +35,9 @@ describe("useSystemAgent", () => {
       system_prompt: "",
       allowed_tools: [],
       config: {},
+      max_cycles: 10,
+      position_x: null,
+      position_y: null,
       created_at: "",
       updated_at: "",
     });
@@ -69,6 +72,9 @@ describe("useSystemAgent", () => {
       system_prompt: "",
       allowed_tools: [],
       config: {},
+      max_cycles: 10,
+      position_x: null,
+      position_y: null,
       created_at: "",
       updated_at: "",
     });
@@ -102,6 +108,9 @@ describe("useSystemAgent", () => {
       system_prompt: "",
       allowed_tools: [],
       config: {},
+      max_cycles: 10,
+      position_x: null,
+      position_y: null,
       created_at: "",
       updated_at: "",
     });
@@ -138,6 +147,9 @@ describe("useSystemAgent", () => {
       system_prompt: "",
       allowed_tools: [],
       config: {},
+      max_cycles: 10,
+      position_x: null,
+      position_y: null,
       created_at: "",
       updated_at: "",
     });

@@ -2,12 +2,14 @@ import { Outlet, Link, useLocation } from "react-router-dom";
 import { AuthStatusBadge } from "./AuthStatusBadge";
 
 const NAV_ITEMS = [
-  { path: "/", label: "Teams" },
+  { path: "/", label: "Dashboard" },
+  { path: "/teams", label: "Teams" },
   { path: "/eval", label: "Evaluations" },
 ] as const;
 
 export function Layout() {
   const location = useLocation();
+  const isFullWidth = location.pathname === "/teams";
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -36,7 +38,7 @@ export function Layout() {
           </div>
         </div>
       </header>
-      <main className="max-w-7xl mx-auto px-4 py-6">
+      <main className={isFullWidth ? "px-4 py-2" : "max-w-7xl mx-auto px-4 py-6"}>
         <Outlet />
       </main>
     </div>

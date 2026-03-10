@@ -30,6 +30,9 @@ export interface Agent {
   system_prompt: string;
   allowed_tools: string[];
   config: Record<string, unknown>;
+  max_cycles: number;
+  position_x: number | null;
+  position_y: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -339,4 +342,30 @@ export interface EvalComparison {
   improvements: Array<{ case_id: string; score_a: number; score_b: number; delta: number }>;
   regression_count: number;
   improvement_count: number;
+}
+
+// ── Workflow types ──────────────────────────────────────────────────────────
+
+export interface Workflow {
+  id: string;
+  name: string;
+  description: string | null;
+  team_id: string;
+  starting_agent_id: string;
+  starting_prompt: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowEdge {
+  id: string;
+  workflow_id: string;
+  from_agent_id: string;
+  to_agent_id: string;
+  condition: string | null;
+  prompt_template: string | null;
+  prompt_id: string | null;
+  order: number;
+  requires_approval: boolean;
+  created_at: string;
 }
