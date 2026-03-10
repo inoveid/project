@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.schemas.task import TaskRead
 from app.schemas.workflow import WorkflowCreate, WorkflowRead, WorkflowUpdate
 from app.services.workflow_service import (
     AgentNotInTeamError,
@@ -12,6 +13,7 @@ from app.services.workflow_service import (
     WorkflowNotFoundError,
     create_workflow,
     delete_workflow,
+    get_active_tasks,
     get_workflow,
     get_workflows,
     update_workflow,
@@ -72,6 +74,18 @@ async def update_workflow_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
     except DuplicateWorkflowError as e:
         raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.get(
+    "/workflows/{workflow_id}/active-tasks", response_model=list[TaskRead]
+)
+async def list_active_tasks(
+    workflow_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+):
+    try:
+        return await get_active_tasks(db, workflow_id)
+    except WorkflowNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.delete("/workflows/{workflow_id}", status_code=204)

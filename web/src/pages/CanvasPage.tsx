@@ -16,6 +16,8 @@ import { useTeams } from "../hooks/useTeams";
 import { useAllAgents } from "../hooks/useAgents";
 import { useCanvasData } from "../hooks/useCanvasData";
 import { useCanvasMutations } from "../hooks/useCanvasMutations";
+import { useWorkflowValidation } from "../hooks/useWorkflowValidation";
+import { useWorkflowLocks } from "../hooks/useWorkflowLock";
 import { AgentNode } from "../components/canvas/AgentNode";
 import { TeamGroupNode } from "../components/canvas/TeamGroupNode";
 import { WorkflowEdgeComponent } from "../components/canvas/WorkflowEdge";
@@ -60,6 +62,24 @@ export function CanvasPage() {
   const { allWorkflows, allEdges, isLoading: workflowsLoading } = useCanvasData(teams);
   const mutations = useCanvasMutations();
 
+  // Validation & locks
+  const teamIds = useMemo(() => (teams ?? []).map((t) => t.id), [teams]);
+  const workflowIds = useMemo(
+    () => allWorkflows.map((w) => w.id),
+    [allWorkflows],
+  );
+  const { issuesByNode } = useWorkflowValidation(
+    allWorkflows, allEdges, allAgents ?? [], teamIds,
+  );
+  const lockedWorkflowMap = useWorkflowLocks(workflowIds);
+  const lockedWorkflowIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const [id, locked] of lockedWorkflowMap) {
+      if (locked) set.add(id);
+    }
+    return set;
+  }, [lockedWorkflowMap]);
+
   // Callbacks for group node buttons
   const handleAddAgent = useCallback((teamId: string) => {
     const count = allAgents?.filter((a) => a.team_id === teamId).length ?? 0;
@@ -90,9 +110,10 @@ export function CanvasPage() {
       teams, agentsByTeam, allWorkflows, allEdges, colorMap,
       new Set(),
       { onAddAgent: handleAddAgent, onAddWorkflow: handleAddWorkflow },
+      { issuesByNode, lockedWorkflowIds },
     );
     return { ...layout, workflowColorMap: colorMap };
-  }, [teams, allAgents, allWorkflows, allEdges, handleAddAgent, handleAddWorkflow]);
+  }, [teams, allAgents, allWorkflows, allEdges, handleAddAgent, handleAddWorkflow, issuesByNode, lockedWorkflowIds]);
 
   const edges = useMemo(
     () => applyWorkflowFilter(rawEdges, selectedWorkflowId, allEdges, workflowColorMap),
@@ -115,7 +136,7 @@ export function CanvasPage() {
     }, [],
   );
 
-  // Drag & drop → debounced position save
+  // Drag & drop → debounced position save (allowed even when locked)
   const handleNodeDragStop = useCallback((_event: React.MouseEvent, node: Node) => {
     if (node.type !== "agentNode") return;
     const agentId = stripNodePrefix(node.id, "agent-");
@@ -139,9 +160,15 @@ export function CanvasPage() {
   // Delete edges via keyboard
   const handleEdgesDelete = useCallback((deletedEdges: Edge[]) => {
     for (const edge of deletedEdges) {
-      void mutations.handleDeleteEdge(stripNodePrefix(edge.id, "edge-"));
+      const rawId = stripNodePrefix(edge.id, "edge-");
+      const edgeData = allEdges.find((e) => e.id === rawId);
+      if (edgeData && lockedWorkflowIds.has(edgeData.workflow_id)) {
+        alert("Cannot delete edge: workflow is being used by an active task.");
+        return;
+      }
+      void mutations.handleDeleteEdge(rawId);
     }
-  }, [mutations]);
+  }, [mutations, allEdges, lockedWorkflowIds]);
 
   const isLoading = teamsLoading || agentsLoading || workflowsLoading;
 
@@ -234,6 +261,7 @@ export function CanvasPage() {
             agents={allAgents}
             workflows={allWorkflows}
             workflowEdges={allEdges}
+            lockedWorkflowIds={lockedWorkflowIds}
             onClose={() => setPanelSelection(null)}
             onUpdateAgent={(id, _teamId, data) => {
               void mutations.handleUpdateAgent(id, data);

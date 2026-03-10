@@ -1,5 +1,5 @@
 import type { Node, Edge } from "@xyflow/react";
-import type { Agent, Team, Workflow, WorkflowEdge } from "../../types";
+import type { Agent, Team, ValidationIssue, Workflow, WorkflowEdge } from "../../types";
 import type { AgentNodeData, TeamGroupNodeData } from "./types";
 
 const WORKFLOW_COLORS = [
@@ -40,6 +40,17 @@ interface LayoutCallbacks {
   onAddWorkflow?: (teamId: string) => void;
 }
 
+interface ValidationContext {
+  issuesByNode: Map<string, ValidationIssue[]>;
+  lockedWorkflowIds: Set<string>;
+}
+
+const EMPTY_ISSUES: ValidationIssue[] = [];
+const EMPTY_VALIDATION: ValidationContext = {
+  issuesByNode: new Map(),
+  lockedWorkflowIds: new Set(),
+};
+
 // TODO: Wire activeAgentIds to real session status when available
 export function buildCanvasLayout(
   teams: Team[],
@@ -49,6 +60,7 @@ export function buildCanvasLayout(
   workflowColorMap: Map<string, string>,
   activeAgentIds: Set<string> = new Set(),
   callbacks: LayoutCallbacks = {},
+  validation: ValidationContext = EMPTY_VALIDATION,
 ): LayoutResult {
   const nodes: Node[] = [];
   const edges: Edge[] = [];
@@ -68,6 +80,10 @@ export function buildCanvasLayout(
     const groupHeight = rows * (NODE_HEIGHT + NODE_GAP_Y) + GROUP_HEADER_HEIGHT + GROUP_PADDING * 2 - NODE_GAP_Y;
 
     const groupId = `team-${team.id}`;
+    const teamWorkflows = workflows.filter((w) => w.team_id === team.id);
+    const isTeamLocked = teamWorkflows.some((w) =>
+      validation.lockedWorkflowIds.has(w.id),
+    );
     nodes.push({
       id: groupId,
       type: "teamGroup",
@@ -77,6 +93,8 @@ export function buildCanvasLayout(
         agentCount: agents.length,
         onAddAgent: callbacks.onAddAgent,
         onAddWorkflow: callbacks.onAddWorkflow,
+        validationIssues: validation.issuesByNode.get(team.id) ?? EMPTY_ISSUES,
+        isLocked: isTeamLocked,
       } satisfies TeamGroupNodeData,
       style: { width: groupWidth, height: groupHeight },
     });
@@ -100,7 +118,13 @@ export function buildCanvasLayout(
         parentId: groupId,
         extent: "parent" as const,
         draggable: true,
-        data: { agent, isStart, isEnd, isActive } satisfies AgentNodeData,
+        data: {
+          agent,
+          isStart,
+          isEnd,
+          isActive,
+          validationIssues: validation.issuesByNode.get(agent.id) ?? EMPTY_ISSUES,
+        } satisfies AgentNodeData,
         style: { width: NODE_WIDTH },
       });
     });

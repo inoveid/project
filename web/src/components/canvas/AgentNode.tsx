@@ -5,12 +5,39 @@ import type { AgentNodeData } from "./types";
 
 export type { AgentNodeData } from "./types";
 
+function getValidationBorderClass(
+  issues: AgentNodeData["validationIssues"],
+): string {
+  if (issues.some((i) => i.type === "error")) return "border-red-500 border-2";
+  if (issues.some((i) => i.type === "warning"))
+    return "border-yellow-400 border-2";
+  return "border-gray-200";
+}
+
+function getValidationTooltip(
+  issues: AgentNodeData["validationIssues"],
+): string {
+  return issues.map((i) => i.message).join("\n");
+}
+
 export function AgentNode({ data }: NodeProps) {
-  const { agent, isStart, isEnd, isActive } = getNodeData<AgentNodeData>(data);
+  const { agent, isStart, isEnd, isActive, validationIssues } =
+    getNodeData<AgentNodeData>(data);
+
+  const borderClass = getValidationBorderClass(validationIssues);
+  const tooltip = getValidationTooltip(validationIssues);
+  const hasIssues = validationIssues.length > 0;
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg shadow-sm px-3 py-2 min-w-[180px]">
-      <Handle type="target" position={Position.Top} className="!bg-gray-400 !w-2 !h-2" />
+    <div
+      className={`bg-white ${borderClass} rounded-lg shadow-sm px-3 py-2 min-w-[180px]`}
+      title={hasIssues ? tooltip : undefined}
+    >
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="!bg-gray-400 !w-2 !h-2"
+      />
 
       <div className="flex items-center gap-1.5 mb-1">
         {isActive && (
@@ -19,11 +46,23 @@ export function AgentNode({ data }: NodeProps) {
             title="Active"
           />
         )}
-        <span className="font-semibold text-sm text-gray-900 truncate">{agent.name}</span>
+        <span className="font-semibold text-sm text-gray-900 truncate">
+          {agent.name}
+        </span>
+        {hasIssues && (
+          <span
+            className="inline-block w-3.5 h-3.5 text-[10px] leading-[14px] text-center rounded-full bg-yellow-100 text-yellow-700"
+            title={tooltip}
+          >
+            !
+          </span>
+        )}
       </div>
 
       {agent.description && (
-        <p className="text-xs text-gray-500 truncate mb-1">{agent.description}</p>
+        <p className="text-xs text-gray-500 truncate mb-1">
+          {agent.description}
+        </p>
       )}
 
       <div className="flex gap-1">
@@ -39,7 +78,11 @@ export function AgentNode({ data }: NodeProps) {
         )}
       </div>
 
-      <Handle type="source" position={Position.Bottom} className="!bg-gray-400 !w-2 !h-2" />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="!bg-gray-400 !w-2 !h-2"
+      />
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import type { Agent, AgentCreate, AgentUpdate } from "../types";
+import type { Agent, AgentCanDeleteResponse, AgentCreate, AgentUpdate } from "../types";
 import { fetchApi } from "./client";
 
 export function getAllAgents(): Promise<Agent[]> {
@@ -36,4 +36,8 @@ export function deleteAgent(id: string): Promise<void> {
 
 export function getSystemAgent(): Promise<Agent> {
   return fetchApi<Agent>("/agents/system");
+}
+
+export function getAgentCanDelete(id: string): Promise<AgentCanDeleteResponse> {
+  return fetchApi<AgentCanDeleteResponse>(`/agents/${id}/can-delete`);
 }

@@ -14,6 +14,7 @@ interface SidePanelProps {
   agents: Agent[];
   workflows: Workflow[];
   workflowEdges: WorkflowEdge[];
+  lockedWorkflowIds: Set<string>;
   onClose: () => void;
   onUpdateAgent: (id: string, teamId: string, data: AgentUpdate) => void;
   onDeleteAgent: (id: string, teamId: string) => void;
@@ -29,6 +30,7 @@ export function SidePanel({
   agents,
   workflows,
   workflowEdges,
+  lockedWorkflowIds,
   onClose,
   onUpdateAgent,
   onDeleteAgent,
@@ -99,6 +101,8 @@ export function SidePanel({
   const toAgent = agents.find((a) => a.id === edge.to_agent_id);
   const toAgentPrompts = toAgent?.prompts ?? [];
 
+  const isEdgeLocked = lockedWorkflowIds.has(edge.workflow_id);
+
   return (
     <PanelShell title="Edge settings" onClose={onClose}>
       <div className="flex-1 overflow-y-auto p-4">
@@ -108,6 +112,7 @@ export function SidePanel({
           toAgentPrompts={toAgentPrompts}
           onSave={(data) => onUpdateEdge(edge.id, edge.workflow_id, data)}
           onDelete={() => onDeleteEdge(edge.id)}
+          readOnly={isEdgeLocked}
         />
       </div>
     </PanelShell>

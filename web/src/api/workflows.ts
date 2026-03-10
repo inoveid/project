@@ -1,4 +1,5 @@
 import type {
+  Task,
   Workflow,
   WorkflowCreate,
   WorkflowUpdate,
@@ -60,4 +61,8 @@ export function updateWorkflowEdge(
 
 export function deleteWorkflowEdge(id: string): Promise<void> {
   return fetchApi<void>(`/edges/${id}`, { method: "DELETE" });
+}
+
+export function getWorkflowActiveTasks(workflowId: string): Promise<Task[]> {
+  return fetchApi<Task[]>(`/workflows/${workflowId}/active-tasks`);
 }

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Agent, AgentUpdate } from "../../../types";
 import { useAutoSave } from "../../../hooks/useAutoSave";
+import { useAgentDeletable } from "../../../hooks/useAgentDeletable";
 
 interface AgentGeneralTabProps {
   agent: Agent;
@@ -16,6 +17,8 @@ export function AgentGeneralTab({ agent, onSave, onDelete }: AgentGeneralTabProp
   const [maxCycles, setMaxCycles] = useState(agent.max_cycles);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  const { canDelete, reason: deleteBlockReason } = useAgentDeletable(agent.id);
+
   const saveField = (field: keyof AgentUpdate, value: unknown) => {
     onSave({ [field]: value });
   };
@@ -27,6 +30,14 @@ export function AgentGeneralTab({ agent, onSave, onDelete }: AgentGeneralTabProp
       .filter(Boolean);
     saveField("allowed_tools", tools);
   }, 500);
+
+  const handleDeleteClick = () => {
+    if (!canDelete) {
+      alert(deleteBlockReason ?? "Cannot delete this agent");
+      return;
+    }
+    setShowDeleteConfirm(true);
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -101,11 +112,17 @@ export function AgentGeneralTab({ agent, onSave, onDelete }: AgentGeneralTabProp
       </label>
 
       <div className="pt-4 border-t border-gray-100">
+        {!canDelete && deleteBlockReason && (
+          <p className="text-xs text-amber-600 mb-2" data-testid="delete-block-reason">
+            {deleteBlockReason}
+          </p>
+        )}
         {!showDeleteConfirm ? (
           <button
             type="button"
-            className="text-sm text-red-600 hover:text-red-700"
-            onClick={() => setShowDeleteConfirm(true)}
+            className={`text-sm ${canDelete ? "text-red-600 hover:text-red-700" : "text-gray-400 cursor-not-allowed"}`}
+            onClick={handleDeleteClick}
+            disabled={!canDelete}
           >
             Delete agent
           </button>

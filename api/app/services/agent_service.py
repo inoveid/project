@@ -91,6 +91,55 @@ async def update_agent(
     return agent
 
 
+async def can_delete_agent(
+    db: AsyncSession, agent_id: uuid.UUID
+) -> tuple[bool, str | None]:
+    """Check whether an agent can be safely deleted.
+
+    Returns (can_delete, reason). reason is None when deletion is allowed.
+    """
+    from app.models.session import Session
+    from app.models.task import Task
+    from app.models.workflow import Workflow
+    from app.models.workflow_edge import WorkflowEdge
+
+    agent = await get_agent(db, agent_id)  # raises AgentNotFoundError
+
+    # 1. Active sessions
+    active_session_stmt = (
+        select(Session.id)
+        .where(Session.agent_id == agent_id, Session.status == "active")
+        .limit(1)
+    )
+    result = await db.execute(active_session_stmt)
+    if result.scalar_one_or_none() is not None:
+        return False, f"Agent '{agent.name}' has active sessions"
+
+    # 2. Part of a workflow with active tasks
+    workflow_ids_as_start = select(Workflow.id).where(
+        Workflow.starting_agent_id == agent_id
+    )
+    workflow_ids_from_edges = select(WorkflowEdge.workflow_id).where(
+        (WorkflowEdge.from_agent_id == agent_id)
+        | (WorkflowEdge.to_agent_id == agent_id)
+    )
+    all_workflow_ids = workflow_ids_as_start.union(workflow_ids_from_edges)
+
+    locked_task_stmt = (
+        select(Task.id)
+        .where(
+            Task.workflow_id.in_(all_workflow_ids),
+            Task.status.in_(["in_progress", "awaiting_user"]),
+        )
+        .limit(1)
+    )
+    result = await db.execute(locked_task_stmt)
+    if result.scalar_one_or_none() is not None:
+        return False, f"Agent '{agent.name}' is part of a workflow with an active task"
+
+    return True, None
+
+
 async def delete_agent(db: AsyncSession, agent_id: uuid.UUID) -> None:
     agent = await get_agent(db, agent_id)
     await db.delete(agent)

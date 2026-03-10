@@ -11,6 +11,7 @@ from app.services.agent_service import (
     AgentDuplicateNameError,
     AgentNotFoundError,
     TeamNotFoundError,
+    can_delete_agent,
     create_agent,
     delete_agent,
     get_agent,
@@ -61,6 +62,17 @@ async def create_agent_endpoint(
         raise HTTPException(status_code=404, detail=str(e))
     except AgentDuplicateNameError as e:
         raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.get("/agents/{agent_id}/can-delete")
+async def check_agent_deletable(
+    agent_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+):
+    try:
+        can_delete, reason = await can_delete_agent(db, agent_id)
+        return {"can_delete": can_delete, "reason": reason}
+    except AgentNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.get("/agents/{agent_id}", response_model=AgentRead)

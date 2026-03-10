@@ -1,4 +1,4 @@
-import type { Agent, Team } from "../../types";
+import type { Agent, Team, ValidationIssue } from "../../types";
 
 /**
  * ReactFlow types `data` as `Record<string, unknown>`, requiring a cast
@@ -14,6 +14,7 @@ export interface AgentNodeData {
   isStart: boolean;
   isEnd: boolean;
   isActive: boolean;
+  validationIssues: ValidationIssue[];
   [key: string]: unknown;
 }
 
@@ -22,6 +23,8 @@ export interface TeamGroupNodeData {
   agentCount: number;
   onAddAgent?: (teamId: string) => void;
   onAddWorkflow?: (teamId: string) => void;
+  validationIssues: ValidationIssue[];
+  isLocked: boolean;
   [key: string]: unknown;
 }
 

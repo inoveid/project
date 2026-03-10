@@ -102,6 +102,26 @@ async def delete_workflow(db: AsyncSession, workflow_id: uuid.UUID) -> None:
     await db.commit()
 
 
+async def get_active_tasks(
+    db: AsyncSession, workflow_id: uuid.UUID
+) -> list["Task"]:
+    """Return tasks with status in_progress or awaiting_user for a workflow."""
+    from app.models.task import Task
+
+    await get_workflow(db, workflow_id)  # raises WorkflowNotFoundError if missing
+
+    stmt = (
+        select(Task)
+        .where(
+            Task.workflow_id == workflow_id,
+            Task.status.in_(["in_progress", "awaiting_user"]),
+        )
+        .order_by(Task.created_at.desc())
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
 async def validate_workflow(db: AsyncSession, workflow_id: uuid.UUID) -> bool:
     """Check that starting_agent exists and workflow has at least one edge."""
     from app.models.workflow_edge import WorkflowEdge

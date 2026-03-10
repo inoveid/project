@@ -411,3 +411,17 @@ export interface WorkflowEdgeUpdate {
   order?: number;
   requires_approval?: boolean;
 }
+
+// ── Canvas validation types ─────────────────────────────────────────────────
+
+export interface AgentCanDeleteResponse {
+  can_delete: boolean;
+  reason: string | null;
+}
+
+export interface ValidationIssue {
+  type: 'error' | 'warning' | 'info';
+  message: string;
+  nodeId?: string;
+  workflowId?: string;
+}

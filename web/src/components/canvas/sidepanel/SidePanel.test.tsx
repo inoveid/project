@@ -1,7 +1,19 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SidePanel } from "./SidePanel";
 import type { Agent, Workflow, WorkflowEdge } from "../../../types";
+
+vi.mock("../../../api/agents", () => ({
+  getAgentCanDelete: vi.fn().mockResolvedValue({ can_delete: true, reason: null }),
+  getAllAgents: vi.fn(),
+  getAgents: vi.fn(),
+  getAgent: vi.fn(),
+  createAgent: vi.fn(),
+  updateAgent: vi.fn(),
+  deleteAgent: vi.fn(),
+  getSystemAgent: vi.fn(),
+}));
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -60,11 +72,21 @@ const defaultProps = {
   onUpdateEdge: vi.fn(),
   onDeleteEdge: vi.fn(),
   onCreateEdge: vi.fn(),
+  lockedWorkflowIds: new Set<string>(),
 };
+
+function renderWithProviders(ui: React.ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>,
+  );
+}
 
 describe("SidePanel", () => {
   it("renders agent panel with name", () => {
-    render(
+    renderWithProviders(
       <SidePanel
         {...defaultProps}
         selection={{ type: "agent", agentId: "agent-1" }}
@@ -78,7 +100,7 @@ describe("SidePanel", () => {
   });
 
   it("renders three tabs for agent", () => {
-    render(
+    renderWithProviders(
       <SidePanel
         {...defaultProps}
         selection={{ type: "agent", agentId: "agent-1" }}
@@ -93,7 +115,7 @@ describe("SidePanel", () => {
   });
 
   it("switches tabs on click", () => {
-    render(
+    renderWithProviders(
       <SidePanel
         {...defaultProps}
         selection={{ type: "agent", agentId: "agent-1" }}
@@ -107,7 +129,7 @@ describe("SidePanel", () => {
   });
 
   it("renders edge panel for edge selection", () => {
-    render(
+    renderWithProviders(
       <SidePanel
         {...defaultProps}
         selection={{ type: "edge", edgeId: "edge-edge-1" }}
@@ -122,7 +144,7 @@ describe("SidePanel", () => {
 
   it("calls onClose when close button clicked", () => {
     const onClose = vi.fn();
-    render(
+    renderWithProviders(
       <SidePanel
         {...defaultProps}
         onClose={onClose}
@@ -137,7 +159,7 @@ describe("SidePanel", () => {
   });
 
   it("returns null for unknown agent", () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <SidePanel
         {...defaultProps}
         selection={{ type: "agent", agentId: "unknown" }}
@@ -147,5 +169,19 @@ describe("SidePanel", () => {
       />,
     );
     expect(container.firstChild).toBeNull();
+  });
+
+  it("shows locked notice on edge when workflow is locked", () => {
+    renderWithProviders(
+      <SidePanel
+        {...defaultProps}
+        lockedWorkflowIds={new Set(["wf-1"])}
+        selection={{ type: "edge", edgeId: "edge-edge-1" }}
+        agents={[makeAgent(), makeAgent({ id: "agent-2", name: "Reviewer" })]}
+        workflows={[makeWorkflow()]}
+        workflowEdges={[makeEdge()]}
+      />,
+    );
+    expect(screen.getByTestId("edge-locked-notice")).toBeInTheDocument();
   });
 });

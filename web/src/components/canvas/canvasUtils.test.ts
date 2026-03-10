@@ -30,6 +30,7 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     system_prompt: "prompt",
     allowed_tools: [],
     config: {},
+    prompts: [],
     max_cycles: 10,
     position_x: null,
     position_y: null,

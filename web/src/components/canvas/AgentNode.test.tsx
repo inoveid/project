@@ -23,6 +23,7 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     system_prompt: "prompt",
     allowed_tools: [],
     config: {},
+    prompts: [],
     max_cycles: 10,
     position_x: null,
     position_y: null,
@@ -42,33 +43,55 @@ function renderNode(data: AgentNodeData) {
 
 describe("AgentNode", () => {
   it("renders agent name", () => {
-    renderNode({ agent: makeAgent(), isStart: false, isEnd: false, isActive: false });
+    renderNode({ agent: makeAgent(), isStart: false, isEnd: false, isActive: false, validationIssues: [] });
     expect(screen.getByText("Coder")).toBeInTheDocument();
   });
 
   it("renders description when provided", () => {
-    renderNode({ agent: makeAgent({ description: "Writes code" }), isStart: false, isEnd: false, isActive: false });
+    renderNode({ agent: makeAgent({ description: "Writes code" }), isStart: false, isEnd: false, isActive: false, validationIssues: [] });
     expect(screen.getByText("Writes code")).toBeInTheDocument();
   });
 
   it("shows Start badge when isStart", () => {
-    renderNode({ agent: makeAgent(), isStart: true, isEnd: false, isActive: false });
+    renderNode({ agent: makeAgent(), isStart: true, isEnd: false, isActive: false, validationIssues: [] });
     expect(screen.getByText("Start")).toBeInTheDocument();
   });
 
   it("shows End badge when isEnd", () => {
-    renderNode({ agent: makeAgent(), isStart: false, isEnd: true, isActive: false });
+    renderNode({ agent: makeAgent(), isStart: false, isEnd: true, isActive: false, validationIssues: [] });
     expect(screen.getByText("End")).toBeInTheDocument();
   });
 
   it("does not show badges when not start or end", () => {
-    renderNode({ agent: makeAgent(), isStart: false, isEnd: false, isActive: false });
+    renderNode({ agent: makeAgent(), isStart: false, isEnd: false, isActive: false, validationIssues: [] });
     expect(screen.queryByText("Start")).not.toBeInTheDocument();
     expect(screen.queryByText("End")).not.toBeInTheDocument();
   });
 
   it("shows active indicator when isActive", () => {
-    renderNode({ agent: makeAgent(), isStart: false, isEnd: false, isActive: true });
+    renderNode({ agent: makeAgent(), isStart: false, isEnd: false, isActive: true, validationIssues: [] });
     expect(screen.getByTitle("Active")).toBeInTheDocument();
+  });
+
+  it("shows warning indicator for validation issues", () => {
+    renderNode({
+      agent: makeAgent(),
+      isStart: false,
+      isEnd: false,
+      isActive: false,
+      validationIssues: [{ type: "warning", message: "Unreachable agent" }],
+    });
+    expect(screen.getByText("!")).toBeInTheDocument();
+  });
+
+  it("does not show warning indicator when no issues", () => {
+    renderNode({
+      agent: makeAgent(),
+      isStart: false,
+      isEnd: false,
+      isActive: false,
+      validationIssues: [],
+    });
+    expect(screen.queryByText("!")).not.toBeInTheDocument();
   });
 });
