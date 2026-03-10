@@ -58,7 +58,7 @@ async def get_workflow_endpoint(
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@router.put("/workflows/{workflow_id}", response_model=WorkflowRead)
+@router.patch("/workflows/{workflow_id}", response_model=WorkflowRead)
 async def update_workflow_endpoint(
     workflow_id: uuid.UUID,
     data: WorkflowUpdate,

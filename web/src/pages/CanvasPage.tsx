@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   MiniMap,
@@ -6,20 +6,29 @@ import {
   Background,
   type NodeTypes,
   type EdgeTypes,
+  type Connection,
+  type Node,
+  type Edge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
 import { useTeams } from "../hooks/useTeams";
 import { useAllAgents } from "../hooks/useAgents";
 import { useCanvasData } from "../hooks/useCanvasData";
+import { useCanvasMutations } from "../hooks/useCanvasMutations";
 import { AgentNode } from "../components/canvas/AgentNode";
 import { TeamGroupNode } from "../components/canvas/TeamGroupNode";
 import { WorkflowEdgeComponent } from "../components/canvas/WorkflowEdge";
 import { WorkflowFilter } from "../components/canvas/WorkflowFilter";
+import { CreateTeamForm } from "../components/canvas/CreateTeamForm";
+import { CreateWorkflowForm } from "../components/canvas/CreateWorkflowForm";
+import { ConnectEdgeDialog } from "../components/canvas/ConnectEdgeDialog";
+import { SidePanel, type SidePanelSelection } from "../components/canvas/sidepanel/SidePanel";
 import {
   buildCanvasLayout,
   buildWorkflowColorMap,
   applyWorkflowFilter,
+  stripNodePrefix,
 } from "../components/canvas/canvasUtils";
 
 const nodeTypes: NodeTypes = {
@@ -31,13 +40,41 @@ const edgeTypes: EdgeTypes = {
   workflowEdge: WorkflowEdgeComponent,
 };
 
+const DRAG_SAVE_DELAY = 500;
+
 export function CanvasPage() {
   const { data: teams, isLoading: teamsLoading } = useTeams();
   const { data: allAgents, isLoading: agentsLoading } = useAllAgents();
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
+  const [panelSelection, setPanelSelection] = useState<SidePanelSelection | null>(null);
+  const [showCreateTeam, setShowCreateTeam] = useState(false);
+  const [createWorkflowTeamId, setCreateWorkflowTeamId] = useState<string | null>(null);
+  const [pendingConnection, setPendingConnection] = useState<{
+    fromId: string;
+    toId: string;
+    fromName: string;
+    toName: string;
+  } | null>(null);
 
+  const dragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { allWorkflows, allEdges, isLoading: workflowsLoading } = useCanvasData(teams);
+  const mutations = useCanvasMutations();
 
+  // Callbacks for group node buttons
+  const handleAddAgent = useCallback((teamId: string) => {
+    const count = allAgents?.filter((a) => a.team_id === teamId).length ?? 0;
+    void mutations.handleCreateAgent(teamId, {
+      name: `Agent ${count + 1}`,
+      role: "agent",
+      system_prompt: "",
+    });
+  }, [allAgents, mutations]);
+
+  const handleAddWorkflow = useCallback((teamId: string) => {
+    setCreateWorkflowTeamId(teamId);
+  }, []);
+
+  // Build layout
   const { nodes, edges: rawEdges, workflowColorMap } = useMemo(() => {
     if (!teams) return { nodes: [], edges: [], workflowColorMap: new Map<string, string>() };
     const agentsByTeam = new Map<string, NonNullable<typeof allAgents>>();
@@ -49,14 +86,62 @@ export function CanvasPage() {
       }
     }
     const colorMap = buildWorkflowColorMap(allWorkflows);
-    const layout = buildCanvasLayout(teams, agentsByTeam, allWorkflows, allEdges, colorMap);
+    const layout = buildCanvasLayout(
+      teams, agentsByTeam, allWorkflows, allEdges, colorMap,
+      new Set(),
+      { onAddAgent: handleAddAgent, onAddWorkflow: handleAddWorkflow },
+    );
     return { ...layout, workflowColorMap: colorMap };
-  }, [teams, allAgents, allWorkflows, allEdges]);
+  }, [teams, allAgents, allWorkflows, allEdges, handleAddAgent, handleAddWorkflow]);
 
   const edges = useMemo(
     () => applyWorkflowFilter(rawEdges, selectedWorkflowId, allEdges, workflowColorMap),
     [rawEdges, selectedWorkflowId, allEdges, workflowColorMap],
   );
+
+  // Node click → side panel
+  const handleNodeClick = useCallback(
+    (_event: React.MouseEvent, node: { id: string; type?: string }) => {
+      if (node.type === "agentNode") {
+        setPanelSelection({ type: "agent", agentId: stripNodePrefix(node.id, "agent-") });
+      }
+    }, [],
+  );
+
+  // Edge click → side panel
+  const handleEdgeClick = useCallback(
+    (_event: React.MouseEvent, edge: { id: string }) => {
+      setPanelSelection({ type: "edge", edgeId: edge.id });
+    }, [],
+  );
+
+  // Drag & drop → debounced position save
+  const handleNodeDragStop = useCallback((_event: React.MouseEvent, node: Node) => {
+    if (node.type !== "agentNode") return;
+    const agentId = stripNodePrefix(node.id, "agent-");
+    if (dragTimerRef.current) clearTimeout(dragTimerRef.current);
+    dragTimerRef.current = setTimeout(() => {
+      mutations.handleSavePosition(agentId, node.position.x, node.position.y);
+      dragTimerRef.current = null;
+    }, DRAG_SAVE_DELAY);
+  }, [mutations]);
+
+  // Connect nodes → dialog
+  const handleConnect = useCallback((connection: Connection) => {
+    const fromId = stripNodePrefix(connection.source ?? "", "agent-");
+    const toId = stripNodePrefix(connection.target ?? "", "agent-");
+    const from = allAgents?.find((a) => a.id === fromId);
+    const to = allAgents?.find((a) => a.id === toId);
+    if (!from || !to) return;
+    setPendingConnection({ fromId, toId, fromName: from.name, toName: to.name });
+  }, [allAgents]);
+
+  // Delete edges via keyboard
+  const handleEdgesDelete = useCallback((deletedEdges: Edge[]) => {
+    for (const edge of deletedEdges) {
+      void mutations.handleDeleteEdge(stripNodePrefix(edge.id, "edge-"));
+    }
+  }, [mutations]);
 
   const isLoading = teamsLoading || agentsLoading || workflowsLoading;
 
@@ -78,40 +163,118 @@ export function CanvasPage() {
             selectedId={selectedWorkflowId}
             onSelect={setSelectedWorkflowId}
           />
-          <button
-            disabled
-            className="text-sm text-gray-400 border border-gray-200 rounded px-3 py-1 cursor-not-allowed"
-            title="Available in edit mode"
-          >
-            + Team
-          </button>
+          {showCreateTeam ? (
+            <CreateTeamForm
+              onSubmit={(data) => {
+                void mutations.handleCreateTeam(data);
+                setShowCreateTeam(false);
+              }}
+              onCancel={() => setShowCreateTeam(false)}
+            />
+          ) : (
+            <button
+              className="text-sm text-blue-600 border border-blue-200 rounded px-3 py-1 hover:bg-blue-50"
+              onClick={() => setShowCreateTeam(true)}
+            >
+              + Team
+            </button>
+          )}
         </div>
       </div>
 
-      <div className="flex-1 border rounded-lg overflow-hidden bg-gray-50">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          fitView
-          minZoom={0.3}
-          maxZoom={2}
-          nodesDraggable={false}
-          nodesConnectable={false}
-          elementsSelectable={false}
-        >
-          <MiniMap
-            nodeColor={(node) => {
-              if (node.type === "teamGroup") return "#dbeafe";
-              return "#ffffff";
+      {createWorkflowTeamId && (
+        <div className="px-1 pb-2">
+          <CreateWorkflowForm
+            teamId={createWorkflowTeamId}
+            agents={allAgents ?? []}
+            onSubmit={(teamId, data) => {
+              void mutations.handleCreateWorkflow(teamId, data);
+              setCreateWorkflowTeamId(null);
             }}
-            className="!bg-gray-100"
+            onCancel={() => setCreateWorkflowTeamId(null)}
           />
-          <Controls showInteractive={false} />
-          <Background gap={20} size={1} />
-        </ReactFlow>
+        </div>
+      )}
+
+      <div className="flex flex-1 border rounded-lg overflow-hidden bg-gray-50">
+        <div className="flex-1">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            fitView
+            minZoom={0.3}
+            maxZoom={2}
+            nodesDraggable
+            nodesConnectable
+            elementsSelectable
+            onNodeClick={handleNodeClick}
+            onEdgeClick={handleEdgeClick}
+            onNodeDragStop={handleNodeDragStop}
+            onConnect={handleConnect}
+            onEdgesDelete={handleEdgesDelete}
+            deleteKeyCode="Delete"
+          >
+            <MiniMap
+              nodeColor={(node) => {
+                if (node.type === "teamGroup") return "#dbeafe";
+                return "#ffffff";
+              }}
+              className="!bg-gray-100"
+            />
+            <Controls showInteractive={false} />
+            <Background gap={20} size={1} />
+          </ReactFlow>
+        </div>
+
+        {panelSelection && allAgents && (
+          <SidePanel
+            selection={panelSelection}
+            agents={allAgents}
+            workflows={allWorkflows}
+            workflowEdges={allEdges}
+            onClose={() => setPanelSelection(null)}
+            onUpdateAgent={(id, _teamId, data) => {
+              void mutations.handleUpdateAgent(id, data);
+            }}
+            onDeleteAgent={(id) => {
+              void mutations.handleDeleteAgent(id);
+              setPanelSelection(null);
+            }}
+            onUpdateEdge={(edgeId, _workflowId, data) => {
+              void mutations.handleUpdateEdge(edgeId, data);
+            }}
+            onDeleteEdge={(edgeId) => {
+              void mutations.handleDeleteEdge(edgeId);
+              setPanelSelection(null);
+            }}
+            onCreateEdge={(workflowId, fromAgentId, toAgentId) => {
+              void mutations.handleCreateEdge(workflowId, {
+                from_agent_id: fromAgentId,
+                to_agent_id: toAgentId,
+              });
+            }}
+          />
+        )}
       </div>
+
+      {pendingConnection && (
+        <ConnectEdgeDialog
+          workflows={allWorkflows}
+          fromAgentName={pendingConnection.fromName}
+          toAgentName={pendingConnection.toName}
+          onSubmit={(workflowId, condition) => {
+            void mutations.handleCreateEdge(workflowId, {
+              from_agent_id: pendingConnection.fromId,
+              to_agent_id: pendingConnection.toId,
+              condition,
+            });
+            setPendingConnection(null);
+          }}
+          onCancel={() => setPendingConnection(null)}
+        />
+      )}
     </div>
   );
 }

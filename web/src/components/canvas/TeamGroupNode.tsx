@@ -5,7 +5,7 @@ import type { TeamGroupNodeData } from "./types";
 export type { TeamGroupNodeData } from "./types";
 
 export function TeamGroupNode({ data }: NodeProps) {
-  const { team, agentCount } = getNodeData<TeamGroupNodeData>(data);
+  const { team, agentCount, onAddAgent, onAddWorkflow } = getNodeData<TeamGroupNodeData>(data);
 
   return (
     <div className="w-full h-full bg-blue-50/50 border-2 border-blue-200 rounded-xl">
@@ -16,13 +16,20 @@ export function TeamGroupNode({ data }: NodeProps) {
             {agentCount} {agentCount === 1 ? "agent" : "agents"}
           </span>
         </div>
-        <button
-          disabled
-          className="text-xs text-gray-400 border border-gray-200 rounded px-2 py-0.5 cursor-not-allowed"
-          title="Available in edit mode"
-        >
-          + Agent
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            className="text-xs text-blue-600 border border-blue-200 rounded px-2 py-0.5 hover:bg-blue-100 nopan nodrag"
+            onClick={() => onAddAgent?.(team.id)}
+          >
+            + Agent
+          </button>
+          <button
+            className="text-xs text-blue-600 border border-blue-200 rounded px-2 py-0.5 hover:bg-blue-100 nopan nodrag"
+            onClick={() => onAddWorkflow?.(team.id)}
+          >
+            + Workflow
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -11,17 +11,19 @@ export function useCanvasData(teams: Team[] | undefined) {
     queries: teamIds.map((teamId) => ({
       queryKey: ["workflows", teamId] as const,
       queryFn: () => getWorkflows(teamId),
-      enabled: teamIds.length > 0,
     })),
   });
 
+  // Stabilize reference: only recompute when query data actually changes
+  const workflowDataKeys = workflowQueries.map((q) => q.dataUpdatedAt).join(",");
   const allWorkflows = useMemo(() => {
     const result: Workflow[] = [];
     for (const q of workflowQueries) {
       if (q.data) result.push(...q.data);
     }
     return result;
-  }, [workflowQueries]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workflowDataKeys]);
 
   const { data: allEdges, isLoading: edgesLoading } = useAllWorkflowEdges(allWorkflows);
 

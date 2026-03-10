@@ -20,6 +20,8 @@ export interface AgentNodeData {
 export interface TeamGroupNodeData {
   team: Team;
   agentCount: number;
+  onAddAgent?: (teamId: string) => void;
+  onAddWorkflow?: (teamId: string) => void;
   [key: string]: unknown;
 }
 
@@ -27,6 +29,7 @@ export interface WorkflowEdgeData {
   condition: string | null;
   requiresApproval: boolean;
   color: string;
+  edgeId: string;
   [key: string]: unknown;
 }
 

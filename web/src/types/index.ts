@@ -21,6 +21,11 @@ export interface TeamUpdate {
   project_scoped?: boolean;
 }
 
+export interface AgentPrompt {
+  name: string;
+  content: string;
+}
+
 export interface Agent {
   id: string;
   team_id: string;
@@ -30,6 +35,7 @@ export interface Agent {
   system_prompt: string;
   allowed_tools: string[];
   config: Record<string, unknown>;
+  prompts: AgentPrompt[];
   max_cycles: number;
   position_x: number | null;
   position_y: number | null;
@@ -53,6 +59,10 @@ export interface AgentUpdate {
   system_prompt?: string;
   allowed_tools?: string[];
   config?: Record<string, unknown>;
+  prompts?: AgentPrompt[];
+  max_cycles?: number;
+  position_x?: number | null;
+  position_y?: number | null;
 }
 
 export interface AgentLink {
@@ -357,6 +367,20 @@ export interface Workflow {
   updated_at: string;
 }
 
+export interface WorkflowCreate {
+  name: string;
+  starting_agent_id: string;
+  starting_prompt: string;
+  description?: string | null;
+}
+
+export interface WorkflowUpdate {
+  name?: string;
+  description?: string | null;
+  starting_agent_id?: string;
+  starting_prompt?: string;
+}
+
 export interface WorkflowEdge {
   id: string;
   workflow_id: string;
@@ -368,4 +392,22 @@ export interface WorkflowEdge {
   order: number;
   requires_approval: boolean;
   created_at: string;
+}
+
+export interface WorkflowEdgeCreate {
+  from_agent_id: string;
+  to_agent_id: string;
+  condition?: string | null;
+  prompt_template?: string | null;
+  prompt_id?: string | null;
+  order?: number;
+  requires_approval?: boolean;
+}
+
+export interface WorkflowEdgeUpdate {
+  condition?: string | null;
+  prompt_template?: string | null;
+  prompt_id?: string | null;
+  order?: number;
+  requires_approval?: boolean;
 }

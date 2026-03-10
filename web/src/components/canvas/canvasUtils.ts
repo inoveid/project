@@ -17,6 +17,11 @@ export function getWorkflowColor(index: number): string {
   return WORKFLOW_COLORS[index % WORKFLOW_COLORS.length] ?? "#94a3b8";
 }
 
+/** Strips "agent-" or "edge-" prefix from ReactFlow node/edge IDs to get the raw entity ID. */
+export function stripNodePrefix(id: string, prefix: "agent-" | "edge-"): string {
+  return id.startsWith(prefix) ? id.slice(prefix.length) : id;
+}
+
 const GROUP_PADDING = 40;
 const NODE_WIDTH = 200;
 const NODE_HEIGHT = 80;
@@ -30,6 +35,11 @@ interface LayoutResult {
   edges: Edge[];
 }
 
+interface LayoutCallbacks {
+  onAddAgent?: (teamId: string) => void;
+  onAddWorkflow?: (teamId: string) => void;
+}
+
 // TODO: Wire activeAgentIds to real session status when available
 export function buildCanvasLayout(
   teams: Team[],
@@ -38,6 +48,7 @@ export function buildCanvasLayout(
   workflowEdges: WorkflowEdge[],
   workflowColorMap: Map<string, string>,
   activeAgentIds: Set<string> = new Set(),
+  callbacks: LayoutCallbacks = {},
 ): LayoutResult {
   const nodes: Node[] = [];
   const edges: Edge[] = [];
@@ -61,7 +72,12 @@ export function buildCanvasLayout(
       id: groupId,
       type: "teamGroup",
       position: { x: 0, y: groupOffsetY },
-      data: { team, agentCount: agents.length } satisfies TeamGroupNodeData,
+      data: {
+        team,
+        agentCount: agents.length,
+        onAddAgent: callbacks.onAddAgent,
+        onAddWorkflow: callbacks.onAddWorkflow,
+      } satisfies TeamGroupNodeData,
       style: { width: groupWidth, height: groupHeight },
     });
 
@@ -83,6 +99,7 @@ export function buildCanvasLayout(
         position: { x, y },
         parentId: groupId,
         extent: "parent" as const,
+        draggable: true,
         data: { agent, isStart, isEnd, isActive } satisfies AgentNodeData,
         style: { width: NODE_WIDTH },
       });
@@ -102,6 +119,7 @@ export function buildCanvasLayout(
         condition: edge.condition,
         requiresApproval: edge.requires_approval,
         color,
+        edgeId: edge.id,
       },
       style: { stroke: color, strokeWidth: 2 },
       animated: false,

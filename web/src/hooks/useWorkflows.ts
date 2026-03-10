@@ -1,6 +1,23 @@
-import { useQuery, useQueries } from "@tanstack/react-query";
-import { getWorkflows, getWorkflow, getWorkflowEdges } from "../api/workflows";
-import type { Workflow, WorkflowEdge } from "../types";
+import { useMutation, useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
+import {
+  getWorkflows,
+  getWorkflow,
+  getWorkflowEdges,
+  createWorkflow,
+  updateWorkflow,
+  deleteWorkflow,
+  createWorkflowEdge,
+  updateWorkflowEdge,
+  deleteWorkflowEdge,
+} from "../api/workflows";
+import type {
+  Workflow,
+  WorkflowCreate,
+  WorkflowUpdate,
+  WorkflowEdge,
+  WorkflowEdgeCreate,
+  WorkflowEdgeUpdate,
+} from "../types";
 
 function workflowsKey(teamId: string) {
   return ["workflows", teamId] as const;
@@ -55,4 +72,66 @@ export function useAllWorkflowEdges(workflows: Workflow[] | undefined) {
   }
 
   return { data: allEdges, isLoading };
+}
+
+export function useCreateWorkflow(teamId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: WorkflowCreate) => createWorkflow(teamId, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: workflowsKey(teamId) });
+    },
+  });
+}
+
+export function useUpdateWorkflow(teamId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: WorkflowUpdate }) =>
+      updateWorkflow(id, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: workflowsKey(teamId) });
+    },
+  });
+}
+
+export function useDeleteWorkflow(teamId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteWorkflow(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: workflowsKey(teamId) });
+    },
+  });
+}
+
+export function useCreateWorkflowEdge(workflowId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: WorkflowEdgeCreate) => createWorkflowEdge(workflowId, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: workflowEdgesKey(workflowId) });
+    },
+  });
+}
+
+export function useUpdateWorkflowEdge(workflowId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: WorkflowEdgeUpdate }) =>
+      updateWorkflowEdge(id, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: workflowEdgesKey(workflowId) });
+    },
+  });
+}
+
+export function useDeleteWorkflowEdge(workflowId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteWorkflowEdge(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: workflowEdgesKey(workflowId) });
+    },
+  });
 }

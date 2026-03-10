@@ -51,7 +51,7 @@ async def create_edge_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.put("/edges/{edge_id}", response_model=WorkflowEdgeRead)
+@router.patch("/edges/{edge_id}", response_model=WorkflowEdgeRead)
 async def update_edge_endpoint(
     edge_id: uuid.UUID,
     data: WorkflowEdgeUpdate,

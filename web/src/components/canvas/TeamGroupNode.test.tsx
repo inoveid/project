@@ -1,8 +1,8 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { TeamGroupNode } from "./TeamGroupNode";
 import type { Team } from "../../types";
-import type { TeamGroupNodeData } from "./TeamGroupNode";
+import type { TeamGroupNodeData } from "./types";
 
 function makeTeam(overrides: Partial<Team> = {}): Team {
   return {
@@ -37,9 +37,19 @@ describe("TeamGroupNode", () => {
     expect(screen.getByText("1 agent")).toBeInTheDocument();
   });
 
-  it("renders disabled Add Agent button", () => {
-    renderNode({ team: makeTeam(), agentCount: 0 });
+  it("renders + Agent button that calls onAddAgent", () => {
+    const onAddAgent = vi.fn();
+    renderNode({ team: makeTeam(), agentCount: 0, onAddAgent });
     const button = screen.getByText("+ Agent");
-    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(onAddAgent).toHaveBeenCalledWith("team-1");
+  });
+
+  it("renders + Workflow button that calls onAddWorkflow", () => {
+    const onAddWorkflow = vi.fn();
+    renderNode({ team: makeTeam(), agentCount: 0, onAddWorkflow });
+    const button = screen.getByText("+ Workflow");
+    fireEvent.click(button);
+    expect(onAddWorkflow).toHaveBeenCalledWith("team-1");
   });
 });
