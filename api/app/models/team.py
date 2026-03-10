@@ -31,6 +31,6 @@ class Team(Base):
     )
 
     agents = relationship("Agent", back_populates="team", cascade="all, delete-orphan")
-    agent_links = relationship(
-        "AgentLink", back_populates="team", cascade="all, delete-orphan"
+    workflows = relationship(
+        "Workflow", back_populates="team", cascade="all, delete-orphan"
     )

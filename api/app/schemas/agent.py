@@ -29,6 +29,9 @@ class AgentUpdate(BaseModel):
     allowed_tools: Optional[list[str]] = None
     config: Optional[dict[str, Any]] = None
     prompts: Optional[list[AgentPrompt]] = None
+    max_cycles: Optional[int] = None
+    position_x: Optional[float] = None
+    position_y: Optional[float] = None
 
 
 class AgentRead(BaseModel):
@@ -41,6 +44,9 @@ class AgentRead(BaseModel):
     allowed_tools: list[str]
     config: dict[str, Any]
     prompts: list[AgentPrompt] = Field(default_factory=list)
+    max_cycles: int = 3
+    position_x: Optional[float] = None
+    position_y: Optional[float] = None
     is_system: bool
     created_at: datetime
     updated_at: datetime

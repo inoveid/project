@@ -6,7 +6,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from app.config import settings
 from app.database import async_session
-from app.routers import agents, agent_links, auth, businesses, evaluations, memory, products, sessions, tasks, teams, ws
+from app.routers import agents, auth, businesses, evaluations, memory, products, sessions, tasks, teams, workflow_edges, workflows, ws
 import app.services.graph_service as graph_svc
 from app.services.system_agent_service import seed_system_agent
 
@@ -40,7 +40,8 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(teams.router, prefix="/api/teams", tags=["teams"])
 app.include_router(agents.router, prefix="/api", tags=["agents"])
-app.include_router(agent_links.router, prefix="/api", tags=["agent_links"])
+app.include_router(workflows.router, prefix="/api", tags=["workflows"])
+app.include_router(workflow_edges.router, prefix="/api", tags=["workflow_edges"])
 app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(businesses.router, prefix="/api", tags=["businesses"])
 app.include_router(products.router, prefix="/api", tags=["products"])
