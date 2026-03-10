@@ -1,11 +1,15 @@
 """
-P4: LangGraph Redesign
+P5: Workflow-based handoff via MCP tools.
 
-Заменяет рекурсивный handle_handoff() из P3 граф-автоматом с:
-- TypedDict State — явное состояние вместо стека вызовов
-- PostgresSaver — checkpoint после каждого узла
-- interrupt() — HITL gate: пауза до одобрения человека
-- Conditional edges — явная маршрутизация вместо if/else
+Replaces text-based handoff blocks with structured MCP tool calls.
+Agent outgoing edges in a workflow become handoff tools. The agent calls
+a tool to transition; the server checks requires_approval and max_cycles.
+
+Graph:
+    START → run_agent → [route] → notify_handoff → gate → run_agent (cycle)
+                                → auto_handoff → run_agent (cycle)
+                                → complete → END
+                                → END
 """
 from __future__ import annotations
 
@@ -22,44 +26,53 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.schemas.session import SessionCreate
-from app.services.agent_link_service import get_agent_handoff_targets
-from app.services.utils.handoff import (
-    build_agent_prompt,
-    parse_handoff_block,
+from app.services.handoff_server import (
+    HandoffResult,
+    format_handoff_tools_prompt,
+    generate_handoff_tools,
+    handle_handoff_tool_call,
+    parse_handoff_from_text,
 )
 from app.services.runtime import runtime
-from app.services.session_service import SessionNotFoundError, add_message, create_session, get_session, stop_session
+from app.services.session_service import (
+    SessionNotFoundError,
+    add_message,
+    create_session,
+    get_session,
+    stop_session,
+)
 
 logger = logging.getLogger(__name__)
 
 MAX_DEPTH = 5
 
+
 # ---------------------------------------------------------------------------
-# State — всё, что LangGraph сохраняет в checkpoint
+# State
 # ---------------------------------------------------------------------------
 
 class WorkflowState(TypedDict):
     """
-    Состояние графа, персистируемое в PostgreSQL после каждого узла.
+    Graph state persisted in PostgreSQL after each node.
 
-    Ключевые концепции:
-    - main_session_id: WebSocket-сессия (не меняется)
-    - current_session_id: claude CLI сессия текущего агента (меняется при handoff)
-    - depth: 0 = главный агент, >0 = sub-агент
-    - chain: [[from, to], ...] — для детектирования циклов
-    - gateway_approved: True/False/None — исход HITL gate
+    - main_session_id: WebSocket session (unchanged)
+    - current_session_id: claude CLI session of current agent (changes on handoff)
+    - workflow_id: workflow being executed (None for legacy sessions)
+    - task_id: task being worked on (None for legacy sessions)
+    - handoff_result: serialized HandoffResult from handle_handoff_tool_call
     """
     main_session_id: str
     current_session_id: str
     current_agent_id: str
     current_agent_name: str
+    workflow_id: str | None
+    task_id: str | None
     task: str
     depth: int
-    chain: list            # [[from_name, to_name], ...]
-    handoff_target: str | None
-    handoff_message: str | None
+    chain: list
+    handoff_result: dict | None
     gateway_approved: bool | None
-    messages: list         # [{agent, text, tools}] — накопленные результаты
+    messages: list
 
 
 # ---------------------------------------------------------------------------
@@ -68,10 +81,10 @@ class WorkflowState(TypedDict):
 
 async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
     """
-    Запустить текущего агента через claude CLI и стримить события в WebSocket.
+    Run the current agent via claude CLI and stream events to WebSocket.
 
-    Для depth==0 (главный агент): runtime уже запущен из ws.py, не останавливаем.
-    Для depth>0 (sub-агент): runtime запущен в gate_node, останавливаем здесь.
+    For depth==0 (main agent): runtime already started from ws.py.
+    For depth>0 (sub-agent): runtime started in gate/auto_handoff node.
     """
     ws: WebSocket = config["configurable"]["websocket"]
     db: AsyncSession = config["configurable"]["db"]
@@ -91,7 +104,6 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
                     "tool_name": event.get("tool_name", ""),
                     "tool_input": event.get("tool_input", {}),
                 })
-            # Sub-агенты получают префикс sub_agent_ для UI
             if is_sub:
                 await ws.send_json({
                     **event,
@@ -111,23 +123,22 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
         else:
             await ws.send_json({"type": "error", "error": str(exc)})
 
-    # Sub-агент завершил работу — остановить runtime, закрыть в БД и уведомить UI
+    # Sub-agent done — stop runtime, close DB session, notify UI
     if is_sub:
         await runtime.stop_session(session_id)
         await stop_session(db, session_id)
         await ws.send_json({"type": "handoff_done", "agent_name": state["current_agent_name"]})
 
-    # Сохранить результат в БД
+    # Save result to DB
     if full_text or tool_uses:
         await add_message(db, session_id, "assistant", full_text, tool_uses=tool_uses or None)
         if is_sub:
-            # Дублировать в основную сессию для истории
             await add_message(
                 db, uuid.UUID(state["main_session_id"]), "assistant",
                 f"[{state['current_agent_name']}]: {full_text}",
             )
 
-    # Сохранить claude_session_id для resume (только главный агент)
+    # Save claude_session_id for resume (main agent only)
     if not is_sub:
         claude_sid = runtime.get_claude_session_id(session_id)
         if claude_sid:
@@ -138,8 +149,11 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
             except SessionNotFoundError:
                 pass
 
-    # Разобрать handoff-блок из ответа
-    block = parse_handoff_block(full_text)
+    # Parse handoff tool call from agent response
+    handoff_result = await _resolve_handoff(
+        db, full_text, state.get("workflow_id"), state.get("task_id"),
+        uuid.UUID(state["current_agent_id"]),
+    )
 
     return {
         "messages": state["messages"] + [{
@@ -147,93 +161,198 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
             "text": full_text,
             "tools": tool_uses,
         }],
-        "handoff_target": block["to"] if block else None,
-        "handoff_message": block["message"] if block else None,
-        "gateway_approved": None,  # сбросить флаг для следующего цикла
+        "handoff_result": _serialize_handoff_result(handoff_result),
+        "gateway_approved": None,
+    }
+
+
+async def _resolve_handoff(
+    db: AsyncSession,
+    full_text: str,
+    workflow_id: str | None,
+    task_id: str | None,
+    agent_id: uuid.UUID,
+) -> HandoffResult | None:
+    """Parse handoff from agent text and resolve via handoff_server."""
+    if not workflow_id:
+        return None
+
+    parsed = parse_handoff_from_text(full_text)
+    if not parsed:
+        return None
+
+    tool_name = parsed.get("tool", "")
+    tool_args = {k: v for k, v in parsed.items() if k != "tool"}
+
+    return await handle_handoff_tool_call(
+        db,
+        tool_name=tool_name,
+        tool_args=tool_args,
+        task_id=uuid.UUID(task_id) if task_id else None,
+        workflow_id=uuid.UUID(workflow_id),
+        agent_id=agent_id,
+    )
+
+
+def _serialize_handoff_result(result: HandoffResult | None) -> dict | None:
+    """Convert HandoffResult to a JSON-serializable dict for state."""
+    if result is None:
+        return None
+    return {
+        "forwarded": result.forwarded,
+        "awaiting_approval": result.awaiting_approval,
+        "blocked": result.blocked,
+        "completed": result.completed,
+        "reason": result.reason,
+        "to_agent_id": str(result.to_agent_id) if result.to_agent_id else None,
+        "to_agent_name": result.to_agent_name,
+        "prompt": result.prompt,
+        "edge_id": str(result.edge_id) if result.edge_id else None,
+        "requires_approval": result.requires_approval,
+        "tool_args": result.tool_args,
     }
 
 
 async def notify_handoff_node(state: WorkflowState, config: RunnableConfig) -> dict:
     """
-    Уведомить WebSocket о предстоящем handoff и запросить одобрение.
+    Notify WebSocket about pending handoff requiring approval.
 
-    Этот узел выполняется ОДИН РАЗ — до gate_node.
-    При resume графа (после interrupt) gate_node перезапускается, но
-    notify_handoff_node — нет. Поэтому approval_required отправляется
-    ровно один раз, без дублирования.
+    Runs ONCE before gate_node. On resume, gate_node reruns but not this node,
+    so approval_required is sent exactly once.
     """
     ws: WebSocket = config["configurable"]["websocket"]
+    hr = state["handoff_result"]
     await ws.send_json({
         "type": "approval_required",
         "from_agent": state["current_agent_name"],
-        "to_agent": state["handoff_target"],
-        "task": state["handoff_message"],
+        "to_agent": hr["to_agent_name"] if hr else "",
+        "task": hr.get("prompt", "") if hr else "",
     })
     return {}
 
 
 async def gate_node(state: WorkflowState, config: RunnableConfig) -> dict:
     """
-    HITL gate: пауза до решения человека.
+    HITL gate: pause until human decision.
 
-    interrupt() — ключевая концепция LangGraph:
-    1. Первый запуск: сохраняет state в checkpoint и паузирует граф
-    2. Resume с Command(resume=True/False): возвращает True/False
-    3. Код ПОСЛЕ interrupt() продолжает выполнение
-
-    На одобрение: создаёт сессию sub-агента, запускает runtime.
-    На отклонение: отменяет handoff.
+    On approve: create sub-agent session and start runtime.
+    On reject: cancel handoff.
     """
     db: AsyncSession = config["configurable"]["db"]
     ws: WebSocket = config["configurable"]["websocket"]
 
-    # Здесь граф паузируется. При resume — возвращает значение из Command(resume=...).
     approved: bool = interrupt("Waiting for human approval of handoff")
 
     if not approved:
-        return {"gateway_approved": False, "handoff_target": None, "handoff_message": None}
+        return {"gateway_approved": False, "handoff_result": None}
 
-    # Найти target-агента через agent_links (граф маршрутизации из БД)
-    from_agent_id = uuid.UUID(state["current_agent_id"])
-    targets = await get_agent_handoff_targets(db, from_agent_id)
-    target = next((a for a in targets if a.name == state["handoff_target"]), None)
+    hr = state["handoff_result"]
+    if not hr or not hr.get("to_agent_id"):
+        return {"gateway_approved": False, "handoff_result": None}
 
+    return await _create_sub_session(db, ws, state, hr)
+
+
+async def auto_handoff_node(state: WorkflowState, config: RunnableConfig) -> dict:
+    """
+    Automatic handoff: create sub-agent session without approval.
+
+    Used when requires_approval=False on the workflow edge.
+    """
+    db: AsyncSession = config["configurable"]["db"]
+    ws: WebSocket = config["configurable"]["websocket"]
+
+    hr = state["handoff_result"]
+    if not hr or not hr.get("to_agent_id"):
+        return {"gateway_approved": False, "handoff_result": None}
+
+    return await _create_sub_session(db, ws, state, hr)
+
+
+async def complete_node(state: WorkflowState, config: RunnableConfig) -> dict:
+    """Handle task completion when agent calls complete_task tool."""
+    ws: WebSocket = config["configurable"]["websocket"]
+    hr = state["handoff_result"]
+    summary = hr.get("tool_args", {}).get("summary", "") if hr else ""
+
+    await ws.send_json({
+        "type": "task_completed",
+        "agent_name": state["current_agent_name"],
+        "summary": summary,
+    })
+
+    return {"handoff_result": None, "gateway_approved": None}
+
+
+async def blocked_node(state: WorkflowState, config: RunnableConfig) -> dict:
+    """Handle blocked handoff (max_cycles exceeded)."""
+    ws: WebSocket = config["configurable"]["websocket"]
+    hr = state["handoff_result"]
+    reason = hr.get("reason", "unknown") if hr else "unknown"
+
+    await ws.send_json({
+        "type": "max_cycles_reached",
+        "agent_name": hr.get("to_agent_name", "") if hr else "",
+        "reason": reason,
+    })
+
+    return {"handoff_result": None, "gateway_approved": None}
+
+
+async def _create_sub_session(
+    db: AsyncSession, ws: WebSocket, state: WorkflowState, hr: dict
+) -> dict:
+    """Create a sub-agent session and start its runtime."""
+    from app.models.agent import Agent
+
+    target_id = uuid.UUID(hr["to_agent_id"])
+    target = await db.get(Agent, target_id)
     if not target:
-        logger.warning("Handoff target '%s' not found in agent_links", state["handoff_target"])
-        return {"gateway_approved": False, "handoff_target": None, "handoff_message": None}
+        logger.warning("Handoff target agent %s not found", target_id)
+        return {"gateway_approved": False, "handoff_result": None}
 
-    # Детектирование циклов: [[from, to], ...] из state
-    current_pair = [state["current_agent_name"], target.name]
-    if current_pair in state["chain"]:
-        await ws.send_json({
-            "type": "handoff_cycle_detected",
-            "message": f"Cycle detected: {state['current_agent_name']} → {target.name}",
-        })
-        return {"gateway_approved": False, "handoff_target": None, "handoff_message": None}
+    prompt = hr.get("prompt", "") or hr.get("tool_args", {}).get("comment", "")
 
-    # Создать DB Session для sub-агента (в отличие от ephemeral run_task, сохраняется в БД)
+    # Create sub-session with task_id linked
+    task_id = uuid.UUID(state["task_id"]) if state.get("task_id") else None
     sub_session = await create_session(db, SessionCreate(agent_id=target.id))
-    await add_message(db, sub_session.id, "user", state["handoff_message"])
+    if task_id:
+        sub_session.task_id = task_id
+        await db.commit()
+        await db.refresh(sub_session)
+    await add_message(db, sub_session.id, "user", prompt)
 
-    # Построить системный промпт с контекстом цепочки
-    sub_targets = await get_agent_handoff_targets(db, target.id)
-    chain_tuples = [tuple(p) for p in state["chain"]] + [tuple(current_pair)]
-    system_prompt = build_agent_prompt(target, list(chain_tuples), sub_targets)
+    # Build system prompt for sub-agent
+    system_prompt = target.system_prompt
 
-    # Запустить runtime sub-агента
+    # Add handoff tools for the sub-agent if workflow context exists
+    workflow_id = state.get("workflow_id")
+    if workflow_id:
+        sub_tools = await generate_handoff_tools(db, target.id, uuid.UUID(workflow_id))
+        tools_prompt = format_handoff_tools_prompt(sub_tools)
+        if tools_prompt:
+            system_prompt += tools_prompt
+
+    # Add chain context
+    current_pair = [state["current_agent_name"], target.name]
+    chain = state["chain"] + [current_pair]
+    chain_str = " → ".join(f"{a}→{b}" for a, b in chain)
+    system_prompt += f"\n\n## Handoff Chain Context\nChain so far: {chain_str} → {target.name} (you)"
+
+    # Resolve workdir
     workdir = (target.config.get("workdir") or settings.workspace_path) if target.config else settings.workspace_path
+
     await runtime.start_session(
         sub_session.id, workdir, system_prompt,
         parent_session_id=uuid.UUID(state["main_session_id"]),
         allowed_tools=target.allowed_tools or [],
     )
 
-    # Уведомить UI о начале handoff
     await ws.send_json({
         "type": "handoff_start",
         "from_agent": state["current_agent_name"],
         "to_agent": target.name,
-        "task": state["handoff_message"],
+        "task": prompt,
     })
 
     return {
@@ -241,27 +360,38 @@ async def gate_node(state: WorkflowState, config: RunnableConfig) -> dict:
         "current_session_id": str(sub_session.id),
         "current_agent_id": str(target.id),
         "current_agent_name": target.name,
-        "task": state["handoff_message"],
+        "task": prompt,
         "depth": state["depth"] + 1,
-        "chain": state["chain"] + [current_pair],
-        "handoff_target": None,
-        "handoff_message": None,
+        "chain": chain,
+        "handoff_result": None,
     }
 
 
 # ---------------------------------------------------------------------------
-# Routing edges — явная маршрутизация по state
+# Routing
 # ---------------------------------------------------------------------------
 
-def route_after_agent(state: WorkflowState) -> Literal["notify_handoff", "__end__"]:
-    """Если агент сгенерировал handoff-блок и не превышена глубина → gate."""
-    if state.get("handoff_target") and state["depth"] < MAX_DEPTH:
+def route_after_agent(
+    state: WorkflowState,
+) -> Literal["notify_handoff", "auto_handoff", "complete", "blocked", "__end__"]:
+    """Route based on handoff_result from handle_handoff_tool_call."""
+    hr = state.get("handoff_result")
+    if not hr or state["depth"] >= MAX_DEPTH:
+        return END
+
+    if hr.get("completed"):
+        return "complete"
+    if hr.get("blocked"):
+        return "blocked"
+    if hr.get("awaiting_approval"):
         return "notify_handoff"
+    if hr.get("forwarded"):
+        return "auto_handoff"
     return END
 
 
 def route_after_gate(state: WorkflowState) -> Literal["run_agent", "__end__"]:
-    """Если одобрено → снова run_agent (для sub-агента). Иначе → END."""
+    """If approved → run_agent (for sub-agent). Otherwise → END."""
     if state.get("gateway_approved"):
         return "run_agent"
     return END
@@ -273,29 +403,36 @@ def route_after_gate(state: WorkflowState) -> Literal["run_agent", "__end__"]:
 
 def build_graph(checkpointer: AsyncPostgresSaver):
     """
-    Граф:
-        START → run_agent → [notify_handoff → gate → run_agent (цикл)] | END
-
-    Checkpointing: после каждого узла состояние сохраняется в PostgreSQL.
-    Thread ID = session_id → отдельная история для каждой сессии.
-    Time-travel: любой прошлый checkpoint можно загрузить и воспроизвести.
+    Graph:
+        START → run_agent → route_after_agent:
+          - notify_handoff → gate → route_after_gate → run_agent | END
+          - auto_handoff → run_agent
+          - complete → END
+          - blocked → END
+          - END
     """
     graph = StateGraph(WorkflowState)
 
     graph.add_node("run_agent", run_agent_node)
     graph.add_node("notify_handoff", notify_handoff_node)
     graph.add_node("gate", gate_node)
+    graph.add_node("auto_handoff", auto_handoff_node)
+    graph.add_node("complete", complete_node)
+    graph.add_node("blocked", blocked_node)
 
     graph.add_edge(START, "run_agent")
     graph.add_conditional_edges("run_agent", route_after_agent)
     graph.add_edge("notify_handoff", "gate")
     graph.add_conditional_edges("gate", route_after_gate)
+    graph.add_edge("auto_handoff", "run_agent")
+    graph.add_edge("complete", END)
+    graph.add_edge("blocked", END)
 
     return graph.compile(checkpointer=checkpointer)
 
 
 # ---------------------------------------------------------------------------
-# Module-level singleton (инициализируется в lifespan main.py)
+# Module-level singleton
 # ---------------------------------------------------------------------------
 
 _compiled_graph = None

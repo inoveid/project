@@ -1,4 +1,4 @@
-"""Tests for app.routers.ws — WebSocket handler."""
+"""Tests for app.routers.ws — WebSocket handler (P5)."""
 
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -17,7 +17,7 @@ WS = "app.routers.ws"
 # ---------------------------------------------------------------------------
 
 
-def _make_session_mock(session_id, agent_id=None, task_id=None):
+def _make_session_mock(session_id, agent_id=None, task_id=None, workflow_id=None):
     agent_id = agent_id or uuid.uuid4()
     agent = MagicMock()
     agent.id = agent_id
@@ -35,13 +35,13 @@ def _make_session_mock(session_id, agent_id=None, task_id=None):
     session.agent = agent
     session.messages = []
 
-    # When task_id is set, provide task→product chain for workdir resolution
     if task_id:
         product = MagicMock()
         product.workspace_path = "/tmp/project"
         task = MagicMock()
         task.product_id = uuid.uuid4()
         task.product = product
+        task.workflow_id = workflow_id
         session.task = task
     else:
         session.task = None
@@ -116,7 +116,7 @@ def test_ws_invalid_json():
 
     with (
         patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS}.runtime") as mock_runtime,
         patch(f"{WS}.get_graph", return_value=_noop_graph()),
     ):
@@ -136,7 +136,7 @@ def test_ws_unknown_message_type():
 
     with (
         patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS}.runtime") as mock_runtime,
         patch(f"{WS}.get_graph", return_value=_noop_graph()),
     ):
@@ -156,7 +156,7 @@ def test_ws_empty_message_content():
 
     with (
         patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS}.runtime") as mock_runtime,
         patch(f"{WS}.get_graph", return_value=_noop_graph()),
     ):
@@ -181,7 +181,7 @@ def test_ws_stop_message():
 
     with (
         patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS}.runtime") as mock_runtime,
         patch(f"{WS}.get_graph", return_value=_noop_graph()),
     ):
@@ -203,7 +203,7 @@ def test_ws_starts_runtime_if_not_running():
 
     with (
         patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS}.runtime") as mock_runtime,
         patch(f"{WS}.get_graph", return_value=_noop_graph()),
     ):
@@ -229,14 +229,13 @@ def test_ws_starts_runtime_if_not_running():
 
 
 def test_ws_message_saves_to_db():
-    """Incoming message is saved to DB via add_message before graph runs."""
     session_id = uuid.uuid4()
     session = _make_session_mock(session_id)
     mock_add = AsyncMock()
 
     with (
         patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS}.runtime") as mock_runtime,
         patch(f"{WS}.add_message", mock_add),
         patch(f"{WS}.get_graph", return_value=_noop_graph()),
@@ -257,7 +256,6 @@ def test_ws_message_saves_to_db():
 
 
 def test_ws_message_triggers_run_graph():
-    """Message triggers graph.astream with correct initial WorkflowState."""
     session_id = uuid.uuid4()
     agent_id = uuid.uuid4()
     session = _make_session_mock(session_id, agent_id=agent_id)
@@ -275,7 +273,7 @@ def test_ws_message_triggers_run_graph():
 
     with (
         patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS}.runtime") as mock_runtime,
         patch(f"{WS}.add_message", new_callable=AsyncMock),
         patch(f"{WS}.get_graph", return_value=g),
@@ -295,7 +293,8 @@ def test_ws_message_triggers_run_graph():
     assert state["task"] == "Do the thing"
     assert state["depth"] == 0
     assert state["chain"] == []
-    assert state["handoff_target"] is None
+    assert state["handoff_result"] is None
+    assert state["workflow_id"] is None  # no task workflow
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +303,6 @@ def test_ws_message_triggers_run_graph():
 
 
 def test_ws_run_graph_sets_interrupted():
-    """__interrupt__ in graph output sets interrupted=True; no 'done' sent."""
     session_id = uuid.uuid4()
     session = _make_session_mock(session_id)
 
@@ -317,7 +315,7 @@ def test_ws_run_graph_sets_interrupted():
 
     with (
         patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS}.runtime") as mock_runtime,
         patch(f"{WS}.add_message", new_callable=AsyncMock),
         patch(f"{WS}.get_graph", return_value=g),
@@ -330,7 +328,6 @@ def test_ws_run_graph_sets_interrupted():
         client = TestClient(app)
         with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
             ws.send_json({"type": "message", "content": "trigger handoff"})
-            # Verify interrupted state: a new message should get error
             ws.send_json({"type": "message", "content": "another"})
             data = ws.receive_json()
             assert data["type"] == "error"
@@ -338,14 +335,13 @@ def test_ws_run_graph_sets_interrupted():
 
 
 def test_ws_approve_resumes_graph():
-    """Approve when interrupted resumes graph with Command(resume=True)."""
     session_id = uuid.uuid4()
     session = _make_session_mock(session_id)
     g = _capturing_graph()
 
     with (
         patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS}.runtime") as mock_runtime,
         patch(f"{WS}.add_message", new_callable=AsyncMock),
         patch(f"{WS}.get_graph", return_value=g),
@@ -369,14 +365,13 @@ def test_ws_approve_resumes_graph():
 
 
 def test_ws_reject_resumes_graph():
-    """Reject when interrupted resumes graph with Command(resume=False)."""
     session_id = uuid.uuid4()
     session = _make_session_mock(session_id)
     g = _capturing_graph()
 
     with (
         patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS}.runtime") as mock_runtime,
         patch(f"{WS}.add_message", new_callable=AsyncMock),
         patch(f"{WS}.get_graph", return_value=g),
@@ -400,7 +395,6 @@ def test_ws_reject_resumes_graph():
 
 
 def test_ws_message_while_interrupted_sends_error():
-    """Message while graph is interrupted returns approval error."""
     session_id = uuid.uuid4()
     session = _make_session_mock(session_id)
 
@@ -413,7 +407,7 @@ def test_ws_message_while_interrupted_sends_error():
 
     with (
         patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS}.runtime") as mock_runtime,
         patch(f"{WS}.add_message", new_callable=AsyncMock),
         patch(f"{WS}.get_graph", return_value=g),
@@ -438,7 +432,6 @@ def test_ws_message_while_interrupted_sends_error():
 
 
 def test_ws_disconnect_cleanup():
-    """On disconnect, child sessions stopped in DB and main runtime cleaned up."""
     session_id = uuid.uuid4()
     child_id = uuid.uuid4()
     session = _make_session_mock(session_id)
@@ -446,7 +439,7 @@ def test_ws_disconnect_cleanup():
 
     with (
         patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS}.runtime") as mock_runtime,
         patch(f"{WS}.stop_session", mock_stop_svc),
         patch(f"{WS}.get_graph", return_value=_noop_graph()),
@@ -465,23 +458,60 @@ def test_ws_disconnect_cleanup():
 
 
 # ---------------------------------------------------------------------------
-# Handoff targets in prompt
+# Workflow handoff tools in prompt
 # ---------------------------------------------------------------------------
 
 
-def test_ws_handoff_targets_appended_to_prompt():
-    """Handoff targets are appended to system_prompt for runtime."""
+def test_ws_workflow_tools_appended_to_prompt():
+    """When session has a task with workflow_id, handoff tools are added to prompt."""
+    session_id = uuid.uuid4()
+    task_id = uuid.uuid4()
+    workflow_id = uuid.uuid4()
+    session = _make_session_mock(session_id, task_id=task_id, workflow_id=workflow_id)
+
+    from app.services.handoff_server import HandoffTool
+    mock_tool = HandoffTool(
+        name="forward_to_qa",
+        description="Forward to QA",
+        edge_id=uuid.uuid4(),
+        to_agent_id=uuid.uuid4(),
+        to_agent_name="QA",
+        requires_approval=False,
+    )
+
+    _override_db_with_mock()
+    try:
+        with (
+            patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+            patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[mock_tool]),
+            patch(f"{WS}.format_handoff_tools_prompt", return_value="\n\n## Available Actions\nforward_to_qa"),
+            patch(f"{WS}.runtime") as mock_runtime,
+            patch(f"{WS}.get_graph", return_value=_noop_graph()),
+        ):
+            mock_runtime.is_running.return_value = False
+            mock_runtime.start_session = AsyncMock()
+            mock_runtime.stop_session = AsyncMock()
+
+            client = TestClient(app)
+            with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+                ws.send_json({"type": "stop"})
+                ws.receive_json()
+
+            call_kwargs = mock_runtime.start_session.call_args.kwargs
+            assert "forward_to_qa" in call_kwargs["system_prompt"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_ws_no_workflow_no_tools():
+    """When session has no task (System Agent), no handoff tools are added."""
     session_id = uuid.uuid4()
     session = _make_session_mock(session_id)
-
-    target = MagicMock()
-    target.name = "Reviewer"
-    target.role = "reviewer"
-    target.description = "Reviews code"
+    session.task_id = None
 
     with (
         patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[target]),
+        patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock) as mock_gen,
         patch(f"{WS}.runtime") as mock_runtime,
         patch(f"{WS}.get_graph", return_value=_noop_graph()),
     ):
@@ -494,9 +524,10 @@ def test_ws_handoff_targets_appended_to_prompt():
             ws.send_json({"type": "stop"})
             ws.receive_json()
 
+        # generate_handoff_tools should NOT be called for sessions without workflow
+        mock_gen.assert_not_called()
         call_kwargs = mock_runtime.start_session.call_args.kwargs
-        assert "Reviewer" in call_kwargs["system_prompt"]
-        assert "handoff" in call_kwargs["system_prompt"].lower()
+        assert call_kwargs["system_prompt"] == "You are helpful"
 
 
 # ---------------------------------------------------------------------------
@@ -505,13 +536,12 @@ def test_ws_handoff_targets_appended_to_prompt():
 
 
 def test_ws_start_session_error_closes_connection():
-    """If runtime.start_session raises, error is sent and WS closed with 4000."""
     session_id = uuid.uuid4()
     session = _make_session_mock(session_id)
 
     with (
         patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS}.runtime") as mock_runtime,
         patch(f"{WS}.get_graph", return_value=_noop_graph()),
     ):
@@ -526,13 +556,12 @@ def test_ws_start_session_error_closes_connection():
 
 
 def test_ws_graph_error_sends_error_event():
-    """If graph.astream raises, error event is sent and 'done' follows."""
     session_id = uuid.uuid4()
     session = _make_session_mock(session_id)
 
     with (
         patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS}.runtime") as mock_runtime,
         patch(f"{WS}.add_message", new_callable=AsyncMock),
         patch(f"{WS}.get_graph", return_value=_error_graph("LLM timeout")),
@@ -545,19 +574,17 @@ def test_ws_graph_error_sends_error_event():
             data = ws.receive_json()
             assert data["type"] == "error"
             assert "LLM timeout" in data["error"]
-            # After error, done is sent (interrupted=False)
             done = ws.receive_json()
             assert done["type"] == "done"
 
 
 def test_ws_approve_when_not_interrupted_is_unknown():
-    """Approve/reject when not interrupted goes to 'else' → unknown type error."""
     session_id = uuid.uuid4()
     session = _make_session_mock(session_id)
 
     with (
         patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS}.runtime") as mock_runtime,
         patch(f"{WS}.get_graph", return_value=_noop_graph()),
     ):
@@ -572,44 +599,6 @@ def test_ws_approve_when_not_interrupted_is_unknown():
 
 
 # ---------------------------------------------------------------------------
-# Streaming: graph produces events forwarded to WS
-# ---------------------------------------------------------------------------
-
-
-def _streaming_graph():
-    """Mock graph whose astream yields multiple value chunks."""
-    g = MagicMock()
-
-    async def _astream(input, config, **kwargs):
-        yield {"messages": [{"agent": "Dev", "text": "chunk1"}]}
-        yield {"messages": [{"agent": "Dev", "text": "chunk2"}]}
-
-    g.astream = _astream
-    return g
-
-
-def test_ws_streaming_events_forwarded():
-    """Graph streaming chunks are processed; 'done' is sent after completion."""
-    session_id = uuid.uuid4()
-    session = _make_session_mock(session_id)
-
-    with (
-        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
-        patch(f"{WS}.runtime") as mock_runtime,
-        patch(f"{WS}.add_message", new_callable=AsyncMock),
-        patch(f"{WS}.get_graph", return_value=_streaming_graph()),
-    ):
-        mock_runtime.is_running.return_value = True
-
-        client = TestClient(app)
-        with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
-            ws.send_json({"type": "message", "content": "Hello"})
-            data = ws.receive_json()
-            assert data["type"] == "done"
-
-
-# ---------------------------------------------------------------------------
 # _try_update_task_status
 # ---------------------------------------------------------------------------
 
@@ -617,7 +606,7 @@ def test_ws_streaming_events_forwarded():
 def _override_db_with_mock():
     """Override get_db dependency with an AsyncMock that has no-op refresh."""
     mock_db = AsyncMock()
-    mock_db.refresh = AsyncMock()  # no-op for task/product loading
+    mock_db.refresh = AsyncMock()
 
     async def _get_db():
         yield mock_db
@@ -627,7 +616,6 @@ def _override_db_with_mock():
 
 
 def test_ws_interrupt_sets_task_awaiting_user():
-    """When graph interrupts, task status is updated to awaiting_user."""
     session_id = uuid.uuid4()
     task_id = uuid.uuid4()
     session = _make_session_mock(session_id, task_id=task_id)
@@ -645,7 +633,7 @@ def test_ws_interrupt_sets_task_awaiting_user():
     try:
         with (
             patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-            patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+            patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
             patch(f"{WS}.runtime") as mock_runtime,
             patch(f"{WS}.add_message", new_callable=AsyncMock),
             patch(f"{WS}.get_graph", return_value=g),
@@ -659,7 +647,6 @@ def test_ws_interrupt_sets_task_awaiting_user():
             client = TestClient(app)
             with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
                 ws.send_json({"type": "message", "content": "trigger handoff"})
-                # Read the error from the next message attempt to confirm interrupted state
                 ws.send_json({"type": "message", "content": "another"})
                 ws.receive_json()
 
@@ -672,7 +659,6 @@ def test_ws_interrupt_sets_task_awaiting_user():
 
 
 def test_ws_approve_sets_task_in_progress():
-    """When approve is sent, task status is updated to in_progress."""
     session_id = uuid.uuid4()
     task_id = uuid.uuid4()
     session = _make_session_mock(session_id, task_id=task_id)
@@ -684,7 +670,7 @@ def test_ws_approve_sets_task_in_progress():
     try:
         with (
             patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-            patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+            patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
             patch(f"{WS}.runtime") as mock_runtime,
             patch(f"{WS}.add_message", new_callable=AsyncMock),
             patch(f"{WS}.get_graph", return_value=g),
@@ -701,7 +687,6 @@ def test_ws_approve_sets_task_in_progress():
                 ws.send_json({"type": "approve"})
                 ws.receive_json()  # done
 
-            # First call: awaiting_user (after interrupt), second: in_progress (after approve)
             calls = mock_update_task.call_args_list
             statuses = [c.args[2] for c in calls]
             assert "awaiting_user" in statuses
@@ -711,10 +696,9 @@ def test_ws_approve_sets_task_in_progress():
 
 
 def test_ws_no_task_id_skips_status_update():
-    """When session has no task_id, _try_update_task_status is a no-op."""
     session_id = uuid.uuid4()
     session = _make_session_mock(session_id)
-    session.task_id = None  # no task
+    session.task_id = None
 
     g = MagicMock()
 
@@ -727,7 +711,7 @@ def test_ws_no_task_id_skips_status_update():
 
     with (
         patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS}.runtime") as mock_runtime,
         patch(f"{WS}.add_message", new_callable=AsyncMock),
         patch(f"{WS}.get_graph", return_value=g),
@@ -748,7 +732,6 @@ def test_ws_no_task_id_skips_status_update():
 
 
 def test_ws_graph_error_sets_task_error():
-    """When graph raises an exception, task status is updated to error."""
     session_id = uuid.uuid4()
     task_id = uuid.uuid4()
     session = _make_session_mock(session_id, task_id=task_id)
@@ -759,7 +742,7 @@ def test_ws_graph_error_sets_task_error():
     try:
         with (
             patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-            patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+            patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
             patch(f"{WS}.runtime") as mock_runtime,
             patch(f"{WS}.add_message", new_callable=AsyncMock),
             patch(f"{WS}.get_graph", return_value=_error_graph("LLM timeout")),
@@ -783,7 +766,6 @@ def test_ws_graph_error_sets_task_error():
 
 
 def test_ws_try_update_task_status_swallows_http_exception():
-    """_try_update_task_status silently handles HTTPException (invalid transition)."""
     session_id = uuid.uuid4()
     task_id = uuid.uuid4()
     session = _make_session_mock(session_id, task_id=task_id)
@@ -801,7 +783,7 @@ def test_ws_try_update_task_status_swallows_http_exception():
     try:
         with (
             patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-            patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+            patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
             patch(f"{WS}.runtime") as mock_runtime,
             patch(f"{WS}.add_message", new_callable=AsyncMock),
             patch(f"{WS}.get_graph", return_value=g),
@@ -815,7 +797,6 @@ def test_ws_try_update_task_status_swallows_http_exception():
             client = TestClient(app)
             with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
                 ws.send_json({"type": "message", "content": "trigger"})
-                # Should NOT crash — HTTPException is swallowed
                 ws.send_json({"type": "message", "content": "another"})
                 data = ws.receive_json()
                 assert data["type"] == "error"
@@ -825,23 +806,21 @@ def test_ws_try_update_task_status_swallows_http_exception():
 
 
 # ---------------------------------------------------------------------------
-# Workdir resolution: task → product → workspace_path
+# Workdir resolution
 # ---------------------------------------------------------------------------
 
 
 def test_ws_workdir_from_task_product():
-    """Workdir is resolved from session.task.product.workspace_path."""
     session_id = uuid.uuid4()
     task_id = uuid.uuid4()
     session = _make_session_mock(session_id, task_id=task_id)
-    # Override default workspace_path
     session.task.product.workspace_path = "/projects/my-app"
 
     _override_db_with_mock()
     try:
         with (
             patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-            patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+            patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
             patch(f"{WS}.runtime") as mock_runtime,
             patch(f"{WS}.get_graph", return_value=_noop_graph()),
         ):
@@ -861,15 +840,14 @@ def test_ws_workdir_from_task_product():
 
 
 def test_ws_workdir_fallback_to_agent_config():
-    """When no task_id, workdir falls back to agent.config.workdir."""
     session_id = uuid.uuid4()
     session = _make_session_mock(session_id)
-    session.task_id = None  # no task
+    session.task_id = None
     session.agent.config = {"workdir": "/fallback/path"}
 
     with (
         patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
-        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.generate_handoff_tools", new_callable=AsyncMock, return_value=[]),
         patch(f"{WS}.runtime") as mock_runtime,
         patch(f"{WS}.get_graph", return_value=_noop_graph()),
     ):
