@@ -6,12 +6,12 @@ import pytest
 from app.schemas.workflow_edge import WorkflowEdgeCreate, WorkflowEdgeUpdate
 from app.services.workflow_edge_service import (
     EdgeNotFoundError,
-    WorkflowNotFoundError,
     create_edge,
     delete_edge,
     get_edges,
     update_edge,
 )
+from app.services.workflow_service import AgentNotInTeamError, WorkflowNotFoundError
 
 
 def _mock_db_result(value):
@@ -63,13 +63,47 @@ async def test_create_edge_workflow_not_found():
 
 
 @pytest.mark.asyncio
-async def test_create_edge_success():
+async def test_create_edge_agent_not_in_team():
     db = _make_db()
     wid = uuid.uuid4()
-    db.execute.return_value = _mock_db_result(wid)
+    tid = uuid.uuid4()
+    fake_wf = MagicMock()
+    fake_wf.team_id = tid
+    wf_result = MagicMock()
+    wf_result.scalar_one_or_none.return_value = fake_wf
+    # 1st call: get workflow, 2nd call: check from_agent → not found
+    db.execute.side_effect = [
+        wf_result,
+        _mock_db_result(None),
+    ]
     data = WorkflowEdgeCreate(
         from_agent_id=uuid.uuid4(),
         to_agent_id=uuid.uuid4(),
+    )
+    with pytest.raises(AgentNotInTeamError):
+        await create_edge(db, wid, data)
+
+
+@pytest.mark.asyncio
+async def test_create_edge_success():
+    db = _make_db()
+    wid = uuid.uuid4()
+    tid = uuid.uuid4()
+    from_id = uuid.uuid4()
+    to_id = uuid.uuid4()
+    fake_wf = MagicMock()
+    fake_wf.team_id = tid
+    wf_result = MagicMock()
+    wf_result.scalar_one_or_none.return_value = fake_wf
+    # 1st: get workflow, 2nd: check from_agent, 3rd: check to_agent
+    db.execute.side_effect = [
+        wf_result,
+        _mock_db_result(from_id),
+        _mock_db_result(to_id),
+    ]
+    data = WorkflowEdgeCreate(
+        from_agent_id=from_id,
+        to_agent_id=to_id,
         condition="status == 'done'",
         order=1,
         requires_approval=False,

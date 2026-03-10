@@ -5,10 +5,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.schemas.workflow_edge import WorkflowEdgeCreate
-from app.services.workflow_edge_service import (
-    EdgeNotFoundError,
-    WorkflowNotFoundError,
-)
+from app.services.workflow_edge_service import EdgeNotFoundError
+from app.services.workflow_service import AgentNotInTeamError, WorkflowNotFoundError
 
 
 def _make_edge(workflow_id: uuid.UUID | None = None) -> dict:
@@ -82,6 +80,24 @@ async def test_create_edge_workflow_not_found(client):
             },
         )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_edge_agent_not_in_team(client):
+    wid = uuid.uuid4()
+    with patch(
+        f"{SERVICE}.create_edge",
+        new_callable=AsyncMock,
+        side_effect=AgentNotInTeamError("wrong team"),
+    ):
+        resp = await client.post(
+            f"/api/workflows/{wid}/edges",
+            json={
+                "from_agent_id": str(uuid.uuid4()),
+                "to_agent_id": str(uuid.uuid4()),
+            },
+        )
+    assert resp.status_code == 400
 
 
 @pytest.mark.asyncio

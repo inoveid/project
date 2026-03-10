@@ -103,8 +103,24 @@ async def delete_workflow(db: AsyncSession, workflow_id: uuid.UUID) -> None:
 
 
 async def validate_workflow(db: AsyncSession, workflow_id: uuid.UUID) -> bool:
+    """Check that starting_agent exists and workflow has at least one edge."""
+    from app.models.workflow_edge import WorkflowEdge
+
     workflow = await get_workflow(db, workflow_id)
-    return bool(workflow.starting_agent_id and workflow.starting_prompt)
+
+    agent_stmt = select(Agent.id).where(Agent.id == workflow.starting_agent_id)
+    agent_result = await db.execute(agent_stmt)
+    if agent_result.scalar_one_or_none() is None:
+        return False
+
+    edges_stmt = select(WorkflowEdge.id).where(
+        WorkflowEdge.workflow_id == workflow_id
+    ).limit(1)
+    edges_result = await db.execute(edges_stmt)
+    if edges_result.scalar_one_or_none() is None:
+        return False
+
+    return True
 
 
 async def _ensure_team_exists(db: AsyncSession, team_id: uuid.UUID) -> None:

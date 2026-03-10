@@ -3,13 +3,11 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.agent import Agent
 from app.models.workflow import Workflow
 from app.models.workflow_edge import WorkflowEdge
 from app.schemas.workflow_edge import WorkflowEdgeCreate, WorkflowEdgeUpdate
-
-
-class WorkflowNotFoundError(Exception):
-    pass
+from app.services.workflow_service import AgentNotInTeamError, WorkflowNotFoundError
 
 
 class EdgeNotFoundError(Exception):
@@ -32,7 +30,9 @@ async def get_edges(
 async def create_edge(
     db: AsyncSession, workflow_id: uuid.UUID, data: WorkflowEdgeCreate
 ) -> WorkflowEdge:
-    await _ensure_workflow_exists(db, workflow_id)
+    workflow = await _get_workflow(db, workflow_id)
+    await _ensure_agent_in_team(db, data.from_agent_id, workflow.team_id)
+    await _ensure_agent_in_team(db, data.to_agent_id, workflow.team_id)
 
     edge = WorkflowEdge(
         workflow_id=workflow_id,
@@ -79,6 +79,15 @@ async def _get_edge(db: AsyncSession, edge_id: uuid.UUID) -> WorkflowEdge:
     return edge
 
 
+async def _get_workflow(db: AsyncSession, workflow_id: uuid.UUID) -> Workflow:
+    stmt = select(Workflow).where(Workflow.id == workflow_id)
+    result = await db.execute(stmt)
+    workflow = result.scalar_one_or_none()
+    if workflow is None:
+        raise WorkflowNotFoundError(f"Workflow {workflow_id} not found")
+    return workflow
+
+
 async def _ensure_workflow_exists(
     db: AsyncSession, workflow_id: uuid.UUID
 ) -> None:
@@ -86,3 +95,14 @@ async def _ensure_workflow_exists(
     result = await db.execute(stmt)
     if result.scalar_one_or_none() is None:
         raise WorkflowNotFoundError(f"Workflow {workflow_id} not found")
+
+
+async def _ensure_agent_in_team(
+    db: AsyncSession, agent_id: uuid.UUID, team_id: uuid.UUID
+) -> None:
+    stmt = select(Agent.id).where(Agent.id == agent_id, Agent.team_id == team_id)
+    result = await db.execute(stmt)
+    if result.scalar_one_or_none() is None:
+        raise AgentNotInTeamError(
+            f"Agent {agent_id} does not belong to team {team_id}"
+        )

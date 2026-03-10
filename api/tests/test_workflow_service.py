@@ -20,11 +20,19 @@ from app.services.workflow_service import (
 
 
 def _mock_db_result(value):
+    """Mock for queries using .scalars().all() (list results)."""
     result = MagicMock()
     result.scalar_one_or_none.return_value = value
     scalars = MagicMock()
     scalars.all.return_value = value if isinstance(value, list) else [value]
     result.scalars.return_value = scalars
+    return result
+
+
+def _mock_db_result_scalar(value):
+    """Mock for queries using .scalar_one_or_none() (single value)."""
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = value
     return result
 
 
@@ -166,12 +174,44 @@ async def test_delete_workflow_success():
 
 
 @pytest.mark.asyncio
-async def test_validate_workflow():
+async def test_validate_workflow_valid():
     db = _make_db()
     fake_wf = MagicMock()
     fake_wf.starting_agent_id = uuid.uuid4()
-    fake_wf.starting_prompt = "go"
-    result_mock = MagicMock()
-    result_mock.scalar_one_or_none.return_value = fake_wf
-    db.execute.return_value = result_mock
+    agent_id = fake_wf.starting_agent_id
+    edge_id = uuid.uuid4()
+    # 1st: get workflow, 2nd: check agent exists, 3rd: check edges exist
+    db.execute.side_effect = [
+        _mock_db_result_scalar(fake_wf),
+        _mock_db_result_scalar(agent_id),
+        _mock_db_result_scalar(edge_id),
+    ]
     assert await validate_workflow(db, uuid.uuid4()) is True
+
+
+@pytest.mark.asyncio
+async def test_validate_workflow_agent_missing():
+    db = _make_db()
+    fake_wf = MagicMock()
+    fake_wf.starting_agent_id = uuid.uuid4()
+    # 1st: get workflow, 2nd: agent not found
+    db.execute.side_effect = [
+        _mock_db_result_scalar(fake_wf),
+        _mock_db_result_scalar(None),
+    ]
+    assert await validate_workflow(db, uuid.uuid4()) is False
+
+
+@pytest.mark.asyncio
+async def test_validate_workflow_no_edges():
+    db = _make_db()
+    fake_wf = MagicMock()
+    fake_wf.starting_agent_id = uuid.uuid4()
+    agent_id = fake_wf.starting_agent_id
+    # 1st: get workflow, 2nd: agent exists, 3rd: no edges
+    db.execute.side_effect = [
+        _mock_db_result_scalar(fake_wf),
+        _mock_db_result_scalar(agent_id),
+        _mock_db_result_scalar(None),
+    ]
+    assert await validate_workflow(db, uuid.uuid4()) is False

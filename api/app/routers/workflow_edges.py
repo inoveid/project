@@ -11,12 +11,12 @@ from app.schemas.workflow_edge import (
 )
 from app.services.workflow_edge_service import (
     EdgeNotFoundError,
-    WorkflowNotFoundError,
     create_edge,
     delete_edge,
     get_edges,
     update_edge,
 )
+from app.services.workflow_service import AgentNotInTeamError, WorkflowNotFoundError
 
 router = APIRouter()
 
@@ -47,6 +47,8 @@ async def create_edge_endpoint(
         return await create_edge(db, workflow_id, data)
     except WorkflowNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except AgentNotInTeamError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.put("/edges/{edge_id}", response_model=WorkflowEdgeRead)
