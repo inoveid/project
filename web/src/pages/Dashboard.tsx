@@ -9,7 +9,7 @@ import { TaskCard } from '../components/tasks/TaskCard';
 import { CreateTaskModal } from '../components/tasks/CreateTaskModal';
 import { FilterBar } from '../components/tasks/FilterBar';
 import { TaskModal } from '../components/tasks/TaskModal';
-import { ToastContainer, showToast } from '../components/tasks/Toast';
+import { useToast } from '../hooks/useToast';
 import { isTransitionAllowed, getTransitionError } from '../components/tasks/statusConfig';
 import type { Task, TaskStatus } from '../types';
 import { isTask, isTaskStatus } from '../types';
@@ -60,6 +60,7 @@ const COLUMNS: Array<{ status: TaskStatus; title: string }> = [
 ];
 
 export function Dashboard() {
+  const { addToast } = useToast();
   const [filters, setFilters] = useState<DashboardFilters>(loadFilters);
   const [showDone, setShowDone] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -120,25 +121,25 @@ export function Dashboard() {
 
     if (!isTransitionAllowed(maybeTask.status, maybeStatus)) {
       const errorMsg = getTransitionError(maybeTask.status, maybeStatus);
-      if (errorMsg) showToast(errorMsg);
+      if (errorMsg) addToast({ type: "error", title: "Недопустимый переход", message: errorMsg });
       return;
     }
 
     if (maybeTask.status === 'backlog' && maybeStatus === 'in_progress' && !maybeTask.product_id) {
-      showToast('Задача должна иметь привязку к продукту');
+      addToast({ type: "warning", title: "Невозможно запустить", message: "Задача должна иметь привязку к продукту" });
       return;
     }
 
     updateTaskStatus.mutate(
       { id: maybeTask.id, status: maybeStatus },
-      { onError: (err: Error) => showToast(`Ошибка: ${err.message}`) },
+      { onError: (err: Error) => addToast({ type: "error", title: "Ошибка", message: err.message }) },
     );
   }
 
   function handleStartTask(taskId: string) {
     updateTaskStatus.mutate(
       { id: taskId, status: 'in_progress' },
-      { onError: (err: Error) => showToast(`Ошибка: ${err.message}`) },
+      { onError: (err: Error) => addToast({ type: "error", title: "Ошибка", message: err.message }) },
     );
   }
 
@@ -196,7 +197,7 @@ export function Dashboard() {
           onSubmit={(data) => {
             createTask.mutate(data, {
               onSuccess: () => setShowCreateModal(false),
-              onError: (err: Error) => showToast(`Ошибка: ${err.message}`),
+              onError: (err: Error) => addToast({ type: "error", title: "Ошибка", message: err.message }),
             });
           }}
           onClose={() => setShowCreateModal(false)}
@@ -210,7 +211,6 @@ export function Dashboard() {
         />
       )}
 
-      <ToastContainer />
     </div>
   );
 }

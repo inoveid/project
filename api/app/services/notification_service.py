@@ -39,7 +39,7 @@ class NotificationBroker:
         message = {"type": event_type, **data}
         disconnected: list[WebSocket] = []
 
-        for ws in self._subscribers:
+        for ws in list(self._subscribers):
             try:
                 if ws.client_state == WebSocketState.CONNECTED:
                     await ws.send_json(message)

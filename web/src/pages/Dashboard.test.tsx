@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
+import { ToastProvider } from '../hooks/useToast';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Dashboard } from './Dashboard';
 import * as businessesApi from '../api/businesses';
@@ -75,9 +76,11 @@ function renderDashboard() {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        <Dashboard />
-      </MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }

@@ -1,32 +1,31 @@
 import { useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { useToast } from "./useToast";
+import {
+  handleNotificationEvent,
+  isNotificationEvent,
+} from "./notificationEventHandler";
 
-interface NotificationEvent {
-  type: string;
-  from_agent?: string;
-  to_agent?: string;
-  agent_name?: string;
-  task?: string;
-  task_id?: string;
-  summary?: string;
-  reason?: string;
-  error?: string;
-}
-
-const RECONNECT_DELAY_MS = 3000;
+const BASE_RECONNECT_MS = 1000;
+const MAX_RECONNECT_MS = 30000;
 const MAX_RECONNECT_ATTEMPTS = 10;
 
 /**
  * Connects to /api/ws/notifications and shows toast notifications
  * for global events (approval_required, task_completed, etc.).
+ *
+ * Uses exponential backoff for reconnection and React Router for navigation.
  */
 export function useNotificationSocket() {
   const { addToast } = useToast();
+  const navigate = useNavigate();
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectCount = useRef(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const addToastRef = useRef(addToast);
+  const navigateRef = useRef(navigate);
   addToastRef.current = addToast;
+  navigateRef.current = navigate;
 
   useEffect(() => {
     function connect() {
@@ -41,8 +40,13 @@ export function useNotificationSocket() {
 
       ws.onmessage = (e: MessageEvent) => {
         try {
-          const event = JSON.parse(String(e.data)) as NotificationEvent;
-          handleNotificationEvent(event, addToastRef.current);
+          const data: unknown = JSON.parse(String(e.data));
+          if (isNotificationEvent(data)) {
+            handleNotificationEvent(data, {
+              addToast: addToastRef.current,
+              navigateToTask: (taskId: string) => navigateRef.current(`/?task=${taskId}`),
+            });
+          }
         } catch {
           // Ignore malformed messages
         }
@@ -51,8 +55,12 @@ export function useNotificationSocket() {
       ws.onclose = () => {
         wsRef.current = null;
         if (reconnectCount.current < MAX_RECONNECT_ATTEMPTS) {
+          const delay = Math.min(
+            BASE_RECONNECT_MS * 2 ** reconnectCount.current,
+            MAX_RECONNECT_MS,
+          );
           reconnectCount.current += 1;
-          reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY_MS);
+          reconnectTimer.current = setTimeout(connect, delay);
         }
       };
 
@@ -72,67 +80,4 @@ export function useNotificationSocket() {
       wsRef.current?.close();
     };
   }, []);
-}
-
-function handleNotificationEvent(
-  event: NotificationEvent,
-  addToast: ReturnType<typeof useToast>["addToast"],
-) {
-  switch (event.type) {
-    case "approval_required":
-      addToast({
-        type: "warning",
-        title: "Ожидает подтверждения",
-        message: `${event.from_agent ?? "Agent"} → ${event.to_agent ?? "Agent"}`,
-        duration: 0,
-        action: event.task_id
-          ? { label: "Перейти", onClick: () => navigateToTask(event.task_id) }
-          : undefined,
-      });
-      break;
-
-    case "max_cycles_reached":
-      addToast({
-        type: "error",
-        title: "Цикл превышен",
-        message: `${event.agent_name ?? "Agent"}: ${event.reason ?? "max cycles reached"}`,
-        duration: 0,
-        action: event.task_id
-          ? { label: "Перейти", onClick: () => navigateToTask(event.task_id) }
-          : undefined,
-      });
-      break;
-
-    case "task_completed":
-      addToast({
-        type: "success",
-        title: "Задача выполнена",
-        message: event.summary
-          ? `${event.agent_name ?? "Agent"}: ${event.summary}`
-          : `${event.agent_name ?? "Agent"} завершил задачу`,
-        duration: 5000,
-        action: event.task_id
-          ? { label: "Открыть", onClick: () => navigateToTask(event.task_id) }
-          : undefined,
-      });
-      break;
-
-    case "task_error":
-      addToast({
-        type: "error",
-        title: "Ошибка задачи",
-        message: event.error ?? "Unknown error",
-        duration: 0,
-        action: event.task_id
-          ? { label: "Открыть", onClick: () => navigateToTask(event.task_id) }
-          : undefined,
-      });
-      break;
-  }
-}
-
-function navigateToTask(taskId: string | undefined) {
-  if (!taskId) return;
-  // Navigate to dashboard where tasks are displayed
-  window.location.hash = `task-${taskId}`;
 }

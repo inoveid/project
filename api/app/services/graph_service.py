@@ -238,7 +238,6 @@ async def notify_handoff_node(state: WorkflowState, config: RunnableConfig) -> d
     Runs ONCE before gate_node. On resume, gate_node reruns but not this node,
     so approval_required is sent exactly once.
     """
-    ws: WebSocket = config["configurable"]["websocket"]
     hr = state["handoff_result"]
     event_data = {
         "from_agent": state["current_agent_name"],
@@ -246,7 +245,6 @@ async def notify_handoff_node(state: WorkflowState, config: RunnableConfig) -> d
         "task": hr.get("prompt", "") if hr else "",
         "task_id": state.get("task_id", ""),
     }
-    await ws.send_json({"type": "approval_required", **event_data})
     await broadcast_notification("approval_required", event_data)
     return {}
 
@@ -291,7 +289,6 @@ async def auto_handoff_node(state: WorkflowState, config: RunnableConfig) -> dic
 
 async def complete_node(state: WorkflowState, config: RunnableConfig) -> dict:
     """Handle task completion when agent calls complete_task tool."""
-    ws: WebSocket = config["configurable"]["websocket"]
     hr = state["handoff_result"]
     summary = hr.get("tool_args", {}).get("summary", "") if hr else ""
 
@@ -300,7 +297,6 @@ async def complete_node(state: WorkflowState, config: RunnableConfig) -> dict:
         "summary": summary,
         "task_id": state.get("task_id", ""),
     }
-    await ws.send_json({"type": "task_completed", **event_data})
     await broadcast_notification("task_completed", event_data)
 
     return {"handoff_result": None, "gateway_approved": None}
@@ -308,7 +304,6 @@ async def complete_node(state: WorkflowState, config: RunnableConfig) -> dict:
 
 async def blocked_node(state: WorkflowState, config: RunnableConfig) -> dict:
     """Handle blocked handoff (max_cycles exceeded)."""
-    ws: WebSocket = config["configurable"]["websocket"]
     hr = state["handoff_result"]
     reason = hr.get("reason", "unknown") if hr else "unknown"
 
@@ -317,7 +312,6 @@ async def blocked_node(state: WorkflowState, config: RunnableConfig) -> dict:
         "reason": reason,
         "task_id": state.get("task_id", ""),
     }
-    await ws.send_json({"type": "max_cycles_reached", **event_data})
     await broadcast_notification("max_cycles_reached", event_data)
 
     return {"handoff_result": None, "gateway_approved": None}
@@ -348,7 +342,6 @@ async def _create_sub_session(
             "reason": f"Cycle detected: {current_name} → {target.name} repeated in chain",
             "task_id": state.get("task_id", ""),
         }
-        await ws.send_json({"type": "max_cycles_reached", **cycle_data})
         await broadcast_notification("max_cycles_reached", cycle_data)
         return {"gateway_approved": False, "handoff_result": None}
 
