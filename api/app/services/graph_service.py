@@ -25,6 +25,7 @@ from langgraph.types import interrupt
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.services.notification_service import broadcast_notification
 from app.schemas.session import SessionCreate
 from app.services.handoff_server import (
     HandoffResult,
@@ -239,12 +240,14 @@ async def notify_handoff_node(state: WorkflowState, config: RunnableConfig) -> d
     """
     ws: WebSocket = config["configurable"]["websocket"]
     hr = state["handoff_result"]
-    await ws.send_json({
-        "type": "approval_required",
+    event_data = {
         "from_agent": state["current_agent_name"],
         "to_agent": hr["to_agent_name"] if hr else "",
         "task": hr.get("prompt", "") if hr else "",
-    })
+        "task_id": state.get("task_id", ""),
+    }
+    await ws.send_json({"type": "approval_required", **event_data})
+    await broadcast_notification("approval_required", event_data)
     return {}
 
 
@@ -292,11 +295,13 @@ async def complete_node(state: WorkflowState, config: RunnableConfig) -> dict:
     hr = state["handoff_result"]
     summary = hr.get("tool_args", {}).get("summary", "") if hr else ""
 
-    await ws.send_json({
-        "type": "task_completed",
+    event_data = {
         "agent_name": state["current_agent_name"],
         "summary": summary,
-    })
+        "task_id": state.get("task_id", ""),
+    }
+    await ws.send_json({"type": "task_completed", **event_data})
+    await broadcast_notification("task_completed", event_data)
 
     return {"handoff_result": None, "gateway_approved": None}
 
@@ -307,11 +312,13 @@ async def blocked_node(state: WorkflowState, config: RunnableConfig) -> dict:
     hr = state["handoff_result"]
     reason = hr.get("reason", "unknown") if hr else "unknown"
 
-    await ws.send_json({
-        "type": "max_cycles_reached",
+    event_data = {
         "agent_name": hr.get("to_agent_name", "") if hr else "",
         "reason": reason,
-    })
+        "task_id": state.get("task_id", ""),
+    }
+    await ws.send_json({"type": "max_cycles_reached", **event_data})
+    await broadcast_notification("max_cycles_reached", event_data)
 
     return {"handoff_result": None, "gateway_approved": None}
 
@@ -336,11 +343,13 @@ async def _create_sub_session(
     current_name = state["current_agent_name"]
     if _has_repeated_cycle(state["chain"], current_name, target.name):
         logger.warning("Cycle detected: %s → %s already in chain", current_name, target.name)
-        await ws.send_json({
-            "type": "max_cycles_reached",
+        cycle_data = {
             "agent_name": target.name,
             "reason": f"Cycle detected: {current_name} → {target.name} repeated in chain",
-        })
+            "task_id": state.get("task_id", ""),
+        }
+        await ws.send_json({"type": "max_cycles_reached", **cycle_data})
+        await broadcast_notification("max_cycles_reached", cycle_data)
         return {"gateway_approved": False, "handoff_result": None}
 
     prompt = hr.get("prompt", "") or hr.get("tool_args", {}).get("comment", "")

@@ -12,6 +12,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
+import { useToast } from "../hooks/useToast";
 import { useTeams } from "../hooks/useTeams";
 import { useAllAgents } from "../hooks/useAgents";
 import { useCanvasData } from "../hooks/useCanvasData";
@@ -45,6 +46,7 @@ const edgeTypes: EdgeTypes = {
 const DRAG_SAVE_DELAY = 500;
 
 export function CanvasPage() {
+  const { addToast } = useToast();
   const { data: teams, isLoading: teamsLoading } = useTeams();
   const { data: allAgents, isLoading: agentsLoading } = useAllAgents();
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
@@ -170,9 +172,13 @@ export function CanvasPage() {
       void mutations.handleDeleteEdge(rawId);
     }
     if (blocked.length > 0) {
-      alert("Some edges could not be deleted: workflow is being used by an active task.");
+      addToast({
+        type: "warning",
+        title: "Удаление заблокировано",
+        message: "Некоторые связи нельзя удалить: workflow используется активной задачей.",
+      });
     }
-  }, [mutations, allEdges, lockedWorkflowIds]);
+  }, [mutations, allEdges, lockedWorkflowIds, addToast]);
 
   const isLoading = teamsLoading || agentsLoading || workflowsLoading;
 

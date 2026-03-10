@@ -30,6 +30,7 @@ from app.services.session_service import (
     get_session,
     stop_session,
 )
+from app.services.notification_service import broadcast_notification
 from app.services.task_service import update_task_status
 
 logger = logging.getLogger(__name__)
@@ -285,6 +286,10 @@ async def _run_graph(graph, input, config: dict) -> tuple[bool, bool, bool]:
         logger.error("Graph execution error: %s", exc)
         await websocket.send_json({"type": "error", "error": str(exc)})
         await _try_update_task_status(db, task_id, "error")
+        await broadcast_notification("task_error", {
+            "task_id": str(task_id) if task_id else "",
+            "error": str(exc),
+        })
         return False, False, True
 
     return False, completed, False

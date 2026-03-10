@@ -1,6 +1,8 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { GlobalChatWidget } from "./components/GlobalChatWidget";
+import { NotificationLayer } from "./components/notifications/NotificationLayer";
+import { ToastProvider } from "./hooks/useToast";
 import { Dashboard } from "./pages/Dashboard";
 import { CanvasPage } from "./pages/CanvasPage";
 import { ChatPage } from "./pages/ChatPage";
@@ -10,7 +12,7 @@ import { BusinessPage } from "./pages/BusinessPage";
 
 export function App() {
   return (
-    <>
+    <ToastProvider>
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
@@ -23,6 +25,7 @@ export function App() {
         </Route>
       </Routes>
       <GlobalChatWidget />
-    </>
+      <NotificationLayer />
+    </ToastProvider>
   );
 }

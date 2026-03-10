@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Agent, AgentUpdate } from "../../../types";
 import { useAutoSave } from "../../../hooks/useAutoSave";
 import { useAgentDeletable } from "../../../hooks/useAgentDeletable";
+import { useToast } from "../../../hooks/useToast";
 
 interface AgentGeneralTabProps {
   agent: Agent;
@@ -10,6 +11,7 @@ interface AgentGeneralTabProps {
 }
 
 export function AgentGeneralTab({ agent, onSave, onDelete }: AgentGeneralTabProps) {
+  const { addToast } = useToast();
   const [name, setName] = useState(agent.name);
   const [description, setDescription] = useState(agent.description ?? "");
   const [systemPrompt, setSystemPrompt] = useState(agent.system_prompt);
@@ -33,7 +35,11 @@ export function AgentGeneralTab({ agent, onSave, onDelete }: AgentGeneralTabProp
 
   const handleDeleteClick = () => {
     if (!canDelete) {
-      alert(deleteBlockReason ?? "Cannot delete this agent");
+      addToast({
+        type: "warning",
+        title: "Удаление заблокировано",
+        message: deleteBlockReason ?? "Cannot delete this agent",
+      });
       return;
     }
     setShowDeleteConfirm(true);

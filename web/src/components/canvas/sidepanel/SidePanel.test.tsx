@@ -1,6 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ToastProvider } from "../../../hooks/useToast";
 import { SidePanel } from "./SidePanel";
 import type { Agent, Workflow, WorkflowEdge } from "../../../types";
 
@@ -80,7 +81,9 @@ function renderWithProviders(ui: React.ReactElement) {
     defaultOptions: { queries: { retry: false } },
   });
   return render(
-    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>,
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>{ui}</ToastProvider>
+    </QueryClientProvider>,
   );
 }
 
