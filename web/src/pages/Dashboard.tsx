@@ -8,6 +8,7 @@ import { KanbanColumn } from '../components/tasks/KanbanColumn';
 import { TaskCard } from '../components/tasks/TaskCard';
 import { CreateTaskModal } from '../components/tasks/CreateTaskModal';
 import { FilterBar } from '../components/tasks/FilterBar';
+import { TaskModal } from '../components/tasks/TaskModal';
 import { ToastContainer, showToast } from '../components/tasks/Toast';
 import { isTransitionAllowed, getTransitionError } from '../components/tasks/statusConfig';
 import type { Task, TaskStatus } from '../types';
@@ -63,6 +64,7 @@ export function Dashboard() {
   const [showDone, setShowDone] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [activeDragTask, setActiveDragTask] = useState<Task | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   const { data: businesses } = useBusinesses();
   const { data: products } = useProducts(filters.businessId ?? '');
@@ -140,8 +142,8 @@ export function Dashboard() {
     );
   }
 
-  function handleTaskClick(_task: Task) {
-    // Заглушка до TASK-047
+  function handleTaskClick(task: Task) {
+    setSelectedTaskId(task.id);
   }
 
   const filtersSelected = !!filters.businessId && !!filters.productId;
@@ -198,6 +200,13 @@ export function Dashboard() {
             });
           }}
           onClose={() => setShowCreateModal(false)}
+        />
+      )}
+
+      {selectedTaskId && (
+        <TaskModal
+          taskId={selectedTaskId}
+          onClose={() => setSelectedTaskId(null)}
         />
       )}
 

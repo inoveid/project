@@ -32,13 +32,19 @@ async def create_session(db: AsyncSession, data: SessionCreate) -> Session:
     return session
 
 
-async def get_sessions(db: AsyncSession) -> list[dict]:
+async def get_sessions(
+    db: AsyncSession,
+    task_id: uuid.UUID | None = None,
+) -> list[dict]:
     stmt = (
         select(Session, Agent.name.label("agent_name"))
         .join(Agent, Session.agent_id == Agent.id)
-        .where(Session.status == "active")
         .order_by(Session.created_at.desc())
     )
+    if task_id is not None:
+        stmt = stmt.where(Session.task_id == task_id)
+    else:
+        stmt = stmt.where(Session.status == "active")
     result = await db.execute(stmt)
     rows = result.all()
     return [

@@ -3,8 +3,10 @@
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from fastapi import HTTPException
 from starlette.testclient import TestClient
 
+from app.database import get_db
 from app.main import app
 from app.services.session_service import SessionNotFoundError
 
@@ -15,7 +17,7 @@ WS = "app.routers.ws"
 # ---------------------------------------------------------------------------
 
 
-def _make_session_mock(session_id, agent_id=None):
+def _make_session_mock(session_id, agent_id=None, task_id=None):
     agent_id = agent_id or uuid.uuid4()
     agent = MagicMock()
     agent.id = agent_id
@@ -29,9 +31,21 @@ def _make_session_mock(session_id, agent_id=None):
     session.agent_id = agent_id
     session.status = "active"
     session.claude_session_id = None
-    session.task_id = None
+    session.task_id = task_id
     session.agent = agent
     session.messages = []
+
+    # When task_id is set, provide task→product chain for workdir resolution
+    if task_id:
+        product = MagicMock()
+        product.workspace_path = "/tmp/project"
+        task = MagicMock()
+        task.product_id = uuid.uuid4()
+        task.product = product
+        session.task = task
+    else:
+        session.task = None
+
     return session
 
 
@@ -555,3 +569,318 @@ def test_ws_approve_when_not_interrupted_is_unknown():
             data = ws.receive_json()
             assert data["type"] == "error"
             assert "Unknown type" in data["error"]
+
+
+# ---------------------------------------------------------------------------
+# Streaming: graph produces events forwarded to WS
+# ---------------------------------------------------------------------------
+
+
+def _streaming_graph():
+    """Mock graph whose astream yields multiple value chunks."""
+    g = MagicMock()
+
+    async def _astream(input, config, **kwargs):
+        yield {"messages": [{"agent": "Dev", "text": "chunk1"}]}
+        yield {"messages": [{"agent": "Dev", "text": "chunk2"}]}
+
+    g.astream = _astream
+    return g
+
+
+def test_ws_streaming_events_forwarded():
+    """Graph streaming chunks are processed; 'done' is sent after completion."""
+    session_id = uuid.uuid4()
+    session = _make_session_mock(session_id)
+
+    with (
+        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.runtime") as mock_runtime,
+        patch(f"{WS}.add_message", new_callable=AsyncMock),
+        patch(f"{WS}.get_graph", return_value=_streaming_graph()),
+    ):
+        mock_runtime.is_running.return_value = True
+
+        client = TestClient(app)
+        with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+            ws.send_json({"type": "message", "content": "Hello"})
+            data = ws.receive_json()
+            assert data["type"] == "done"
+
+
+# ---------------------------------------------------------------------------
+# _try_update_task_status
+# ---------------------------------------------------------------------------
+
+
+def _override_db_with_mock():
+    """Override get_db dependency with an AsyncMock that has no-op refresh."""
+    mock_db = AsyncMock()
+    mock_db.refresh = AsyncMock()  # no-op for task/product loading
+
+    async def _get_db():
+        yield mock_db
+
+    app.dependency_overrides[get_db] = _get_db
+    return mock_db
+
+
+def test_ws_interrupt_sets_task_awaiting_user():
+    """When graph interrupts, task status is updated to awaiting_user."""
+    session_id = uuid.uuid4()
+    task_id = uuid.uuid4()
+    session = _make_session_mock(session_id, task_id=task_id)
+
+    g = MagicMock()
+
+    async def _astream(*args, **kwargs):
+        yield {"__interrupt__": True}
+
+    g.astream = _astream
+
+    mock_update_task = AsyncMock()
+
+    _override_db_with_mock()
+    try:
+        with (
+            patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+            patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+            patch(f"{WS}.runtime") as mock_runtime,
+            patch(f"{WS}.add_message", new_callable=AsyncMock),
+            patch(f"{WS}.get_graph", return_value=g),
+            patch(f"{WS}.stop_session", new_callable=AsyncMock),
+            patch(f"{WS}.update_task_status", mock_update_task),
+        ):
+            mock_runtime.is_running.return_value = True
+            mock_runtime.stop_session = AsyncMock()
+            mock_runtime.get_children.return_value = set()
+
+            client = TestClient(app)
+            with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+                ws.send_json({"type": "message", "content": "trigger handoff"})
+                # Read the error from the next message attempt to confirm interrupted state
+                ws.send_json({"type": "message", "content": "another"})
+                ws.receive_json()
+
+            mock_update_task.assert_called_once()
+            call_args = mock_update_task.call_args.args
+            assert call_args[1] == task_id
+            assert call_args[2] == "awaiting_user"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_ws_approve_sets_task_in_progress():
+    """When approve is sent, task status is updated to in_progress."""
+    session_id = uuid.uuid4()
+    task_id = uuid.uuid4()
+    session = _make_session_mock(session_id, task_id=task_id)
+    g = _capturing_graph()
+
+    mock_update_task = AsyncMock()
+
+    _override_db_with_mock()
+    try:
+        with (
+            patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+            patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+            patch(f"{WS}.runtime") as mock_runtime,
+            patch(f"{WS}.add_message", new_callable=AsyncMock),
+            patch(f"{WS}.get_graph", return_value=g),
+            patch(f"{WS}.stop_session", new_callable=AsyncMock),
+            patch(f"{WS}.update_task_status", mock_update_task),
+        ):
+            mock_runtime.is_running.return_value = True
+            mock_runtime.stop_session = AsyncMock()
+            mock_runtime.get_children.return_value = set()
+
+            client = TestClient(app)
+            with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+                ws.send_json({"type": "message", "content": "start"})
+                ws.send_json({"type": "approve"})
+                ws.receive_json()  # done
+
+            # First call: awaiting_user (after interrupt), second: in_progress (after approve)
+            calls = mock_update_task.call_args_list
+            statuses = [c.args[2] for c in calls]
+            assert "awaiting_user" in statuses
+            assert "in_progress" in statuses
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_ws_no_task_id_skips_status_update():
+    """When session has no task_id, _try_update_task_status is a no-op."""
+    session_id = uuid.uuid4()
+    session = _make_session_mock(session_id)
+    session.task_id = None  # no task
+
+    g = MagicMock()
+
+    async def _astream(*args, **kwargs):
+        yield {"__interrupt__": True}
+
+    g.astream = _astream
+
+    mock_update_task = AsyncMock()
+
+    with (
+        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.runtime") as mock_runtime,
+        patch(f"{WS}.add_message", new_callable=AsyncMock),
+        patch(f"{WS}.get_graph", return_value=g),
+        patch(f"{WS}.stop_session", new_callable=AsyncMock),
+        patch(f"{WS}.update_task_status", mock_update_task),
+    ):
+        mock_runtime.is_running.return_value = True
+        mock_runtime.stop_session = AsyncMock()
+        mock_runtime.get_children.return_value = set()
+
+        client = TestClient(app)
+        with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+            ws.send_json({"type": "message", "content": "trigger"})
+            ws.send_json({"type": "message", "content": "try again"})
+            ws.receive_json()
+
+        mock_update_task.assert_not_called()
+
+
+def test_ws_graph_error_sets_task_error():
+    """When graph raises an exception, task status is updated to error."""
+    session_id = uuid.uuid4()
+    task_id = uuid.uuid4()
+    session = _make_session_mock(session_id, task_id=task_id)
+
+    mock_update_task = AsyncMock()
+
+    _override_db_with_mock()
+    try:
+        with (
+            patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+            patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+            patch(f"{WS}.runtime") as mock_runtime,
+            patch(f"{WS}.add_message", new_callable=AsyncMock),
+            patch(f"{WS}.get_graph", return_value=_error_graph("LLM timeout")),
+            patch(f"{WS}.stop_session", new_callable=AsyncMock),
+            patch(f"{WS}.update_task_status", mock_update_task),
+        ):
+            mock_runtime.is_running.return_value = True
+            mock_runtime.stop_session = AsyncMock()
+            mock_runtime.get_children.return_value = set()
+
+            client = TestClient(app)
+            with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+                ws.send_json({"type": "message", "content": "hello"})
+                ws.receive_json()  # error
+                ws.receive_json()  # done
+
+            mock_update_task.assert_called_once()
+            assert mock_update_task.call_args.args[2] == "error"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_ws_try_update_task_status_swallows_http_exception():
+    """_try_update_task_status silently handles HTTPException (invalid transition)."""
+    session_id = uuid.uuid4()
+    task_id = uuid.uuid4()
+    session = _make_session_mock(session_id, task_id=task_id)
+
+    g = MagicMock()
+
+    async def _astream(*args, **kwargs):
+        yield {"__interrupt__": True}
+
+    g.astream = _astream
+
+    mock_update_task = AsyncMock(side_effect=HTTPException(status_code=400, detail="Invalid transition"))
+
+    _override_db_with_mock()
+    try:
+        with (
+            patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+            patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+            patch(f"{WS}.runtime") as mock_runtime,
+            patch(f"{WS}.add_message", new_callable=AsyncMock),
+            patch(f"{WS}.get_graph", return_value=g),
+            patch(f"{WS}.stop_session", new_callable=AsyncMock),
+            patch(f"{WS}.update_task_status", mock_update_task),
+        ):
+            mock_runtime.is_running.return_value = True
+            mock_runtime.stop_session = AsyncMock()
+            mock_runtime.get_children.return_value = set()
+
+            client = TestClient(app)
+            with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+                ws.send_json({"type": "message", "content": "trigger"})
+                # Should NOT crash — HTTPException is swallowed
+                ws.send_json({"type": "message", "content": "another"})
+                data = ws.receive_json()
+                assert data["type"] == "error"
+                assert "approval" in data["error"].lower()
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# Workdir resolution: task → product → workspace_path
+# ---------------------------------------------------------------------------
+
+
+def test_ws_workdir_from_task_product():
+    """Workdir is resolved from session.task.product.workspace_path."""
+    session_id = uuid.uuid4()
+    task_id = uuid.uuid4()
+    session = _make_session_mock(session_id, task_id=task_id)
+    # Override default workspace_path
+    session.task.product.workspace_path = "/projects/my-app"
+
+    _override_db_with_mock()
+    try:
+        with (
+            patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+            patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+            patch(f"{WS}.runtime") as mock_runtime,
+            patch(f"{WS}.get_graph", return_value=_noop_graph()),
+        ):
+            mock_runtime.is_running.return_value = False
+            mock_runtime.start_session = AsyncMock()
+            mock_runtime.stop_session = AsyncMock()
+
+            client = TestClient(app)
+            with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+                ws.send_json({"type": "stop"})
+                ws.receive_json()
+
+            call_kwargs = mock_runtime.start_session.call_args.kwargs
+            assert call_kwargs["workdir"] == "/projects/my-app"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_ws_workdir_fallback_to_agent_config():
+    """When no task_id, workdir falls back to agent.config.workdir."""
+    session_id = uuid.uuid4()
+    session = _make_session_mock(session_id)
+    session.task_id = None  # no task
+    session.agent.config = {"workdir": "/fallback/path"}
+
+    with (
+        patch(f"{WS}.get_session", new_callable=AsyncMock, return_value=session),
+        patch(f"{WS}.get_agent_handoff_targets", new_callable=AsyncMock, return_value=[]),
+        patch(f"{WS}.runtime") as mock_runtime,
+        patch(f"{WS}.get_graph", return_value=_noop_graph()),
+    ):
+        mock_runtime.is_running.return_value = False
+        mock_runtime.start_session = AsyncMock()
+        mock_runtime.stop_session = AsyncMock()
+
+        client = TestClient(app)
+        with client.websocket_connect(f"/api/ws/sessions/{session_id}") as ws:
+            ws.send_json({"type": "stop"})
+            ws.receive_json()
+
+        call_kwargs = mock_runtime.start_session.call_args.kwargs
+        assert call_kwargs["workdir"] == "/fallback/path"

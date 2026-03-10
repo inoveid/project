@@ -63,6 +63,17 @@ async def test_list_sessions(client, session_list_item):
 
 
 @pytest.mark.asyncio
+async def test_list_sessions_by_task_id(client, session_list_item):
+    task_id = uuid.uuid4()
+    with patch(f"{SERVICE}.get_sessions", new_callable=AsyncMock, return_value=[session_list_item]) as mock:
+        resp = await client.get(f"/api/sessions?task_id={task_id}")
+    assert resp.status_code == 200
+    mock.assert_called_once()
+    call_kwargs = mock.call_args
+    assert call_kwargs.kwargs.get("task_id") == task_id
+
+
+@pytest.mark.asyncio
 async def test_get_session(client, session_obj):
     sid = session_obj["id"]
     with patch(f"{SERVICE}.get_session", new_callable=AsyncMock, return_value=session_obj):

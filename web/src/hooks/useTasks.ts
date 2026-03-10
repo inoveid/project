@@ -7,6 +7,7 @@ import {
   updateTask,
   updateTaskStatus,
 } from '../api/tasks';
+import { getSessionsByTask } from '../api/sessions';
 import type { TaskCreate, TaskUpdate, TaskStatus } from '../types';
 
 const TASKS_KEY = ['tasks'] as const;
@@ -24,6 +25,18 @@ export function useTask(id: string) {
     queryKey: [...TASKS_KEY, 'detail', id],
     queryFn: () => getTask(id),
     enabled: !!id,
+    refetchInterval: (query) =>
+      query.state.data?.status === 'awaiting_user' ? 3000 : false,
+  });
+}
+
+export function useTaskSessions(taskId: string, taskStatus?: TaskStatus) {
+  const isActive = taskStatus === 'in_progress' || taskStatus === 'awaiting_user';
+  return useQuery({
+    queryKey: ['sessions', 'by-task', taskId],
+    queryFn: () => getSessionsByTask(taskId),
+    enabled: !!taskId,
+    refetchInterval: isActive ? 5000 : false,
   });
 }
 

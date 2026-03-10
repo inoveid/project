@@ -1,6 +1,7 @@
 import uuid
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -29,8 +30,11 @@ async def create_session_endpoint(
 
 
 @router.get("", response_model=list[SessionListItem])
-async def list_sessions(db: AsyncSession = Depends(get_db)):
-    return await get_sessions(db)
+async def list_sessions(
+    task_id: Optional[uuid.UUID] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    return await get_sessions(db, task_id=task_id)
 
 
 @router.get("/{session_id}", response_model=SessionRead)
