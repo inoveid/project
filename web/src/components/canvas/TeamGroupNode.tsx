@@ -1,14 +1,11 @@
 import type { NodeProps } from "@xyflow/react";
-import type { Team } from "../../types";
+import { getNodeData } from "./types";
+import type { TeamGroupNodeData } from "./types";
 
-export interface TeamGroupNodeData {
-  team: Team;
-  agentCount: number;
-  [key: string]: unknown;
-}
+export type { TeamGroupNodeData } from "./types";
 
 export function TeamGroupNode({ data }: NodeProps) {
-  const { team, agentCount } = data as TeamGroupNodeData;
+  const { team, agentCount } = getNodeData<TeamGroupNodeData>(data);
 
   return (
     <div className="w-full h-full bg-blue-50/50 border-2 border-blue-200 rounded-xl">

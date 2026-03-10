@@ -1,7 +1,6 @@
 import type { Node, Edge } from "@xyflow/react";
 import type { Agent, Team, Workflow, WorkflowEdge } from "../../types";
-import type { AgentNodeData } from "./AgentNode";
-import type { TeamGroupNodeData } from "./TeamGroupNode";
+import type { AgentNodeData, TeamGroupNodeData } from "./types";
 
 const WORKFLOW_COLORS = [
   "#3b82f6", // blue
@@ -31,13 +30,14 @@ interface LayoutResult {
   edges: Edge[];
 }
 
+// TODO: Wire activeAgentIds to real session status when available
 export function buildCanvasLayout(
   teams: Team[],
   agentsByTeam: Map<string, Agent[]>,
   workflows: Workflow[],
   workflowEdges: WorkflowEdge[],
   workflowColorMap: Map<string, string>,
-  activeAgentIds: Set<string>,
+  activeAgentIds: Set<string> = new Set(),
 ): LayoutResult {
   const nodes: Node[] = [];
   const edges: Edge[] = [];
@@ -49,6 +49,7 @@ export function buildCanvasLayout(
 
   for (const team of teams) {
     const agents = agentsByTeam.get(team.id) ?? [];
+    // Grid columns = ceil(sqrt(N)) gives a roughly square layout (e.g. 4 agents → 2x2, 9 → 3x3)
     const columns = Math.max(Math.ceil(Math.sqrt(agents.length)), 1);
 
     const groupWidth = columns * (NODE_WIDTH + NODE_GAP_X) + GROUP_PADDING * 2 - NODE_GAP_X;

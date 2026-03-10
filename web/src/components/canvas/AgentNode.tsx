@@ -1,17 +1,12 @@
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
-import type { Agent } from "../../types";
+import { getNodeData } from "./types";
+import type { AgentNodeData } from "./types";
 
-export interface AgentNodeData {
-  agent: Agent;
-  isStart: boolean;
-  isEnd: boolean;
-  isActive: boolean;
-  [key: string]: unknown;
-}
+export type { AgentNodeData } from "./types";
 
 export function AgentNode({ data }: NodeProps) {
-  const { agent, isStart, isEnd, isActive } = data as AgentNodeData;
+  const { agent, isStart, isEnd, isActive } = getNodeData<AgentNodeData>(data);
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg shadow-sm px-3 py-2 min-w-[180px]">

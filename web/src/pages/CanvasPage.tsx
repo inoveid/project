@@ -11,7 +11,7 @@ import "@xyflow/react/dist/style.css";
 
 import { useTeams } from "../hooks/useTeams";
 import { useAllAgents } from "../hooks/useAgents";
-import { useCanvasData } from "./useCanvasData";
+import { useCanvasData } from "../hooks/useCanvasData";
 import { AgentNode } from "../components/canvas/AgentNode";
 import { TeamGroupNode } from "../components/canvas/TeamGroupNode";
 import { WorkflowEdgeComponent } from "../components/canvas/WorkflowEdge";
@@ -38,35 +38,20 @@ export function CanvasPage() {
 
   const { allWorkflows, allEdges, isLoading: workflowsLoading } = useCanvasData(teams);
 
-  const agentsByTeam = useMemo(() => {
-    const map = new Map<string, NonNullable<typeof allAgents>>();
-    if (!allAgents) return map;
-    for (const agent of allAgents) {
-      const existing = map.get(agent.team_id) ?? [];
-      existing.push(agent);
-      map.set(agent.team_id, existing);
+  const { nodes, edges: rawEdges, workflowColorMap } = useMemo(() => {
+    if (!teams) return { nodes: [], edges: [], workflowColorMap: new Map<string, string>() };
+    const agentsByTeam = new Map<string, NonNullable<typeof allAgents>>();
+    if (allAgents) {
+      for (const agent of allAgents) {
+        const existing = agentsByTeam.get(agent.team_id) ?? [];
+        existing.push(agent);
+        agentsByTeam.set(agent.team_id, existing);
+      }
     }
-    return map;
-  }, [allAgents]);
-
-  const workflowColorMap = useMemo(
-    () => buildWorkflowColorMap(allWorkflows),
-    [allWorkflows],
-  );
-
-  const activeAgentIds = useMemo(() => new Set<string>(), []);
-
-  const { nodes, edges: rawEdges } = useMemo(() => {
-    if (!teams) return { nodes: [], edges: [] };
-    return buildCanvasLayout(
-      teams,
-      agentsByTeam,
-      allWorkflows,
-      allEdges,
-      workflowColorMap,
-      activeAgentIds,
-    );
-  }, [teams, agentsByTeam, allWorkflows, allEdges, workflowColorMap, activeAgentIds]);
+    const colorMap = buildWorkflowColorMap(allWorkflows);
+    const layout = buildCanvasLayout(teams, agentsByTeam, allWorkflows, allEdges, colorMap);
+    return { ...layout, workflowColorMap: colorMap };
+  }, [teams, allAgents, allWorkflows, allEdges]);
 
   const edges = useMemo(
     () => applyWorkflowFilter(rawEdges, selectedWorkflowId, allEdges, workflowColorMap),
@@ -115,7 +100,6 @@ export function CanvasPage() {
           nodesDraggable={false}
           nodesConnectable={false}
           elementsSelectable={false}
-          proOptions={{ hideAttribution: true }}
         >
           <MiniMap
             nodeColor={(node) => {
