@@ -157,9 +157,8 @@ async def generate_handoff_tools(
             prompt_id=edge.prompt_id,
         ))
 
-    # Terminal node: add complete_task tool
-    if not edges:
-        tools.append(HandoffTool(
+    # Any agent can complete the task
+    tools.append(HandoffTool(
             name=COMPLETE_TASK_TOOL_NAME,
             description="Complete the current task. Call when your work is done.",
             to_agent_name="",
