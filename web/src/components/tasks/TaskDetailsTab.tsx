@@ -8,6 +8,16 @@ interface TaskDetailsTabProps {
   task: Task;
 }
 
+const REQUIRED_FIELDS: ReadonlyArray<keyof Task> = ['description', 'team_id', 'workflow_id'];
+
+function getMissingFields(task: Task): Set<string> {
+  const missing = new Set<string>();
+  for (const f of REQUIRED_FIELDS) {
+    if (!task[f]) missing.add(f);
+  }
+  return missing;
+}
+
 export function TaskDetailsTab({ task }: TaskDetailsTabProps) {
   const { data: teams } = useTeams();
   const updateTask = useUpdateTask();
@@ -15,6 +25,7 @@ export function TaskDetailsTab({ task }: TaskDetailsTabProps) {
 
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? '');
+  const [showValidation, setShowValidation] = useState(false);
   const prevTaskIdRef = useRef(task.id);
 
   useEffect(() => {
@@ -22,8 +33,11 @@ export function TaskDetailsTab({ task }: TaskDetailsTabProps) {
       prevTaskIdRef.current = task.id;
       setTitle(task.title);
       setDescription(task.description ?? '');
+      setShowValidation(false);
     }
   }, [task.id, task.title, task.description]);
+
+  const missingFields = showValidation ? getMissingFields(task) : new Set<string>();
 
   const saveField = useCallback(
     (data: TaskUpdate) => {
@@ -82,7 +96,7 @@ export function TaskDetailsTab({ task }: TaskDetailsTabProps) {
           onChange={(e) => setDescription(e.target.value)}
           onBlur={handleDescriptionBlur}
           rows={4}
-          className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none resize-y"
+          className={`w-full rounded border px-3 py-2 text-sm focus:outline-none resize-y ${missingFields.has('description') ? 'border-red-400 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'}`}
         />
       </div>
 
@@ -93,7 +107,7 @@ export function TaskDetailsTab({ task }: TaskDetailsTabProps) {
           id="task-team-select"
           value={task.team_id ?? ''}
           onChange={handleTeamChange}
-          className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+          className={`w-full rounded border px-3 py-2 text-sm focus:outline-none ${missingFields.has('team_id') ? 'border-red-400 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'}`}
         >
           <option value="">— не выбрана —</option>
           {teams?.map((t) => (
@@ -107,7 +121,7 @@ export function TaskDetailsTab({ task }: TaskDetailsTabProps) {
       {/* Workflow — read-only until workflows feature is built */}
       <div>
         <label className="block text-xs font-medium text-gray-500 mb-1">Workflow</label>
-        <p className="text-sm text-gray-400 italic">
+        <p className={`text-sm italic ${missingFields.has('workflow_id') ? 'text-red-500' : 'text-gray-400'}`}>
           {task.workflow_id ? task.workflow_id : 'Не назначен'}
         </p>
       </div>
@@ -127,6 +141,8 @@ export function TaskDetailsTab({ task }: TaskDetailsTabProps) {
           valid={valid}
           onChangeStatus={(status) => updateStatus.mutate({ id: task.id, status })}
           isPending={updateStatus.isPending}
+          onValidationFail={() => setShowValidation(true)}
+          showValidation={showValidation}
         />
       </div>
     </div>
@@ -140,29 +156,38 @@ function StatusActions({
   valid,
   onChangeStatus,
   isPending,
+  onValidationFail,
+  showValidation,
 }: {
   task: Task;
   valid: boolean;
   onChangeStatus: (status: Task['status']) => void;
   isPending: boolean;
+  onValidationFail: () => void;
+  showValidation: boolean;
 }) {
   if (task.status === 'backlog') {
-    const disabled = !valid || isPending;
+    const missing = getMissingFields(task);
+    const canStart = valid && missing.size === 0;
     return (
-      <div className="relative group inline-block">
+      <div>
+        {showValidation && !canStart && (
+          <p className="text-sm text-red-500 mb-2">Заполните обязательные поля в задаче</p>
+        )}
         <button
           type="button"
-          disabled={disabled}
-          onClick={() => onChangeStatus('in_progress')}
-          className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={isPending}
+          onClick={() => {
+            if (!canStart) {
+              onValidationFail();
+              return;
+            }
+            onChangeStatus('in_progress');
+          }}
+          className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
         >
           Начать
         </button>
-        {!valid && (
-          <span className="invisible group-hover:visible absolute left-0 top-full mt-1 w-48 rounded bg-gray-800 px-2 py-1 text-xs text-white z-10">
-            Укажите продукт для задачи
-          </span>
-        )}
       </div>
     );
   }

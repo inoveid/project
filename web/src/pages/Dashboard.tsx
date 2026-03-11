@@ -139,7 +139,14 @@ export function Dashboard() {
   function handleStartTask(taskId: string) {
     updateTaskStatus.mutate(
       { id: taskId, status: 'in_progress' },
-      { onError: (err: Error) => addToast({ type: "error", title: "Ошибка", message: err.message }) },
+      {
+        onError: (err: Error) => {
+          const message = err.message.includes('Required fields missing')
+            ? 'Заполните обязательные поля в задаче'
+            : err.message;
+          addToast({ type: "error", title: "Ошибка", message });
+        },
+      },
     );
   }
 
@@ -193,6 +200,8 @@ export function Dashboard() {
       {showCreateModal && filters.productId && (
         <CreateTaskModal
           productId={filters.productId}
+          teams={teams ?? []}
+          defaultTeamId={filters.teamId}
           isLoading={createTask.isPending}
           onSubmit={(data) => {
             createTask.mutate(data, {
