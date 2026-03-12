@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTeams } from '../../hooks/useTeams';
+import { getWorkflows } from '../../api/workflows';
+import type { Workflow } from '../../types';
 import { useUpdateTask, useUpdateTaskStatus } from '../../hooks/useTasks';
 import { getStatusConfig, isTaskValid } from './statusConfig';
 import type { Task, TaskUpdate } from '../../types';
@@ -21,6 +23,15 @@ function getMissingFields(task: Task): Set<string> {
 export function TaskDetailsTab({ task }: TaskDetailsTabProps) {
   const { data: teams } = useTeams();
   const updateTask = useUpdateTask();
+  const [workflows, setWorkflows] = useState<Workflow[]>([]);
+
+  useEffect(() => {
+    if (!task.team_id) {
+      setWorkflows([]);
+      return;
+    }
+    getWorkflows(task.team_id).then(setWorkflows);
+  }, [task.team_id]);
   const updateStatus = useUpdateTaskStatus();
 
   const [title, setTitle] = useState(task.title);
@@ -118,12 +129,21 @@ export function TaskDetailsTab({ task }: TaskDetailsTabProps) {
         </select>
       </div>
 
-      {/* Workflow — read-only until workflows feature is built */}
+      {/* Workflow */}
       <div>
-        <label className="block text-xs font-medium text-gray-500 mb-1">Workflow</label>
-        <p className={`text-sm italic ${missingFields.has('workflow_id') ? 'text-red-500' : 'text-gray-400'}`}>
-          {task.workflow_id ? task.workflow_id : 'Не назначен'}
-        </p>
+        <label htmlFor="task-workflow-select" className="block text-xs font-medium text-gray-500 mb-1">Workflow</label>
+        <select
+          id="task-workflow-select"
+          value={task.workflow_id ?? ''}
+          onChange={(e) => saveField({ workflow_id: e.target.value || undefined })}
+          disabled={!task.team_id || workflows.length === 0}
+          className={`w-full rounded border px-3 py-2 text-sm focus:outline-none disabled:bg-gray-50 disabled:text-gray-400 ${missingFields.has('workflow_id') ? 'border-red-400 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'}`}
+        >
+          <option value="">— не выбран —</option>
+          {workflows.map((w) => (
+            <option key={w.id} value={w.id}>{w.name}</option>
+          ))}
+        </select>
       </div>
 
       {/* Status badge */}
