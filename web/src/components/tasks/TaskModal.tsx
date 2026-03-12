@@ -67,7 +67,7 @@ export function TaskModal({ taskId, onClose }: TaskModalProps) {
 
         {/* Content */}
         <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-          {activeTab === 'details' && <TaskDetailsTab task={task} onDelete={onClose} />}
+          {activeTab === 'details' && <TaskDetailsTab task={task} onDelete={onClose} onStarted={() => setActiveTab('chats')} />}
           {activeTab === 'chats' && <TaskChatsTab task={task} />}
         </div>
       </div>

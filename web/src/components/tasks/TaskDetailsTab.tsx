@@ -11,6 +11,7 @@ import type { Task, TaskUpdate } from '../../types';
 interface TaskDetailsTabProps {
   task: Task;
   onDelete?: () => void;
+  onStarted?: () => void;
 }
 
 const REQUIRED_FIELDS: ReadonlyArray<keyof Task> = ['description', 'team_id', 'workflow_id'];
@@ -23,7 +24,7 @@ function getMissingFields(task: Task): Set<string> {
   return missing;
 }
 
-export function TaskDetailsTab({ task, onDelete }: TaskDetailsTabProps) {
+export function TaskDetailsTab({ task, onDelete, onStarted }: TaskDetailsTabProps) {
   const { data: teams } = useTeams();
   const updateTask = useUpdateTask();
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
@@ -212,7 +213,7 @@ export function TaskDetailsTab({ task, onDelete }: TaskDetailsTabProps) {
           task={task}
           valid={valid}
           isAuthed={isAuthed}
-          onChangeStatus={(status) => updateStatus.mutate({ id: task.id, status })}
+          onChangeStatus={(status) => updateStatus.mutate({ id: task.id, status }, { onSuccess: () => { if (status === 'in_progress') onStarted?.(); } })}
           isPending={updateStatus.isPending}
           onValidationFail={() => setShowValidation(true)}
           showValidation={showValidation}
