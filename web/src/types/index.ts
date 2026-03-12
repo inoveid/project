@@ -312,6 +312,7 @@ export interface Task {
   product_id: string | null;
   team_id: string | null;
   workflow_id: string | null;
+  spec_id: string | null;
   status: TaskStatus;
   created_at: string;
 }
@@ -322,6 +323,7 @@ export interface TaskCreate {
   product_id?: string;
   team_id?: string;
   workflow_id?: string;
+  spec_id?: string;
 }
 
 export interface TaskUpdate {
@@ -330,6 +332,7 @@ export interface TaskUpdate {
   product_id?: string;
   team_id?: string;
   workflow_id?: string;
+  spec_id?: string;
 }
 
 export interface TaskStatusUpdate {
@@ -434,4 +437,46 @@ export interface ValidationIssue {
   message: string;
   nodeId?: string;
   workflowId?: string;
+}
+
+// ── Spec types ──────────────────────────────────────────────────────────────
+
+export type SpecStatus = 'draft' | 'active';
+
+export interface Spec {
+  id: string;
+  product_id: string;
+  feature: string;
+  title: string;
+  content: string;
+  version: number;
+  status: SpecStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SpecCreate {
+  feature: string;
+  title: string;
+  content?: string;
+  status?: SpecStatus;
+}
+
+export interface SpecUpdate {
+  feature?: string;
+  title?: string;
+  content?: string;
+  status?: SpecStatus;
+  author?: string;
+  summary?: string;
+}
+
+export interface SpecVersion {
+  id: string;
+  spec_id: string;
+  version: number;
+  content: string;
+  author: string;
+  summary: string | null;
+  created_at: string;
 }

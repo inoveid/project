@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import type { Product } from '../types';
 import { useProduct, useCloneProduct, useDeleteProduct } from '../hooks/useProducts';
+import { SpecsPanel } from './SpecsPanel';
 
 interface ProductCardProps {
   product: Product;
@@ -14,6 +16,8 @@ export function ProductCard({ product: initialProduct, onEdit, onDeleted }: Prod
 
   const cloneProduct = useCloneProduct();
   const deleteProduct = useDeleteProduct();
+
+  const [showSpecs, setShowSpecs] = useState(false);
 
   function handleClone() {
     cloneProduct.mutate(product.id);
@@ -69,6 +73,14 @@ export function ProductCard({ product: initialProduct, onEdit, onDeleted }: Prod
           </button>
         )}
         <button
+          onClick={() => setShowSpecs((v) => !v)}
+          className={`border px-3 py-1.5 rounded text-sm hover:bg-gray-50 ${
+            showSpecs ? 'bg-blue-50 border-blue-300 text-blue-700' : 'text-gray-600'
+          }`}
+        >
+          Specs
+        </button>
+        <button
           onClick={handleDelete}
           disabled={deleteProduct.isPending}
           className="border px-3 py-1.5 rounded text-sm hover:bg-gray-50 text-gray-600 disabled:opacity-50"
@@ -76,6 +88,12 @@ export function ProductCard({ product: initialProduct, onEdit, onDeleted }: Prod
           Удалить
         </button>
       </div>
+
+      {showSpecs && (
+        <div className="mt-2 pt-2 border-t">
+          <SpecsPanel productId={product.id} />
+        </div>
+      )}
     </div>
   );
 }
