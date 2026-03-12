@@ -204,8 +204,37 @@ async def _handle_messages(
     - {"type": "reject"}                     — reject handoff (resume after interrupt)
     - {"type": "stop"}                       — stop agent
     """
-    interrupted = False
     task_id = graph_config["configurable"]["task_id"]
+
+    # Restore interrupt state from LangGraph checkpoint (handles WS reconnection)
+    interrupted = False
+    try:
+        graph_state = await graph.aget_state(graph_config)
+        if graph_state and graph_state.next:
+            # Graph has pending nodes — it's interrupted
+            interrupted = True
+            state_values = graph_state.values or {}
+            hr = state_values.get("handoff_result")
+            if hr:
+                steps = []
+                for msg in state_values.get("messages", []):
+                    if isinstance(msg, dict) and msg.get("agent"):
+                        text = msg.get("text", "")
+                        summary = text[:200] + "..." if len(text) > 200 else text
+                        steps.append({"agent": msg["agent"], "summary": summary})
+                await websocket.send_json({
+                    "type": "approval_required",
+                    "from_agent": state_values.get("current_agent_name", ""),
+                    "to_agent": hr.get("to_agent_name", ""),
+                    "task": hr.get("prompt", ""),
+                    "task_id": str(task_id) if task_id else "",
+                    "chain": state_values.get("chain", []),
+                    "steps": steps,
+                    "workflow_agents": [],
+                })
+            logger.info("Restored interrupted state for session %s", session_id)
+    except Exception as exc:
+        logger.warning("Failed to check graph state for session %s: %s", session_id, exc)
 
     while True:
         raw = await websocket.receive_text()
