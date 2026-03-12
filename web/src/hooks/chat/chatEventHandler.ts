@@ -80,9 +80,31 @@ export function handleEvent(
       });
       break;
 
-    case "tool_use":
+    case "tool_use": {
       setStatus("tool");
-      setItems((prev) => prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__"));
+      const toolLabels: Record<string, string> = {
+        Read: "Читает файл...",
+        Edit: "Редактирует файл...",
+        Write: "Пишет файл...",
+        Bash: "Выполняет команду...",
+        Grep: "Ищет в файлах...",
+        Glob: "Ищет файлы...",
+        Agent: "Запускает подзадачу...",
+      };
+      const toolLabel = toolLabels[event.tool_name] || `${event.tool_name}...`;
+      setItems((prev) => {
+        const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
+        const activityItem: HandoffItem = {
+          id: "__activity__",
+          itemType: "activity",
+          agentName: "system",
+          content: toolLabel,
+          created_at: new Date().toISOString(),
+        };
+        return [...withoutActivity, activityItem];
+      });
+      break;
+    }
       refs.toolsRef.current.push({
         tool_name: event.tool_name,
         tool_input: event.tool_input,
@@ -96,6 +118,18 @@ export function handleEvent(
         lastTool.result = event.content;
       }
       updateStreamingItem(refs, setItems);
+      // Update activity to "thinking" after tool completes
+      setItems((prev) => {
+        const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
+        const activityItem: HandoffItem = {
+          id: "__activity__",
+          itemType: "activity",
+          agentName: "system",
+          content: "Думает...",
+          created_at: new Date().toISOString(),
+        };
+        return [...withoutActivity, activityItem];
+      });
       break;
     }
 
@@ -186,6 +220,26 @@ export function handleEvent(
         ];
         updateSubAgentStreamingItem(refs, setItems);
       }
+      const subToolLabels: Record<string, string> = {
+        Read: "Читает файл...",
+        Edit: "Редактирует файл...",
+        Write: "Пишет файл...",
+        Bash: "Выполняет команду...",
+        Grep: "Ищет в файлах...",
+        Glob: "Ищет файлы...",
+      };
+      const subLabel = subToolLabels[event.tool_name] || `${event.tool_name}...`;
+      setItems((prev) => {
+        const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
+        const activityItem: HandoffItem = {
+          id: "__activity__",
+          itemType: "activity",
+          agentName: event.agent_name,
+          content: `${event.agent_name}: ${subLabel}`,
+          created_at: new Date().toISOString(),
+        };
+        return [...withoutActivity, activityItem];
+      });
       break;
     }
 
