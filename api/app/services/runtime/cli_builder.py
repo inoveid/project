@@ -26,6 +26,9 @@ def build_command(running: RunningProcess) -> list[str]:
         # Fresh session with unique ID
         cmd.extend(["--session-id", str(uuid.uuid4())])
 
+    if running.workdir:
+        cmd.extend(["--directory", running.workdir])
+
     if running.allowed_tools:
         cmd.extend(["--allowedTools", ",".join(running.allowed_tools)])
 
