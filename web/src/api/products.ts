@@ -31,3 +31,13 @@ export function deleteProduct(id: string): Promise<void> {
 export function cloneProduct(id: string): Promise<Product> {
   return fetchApi<Product>(`/products/${id}/clone`, { method: 'POST' });
 }
+
+export interface ProductFile {
+  name: string;
+  type: 'file' | 'dir';
+  size: number;
+}
+
+export function getProductFiles(id: string): Promise<ProductFile[]> {
+  return fetchApi<ProductFile[]>(`/products/${id}/files`);
+}

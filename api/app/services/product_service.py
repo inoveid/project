@@ -126,3 +126,30 @@ async def clone_product(db: AsyncSession, product_id: uuid.UUID) -> Product:
 
     asyncio.create_task(_do_clone(product.id))
     return product
+
+
+async def get_product_files(
+    db: AsyncSession, product_id: uuid.UUID, max_items: int = 50
+) -> list[dict]:
+    """Return top-level entries of the product workspace."""
+    product = await get_product(db, product_id)
+    workspace = product.workspace_path
+
+    if not os.path.isdir(workspace):
+        return []
+
+    entries: list[dict] = []
+    try:
+        for name in sorted(os.listdir(workspace)):
+            if name.startswith("."):
+                continue
+            full = os.path.join(workspace, name)
+            is_dir = os.path.isdir(full)
+            size = 0 if is_dir else os.path.getsize(full)
+            entries.append({"name": name, "type": "dir" if is_dir else "file", "size": size})
+            if len(entries) >= max_items:
+                break
+    except OSError:
+        pass
+
+    return entries

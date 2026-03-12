@@ -5,6 +5,7 @@ import { getWorkflows } from '../../api/workflows';
 import type { Workflow } from '../../types';
 import { useUpdateTask, useUpdateTaskStatus, useDeleteTask } from '../../hooks/useTasks';
 import { getStatusConfig, isTaskValid } from './statusConfig';
+import { ProductPreview } from './ProductPreview';
 import type { Task, TaskUpdate } from '../../types';
 
 interface TaskDetailsTabProps {
@@ -117,6 +118,14 @@ export function TaskDetailsTab({ task, onDelete }: TaskDetailsTabProps) {
         />
       </div>
 
+
+      {/* Product Preview */}
+      {task.product_id && (
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Продукт</label>
+          <ProductPreview productId={task.product_id} />
+        </div>
+      )}
       {/* Team */}
       <div>
         <label htmlFor="task-team-select" className="block text-xs font-medium text-gray-500 mb-1">Команда</label>

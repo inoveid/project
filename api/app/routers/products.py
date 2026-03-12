@@ -62,3 +62,11 @@ async def clone_product_endpoint(
     product_id: uuid.UUID, db: AsyncSession = Depends(get_db)
 ):
     return await clone_product(db, product_id)
+
+
+@router.get("/products/{product_id}/files")
+async def list_product_files(
+    product_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+):
+    from app.services.product_service import get_product_files
+    return await get_product_files(db, product_id)
