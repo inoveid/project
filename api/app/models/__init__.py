@@ -17,5 +17,6 @@ from app.models.business import Business
 from app.models.product import Product
 from app.models.task import Task
 from app.models.spec import Spec, SpecVersion
+from app.models.user import User
 
-__all__ = ["Base", "Team", "Agent", "Workflow", "WorkflowEdge", "Session", "Message", "OAuthToken", "EpisodicMemory", "SemanticMemory", "EvalCase", "EvalRun", "EvalResult", "Business", "Product", "Task", "Spec", "SpecVersion"]
+__all__ = ["Base", "Team", "Agent", "Workflow", "WorkflowEdge", "Session", "Message", "OAuthToken", "EpisodicMemory", "SemanticMemory", "EvalCase", "EvalRun", "EvalResult", "Business", "Product", "Task", "Spec", "SpecVersion", "User"]

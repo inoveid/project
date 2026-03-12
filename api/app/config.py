@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     # Clone settings
     clone_timeout_seconds: int = 300
 
+    # JWT auth
+    jwt_secret: str = "change-me-in-production"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 1440  # 24h
+
     # MCP → API вызовы
     api_base_url: str = "http://localhost:8000"
 
