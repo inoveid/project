@@ -314,6 +314,15 @@ function SubSessionView({
     refetchInterval: isTaskRunning ? 2000 : false,
   });
 
+  const hasRealtimeActivity = realtimeItems.length > 0;
+
+  // Combine DB messages with real-time streaming overlay (must be before early returns)
+  const items = useMemo(() => {
+    const dbMessages = session?.messages ?? [];
+    if (!hasRealtimeActivity) return dbMessages;
+    return [...dbMessages, ...realtimeItems];
+  }, [session?.messages, realtimeItems, hasRealtimeActivity]);
+
   if (isLoading) {
     return <p className="text-gray-400 text-sm p-4 flex-1">Загрузка чата...</p>;
   }
@@ -323,14 +332,6 @@ function SubSessionView({
   }
 
   const isActive = session?.status === 'active';
-  const hasRealtimeActivity = realtimeItems.length > 0;
-
-  // Combine DB messages with real-time streaming overlay
-  const items = useMemo(() => {
-    const dbMessages = session?.messages ?? [];
-    if (!hasRealtimeActivity) return dbMessages;
-    return [...dbMessages, ...realtimeItems];
-  }, [session?.messages, realtimeItems, hasRealtimeActivity]);
 
   return (
     <>
