@@ -32,5 +32,5 @@ export function makeLocalMessage(role: "user" | "assistant", content: string): M
   };
 }
 
-export const RECONNECT_DELAY_MS = 2000;
-export const MAX_RECONNECT_ATTEMPTS = 5;
+export const RECONNECT_BASE_DELAY_MS = 1000;
+export const MAX_RECONNECT_ATTEMPTS = 20;

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type { WsIncoming } from "../../types";
 import type { ChatStatus } from "./chatState";
-import { MAX_RECONNECT_ATTEMPTS, RECONNECT_DELAY_MS } from "./chatState";
+import { MAX_RECONNECT_ATTEMPTS, RECONNECT_BASE_DELAY_MS } from "./chatState";
 
 interface UseChatSocketOptions {
   sessionId: string;
@@ -58,7 +58,12 @@ export function useChatSocket(options: UseChatSocketOptions): UseChatSocketResul
       onDisconnect();
       if (!stoppedRef.current && reconnectCount.current < MAX_RECONNECT_ATTEMPTS) {
         reconnectCount.current += 1;
-        reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY_MS);
+        // Exponential backoff: 1s, 2s, 4s, 8s, ... capped at 30s
+        const delay = Math.min(
+          RECONNECT_BASE_DELAY_MS * Math.pow(2, reconnectCount.current - 1),
+          30000,
+        );
+        reconnectTimer.current = setTimeout(connect, delay);
       }
     };
 

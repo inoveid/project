@@ -24,6 +24,7 @@ from langgraph.types import Command
 from app.config import settings
 from app.database import async_session
 from app.services.event_bus import (
+    clear_buffer,
     publish_event,
     publish_notification,
     subscribe_commands,
@@ -232,6 +233,7 @@ async def handle_session(session_id: uuid.UUID) -> None:
         except SessionNotFoundError:
             pass
     await runtime.stop_session(session_id)
+    await clear_buffer(str(session_id))
 
 
 # ---------------------------------------------------------------------------
@@ -416,10 +418,9 @@ async def run_worker() -> None:
                     active_tasks[sid] = task
                     task.add_done_callback(lambda t, s=sid: active_tasks.pop(s, None))
 
-                elif action == "stop":
-                    existing = active_tasks.get(sid)
-                    if existing and not existing.done():
-                        existing.cancel()
+                # NOTE: No "stop" action here — Worker only stops via
+                # session commands channel (explicit user "stop" command).
+                # WS disconnect does NOT stop the Worker.
 
         finally:
             await pubsub.unsubscribe("worker:sessions")
