@@ -207,7 +207,8 @@ async def _handle_messages(
                 await websocket.send_json({"type": "error", "error": "Empty message content"})
                 continue
 
-            await add_message(db, session_id, "user", content)
+            if not data.get("saved"):
+                await add_message(db, session_id, "user", content)
             await websocket.send_json({"type": "status", "status": "thinking"})
 
             initial_state: WorkflowState = {

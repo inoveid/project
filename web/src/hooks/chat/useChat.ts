@@ -107,7 +107,7 @@ export function useChat(
     const lastMsg = msgs[msgs.length - 1];
     if (lastMsg.role === "user") {
       autoSentRef.current = true;
-      send(JSON.stringify({ type: "message", content: lastMsg.content }));
+      send(JSON.stringify({ type: "message", content: lastMsg.content, saved: true }));
       setStatus("typing");
     }
   }, [status, send]);
