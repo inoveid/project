@@ -17,6 +17,7 @@ export function AgentGeneralTab({ agent, onSave, onDelete }: AgentGeneralTabProp
   const [systemPrompt, setSystemPrompt] = useState(agent.system_prompt);
   const [allowedTools, setAllowedTools] = useState(agent.allowed_tools.join(", "));
   const [maxCycles, setMaxCycles] = useState(agent.max_cycles);
+  const [canCompleteTask, setCanCompleteTask] = useState(agent.can_complete_task);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const { canDelete, reason: deleteBlockReason } = useAgentDeletable(agent.id);
@@ -115,6 +116,18 @@ export function AgentGeneralTab({ agent, onSave, onDelete }: AgentGeneralTabProp
             if (maxCycles !== agent.max_cycles) saveField("max_cycles", maxCycles);
           }}
         />
+      </label>
+
+      <label className="flex items-center gap-2 pt-1">
+        <input
+          type="checkbox"
+          checked={canCompleteTask}
+          onChange={(e) => {
+            setCanCompleteTask(e.target.checked);
+            saveField("can_complete_task", e.target.checked);
+          }}
+        />
+        <span className="text-xs font-medium text-gray-600">Can complete task</span>
       </label>
 
       <div className="pt-4 border-t border-gray-100">

@@ -25,6 +25,7 @@ interface PreviewTool {
 function generatePreviewTools(
   edges: WorkflowEdge[],
   agentMap: Map<string, Agent>,
+  canCompleteTask: boolean,
 ): PreviewTool[] {
   const tools: PreviewTool[] = [];
   const usedNames = new Set<string>();
@@ -50,7 +51,9 @@ function generatePreviewTools(
     tools.push({ name, target: toName, requiresApproval: edge.requires_approval });
   }
 
-  tools.push({ name: "complete_task", target: "", requiresApproval: false });
+  if (canCompleteTask) {
+    tools.push({ name: "complete_task", target: "", requiresApproval: false });
+  }
 
   return tools;
 }
@@ -130,7 +133,7 @@ export function AgentHandoffTab({
       {/* Tool Preview — what the agent will see in runtime */}
       {Array.from(edgesByWorkflow.entries()).map(([wfId, edges]) => {
         const wf = workflowMap.get(wfId);
-        const tools = generatePreviewTools(edges, agentMap);
+        const tools = generatePreviewTools(edges, agentMap, agent.can_complete_task);
         return (
           <div key={`preview-${wfId}`} className="border border-dashed border-gray-300 rounded p-3 bg-gray-50">
             <h4 className="text-xs font-semibold text-gray-500 mb-2">

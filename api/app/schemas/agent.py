@@ -12,6 +12,7 @@ class AgentCreate(BaseModel):
     system_prompt: str = Field(..., min_length=1)
     allowed_tools: list[str] = Field(default_factory=list)
     config: dict[str, Any] = Field(default_factory=dict)
+    can_complete_task: bool = False
     is_system: bool = False
 
 
@@ -30,6 +31,7 @@ class AgentUpdate(BaseModel):
     config: Optional[dict[str, Any]] = None
     prompts: Optional[list[AgentPrompt]] = None
     max_cycles: Optional[int] = None
+    can_complete_task: Optional[bool] = None
     position_x: Optional[float] = None
     position_y: Optional[float] = None
 
@@ -45,8 +47,10 @@ class AgentRead(BaseModel):
     config: dict[str, Any]
     prompts: list[AgentPrompt] = Field(default_factory=list)
     max_cycles: int = 3
+    can_complete_task: Optional[bool] = None
     position_x: Optional[float] = None
     position_y: Optional[float] = None
+    can_complete_task: bool = False
     is_system: bool
     created_at: datetime
     updated_at: datetime

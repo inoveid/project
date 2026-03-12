@@ -157,8 +157,10 @@ async def generate_handoff_tools(
             prompt_id=edge.prompt_id,
         ))
 
-    # Any agent can complete the task
-    tools.append(HandoffTool(
+    # Add complete_task only if agent has the permission
+    agent = await db.get(Agent, agent_id)
+    if agent and agent.can_complete_task:
+        tools.append(HandoffTool(
             name=COMPLETE_TASK_TOOL_NAME,
             description="Complete the current task. Call when your work is done.",
             to_agent_name="",

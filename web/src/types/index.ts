@@ -37,6 +37,7 @@ export interface Agent {
   config: Record<string, unknown>;
   prompts: AgentPrompt[];
   max_cycles: number;
+  can_complete_task: boolean;
   position_x: number | null;
   position_y: number | null;
   created_at: string;
@@ -50,6 +51,7 @@ export interface AgentCreate {
   system_prompt: string;
   allowed_tools?: string[];
   config?: Record<string, unknown>;
+  can_complete_task?: boolean;
 }
 
 export interface AgentUpdate {
@@ -61,6 +63,7 @@ export interface AgentUpdate {
   config?: Record<string, unknown>;
   prompts?: AgentPrompt[];
   max_cycles?: number;
+  can_complete_task?: boolean;
   position_x?: number | null;
   position_y?: number | null;
 }

@@ -34,6 +34,9 @@ class Agent(Base):
     max_cycles: Mapped[int] = mapped_column(
         Integer, nullable=False, default=3, server_default="3"
     )
+    can_complete_task: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     position_x: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     position_y: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
