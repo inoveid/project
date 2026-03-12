@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTask } from '../../hooks/useTasks';
 import { TaskDetailsTab } from './TaskDetailsTab';
 import { TaskChatsTab } from './TaskChatsTab';
@@ -13,6 +13,14 @@ interface TaskModalProps {
 export function TaskModal({ taskId, onClose }: TaskModalProps) {
   const [activeTab, setActiveTab] = useState<TabId>('details');
   const { data: task, isLoading } = useTask(taskId);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   if (isLoading || !task) {
     return (
