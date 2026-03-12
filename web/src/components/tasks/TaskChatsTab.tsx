@@ -17,6 +17,7 @@ export function TaskChatsTab({ task }: TaskChatsTabProps) {
   const { data: sessions, isLoading } = useTaskSessions(task.id, task.status);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const prevSessionIdsRef = useRef<Set<string>>(new Set());
+  const pendingSwithToAgentRef = useRef<string | null>(null);
 
   // Main session (oldest, depth=0) — WS always connected at this level
   const mainSessionId = sessions?.[sessions.length - 1]?.id ?? '';
@@ -47,12 +48,23 @@ export function TaskChatsTab({ task }: TaskChatsTabProps) {
     }
   }, [task.status, sessions, selectedId]);
 
-  // Auto-switch to new session when it appears (after approve/handoff)
+  // Auto-switch to new session when it appears OR when pending switch resolves
   useEffect(() => {
     if (!sessions?.length) return;
     const currentIds = new Set(sessions.map((s) => s.id));
     const prevIds = prevSessionIdsRef.current;
-    if (prevIds.size > 0) {
+
+    // Check pending agent switch first (after approve with session reuse)
+    if (pendingSwithToAgentRef.current) {
+      const target = sessions.find(
+        (s) => s.agent_name === pendingSwithToAgentRef.current && s.status === 'active',
+      );
+      if (target) {
+        setSelectedId(target.id);
+        pendingSwithToAgentRef.current = null;
+      }
+    } else if (prevIds.size > 0) {
+      // Detect truly new sessions
       for (const id of currentIds) {
         if (!prevIds.has(id)) {
           setSelectedId(id);
@@ -60,11 +72,23 @@ export function TaskChatsTab({ task }: TaskChatsTabProps) {
         }
       }
     }
+
     prevSessionIdsRef.current = currentIds;
   }, [sessions]);
 
   // Approve / Reject — always goes through main session WS
   function handleApprove() {
+    // Determine which agent we're handing off to, find their session to switch
+    const toAgentName = effectiveApproval?.toAgent;
+    if (toAgentName && sessions) {
+      const targetSession = sessions.find((s) => s.agent_name === toAgentName && s.status === 'active');
+      if (targetSession) {
+        setSelectedId(targetSession.id);
+      } else {
+        // Session might not exist yet (will be created) — set a flag to switch on next sessions update
+        pendingSwithToAgentRef.current = toAgentName;
+      }
+    }
     mainChat.approveHandoff();
     void queryClient.invalidateQueries({ queryKey: ['tasks', 'detail', task.id] });
     void queryClient.invalidateQueries({ queryKey: ['sessions', 'by-task', task.id] });
@@ -90,6 +114,19 @@ export function TaskChatsTab({ task }: TaskChatsTabProps) {
   const activeId = selectedId ?? mainSessionId;
   const isViewingMain = activeId === mainSessionId;
 
+  // Track which agent is currently working (from WS events)
+  const activeAgentFromWs = (() => {
+    // If status is streaming/thinking, the current active agent is working
+    // Check the last handoff item to know which agent that is
+    if (mainChat.status === 'streaming' || mainChat.status === 'thinking') {
+      const lastHandoff = [...mainChat.items]
+        .reverse()
+        .find((i) => isHandoffItem(i) && i.itemType === 'handoff_start');
+      if (lastHandoff && isHandoffItem(lastHandoff)) return lastHandoff.toAgent;
+    }
+    return null;
+  })();
+
   // Approval — derived from main session WS (always connected)
   const approvalFromItems = (() => {
     const last = mainChat.items
@@ -110,6 +147,7 @@ export function TaskChatsTab({ task }: TaskChatsTabProps) {
         sessions={sessions}
         activeId={activeId}
         taskStatus={task.status}
+        activeAgentName={activeAgentFromWs}
         onSelect={setSelectedId}
       />
 
@@ -139,11 +177,13 @@ function SessionSidebar({
   sessions,
   activeId,
   taskStatus,
+  activeAgentName,
   onSelect,
 }: {
   sessions: SessionListItem[];
   activeId: string;
   taskStatus: Task['status'];
+  activeAgentName: string | null;
   onSelect: (id: string) => void;
 }) {
   return (
@@ -170,6 +210,9 @@ function SessionSidebar({
                 <span className="text-xs bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded-full">
                   ⏳
                 </span>
+              )}
+              {!showAwaitingBadge && s.agent_name === activeAgentName && (
+                <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shrink-0" title="Работает" />
               )}
             </span>
           </button>
