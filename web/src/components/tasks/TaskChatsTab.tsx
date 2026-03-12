@@ -99,6 +99,20 @@ export function TaskChatsTab({ task }: TaskChatsTabProps) {
     void queryClient.invalidateQueries({ queryKey: ['tasks', 'detail', task.id] });
   }
 
+  // Extract real-time items for the selected sub-session from main WS
+  const activeId = selectedId ?? mainSessionId;
+  const isViewingMain = activeId === mainSessionId;
+  const selectedAgentName = sessions?.find((s) => s.id === activeId)?.agent_name ?? '';
+  const subAgentRealtimeItems = useMemo(() => {
+    if (isViewingMain || !selectedAgentName) return [];
+    return mainChat.items.filter((item) => {
+      if (!isHandoffItem(item)) return false;
+      if (item.id === '__sub_agent_streaming__' && item.agentName === selectedAgentName) return true;
+      if (item.id === '__activity__' && item.agentName === selectedAgentName) return true;
+      return false;
+    });
+  }, [isViewingMain, selectedAgentName, mainChat.items]);
+
   if (isLoading) {
     return <p className="text-gray-400 text-sm p-6">Загрузка сессий...</p>;
   }
@@ -110,9 +124,6 @@ export function TaskChatsTab({ task }: TaskChatsTabProps) {
       </div>
     );
   }
-
-  const activeId = selectedId ?? mainSessionId;
-  const isViewingMain = activeId === mainSessionId;
 
   // Track which agent is currently working (from WS events)
   const activeAgentFromWs = (() => {
@@ -140,19 +151,6 @@ export function TaskChatsTab({ task }: TaskChatsTabProps) {
   const effectiveApproval = mainChat.pendingApproval || approvalFromItems;
   // Show approval from WS event immediately OR from task status (after refetch)
   const showApproval = (task.status === 'awaiting_user' || mainChat.status === 'awaiting_approval') && mainActive;
-
-  // Extract real-time items for the selected sub-session from main WS
-  const selectedAgentName = sessions?.find((s) => s.id === activeId)?.agent_name ?? '';
-  const subAgentRealtimeItems = useMemo(() => {
-    if (isViewingMain || !selectedAgentName) return [];
-    return mainChat.items.filter((item) => {
-      if (!isHandoffItem(item)) return false;
-      // Include streaming content and activity indicators for this agent
-      if (item.id === '__sub_agent_streaming__' && item.agentName === selectedAgentName) return true;
-      if (item.id === '__activity__' && item.agentName === selectedAgentName) return true;
-      return false;
-    });
-  }, [isViewingMain, selectedAgentName, mainChat.items]);
 
   return (
     <div className="flex flex-1 min-h-0">
