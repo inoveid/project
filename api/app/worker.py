@@ -77,6 +77,33 @@ async def handle_session(session_id: uuid.UUID) -> None:
     sid = str(session_id)
     publisher = EventPublisher(sid)
 
+    try:
+        await _run_session(session_id, sid, publisher)
+    except Exception as exc:
+        logger.error("Session %s crashed: %s", sid, exc, exc_info=True)
+        try:
+            await publish_event(sid, {"type": "error", "error": f"Worker error: {exc}"})
+        except Exception:
+            pass
+    finally:
+        # Cleanup — always runs, even on crash
+        for child_id in runtime.get_children(session_id):
+            try:
+                async with async_session() as cleanup_db:
+                    await stop_session(cleanup_db, child_id)
+            except SessionNotFoundError:
+                pass
+            except Exception as exc:
+                logger.warning("Failed to stop child %s: %s", child_id, exc)
+        await runtime.stop_session(session_id)
+        await clear_buffer(sid)
+        logger.info("Session %s cleanup complete", sid)
+
+
+async def _run_session(
+    session_id: uuid.UUID, sid: str, publisher: EventPublisher,
+) -> None:
+    """Core session logic — separated for try/finally in handle_session."""
     async with async_session() as db:
         try:
             session = await get_session(db, session_id)
@@ -225,16 +252,6 @@ async def handle_session(session_id: uuid.UUID) -> None:
                     "error": "Agent is waiting for approval. Send approve or reject first.",
                 })
 
-    # Cleanup
-    for child_id in runtime.get_children(session_id):
-        try:
-            async with async_session() as cleanup_db:
-                await stop_session(cleanup_db, child_id)
-        except SessionNotFoundError:
-            pass
-    await runtime.stop_session(session_id)
-    await clear_buffer(str(session_id))
-
 
 # ---------------------------------------------------------------------------
 # Graph execution helpers (moved from ws.py, adapted for EventPublisher)
@@ -344,7 +361,7 @@ async def _run_graph(graph, input, config: dict) -> tuple[bool, bool, bool, dict
             if isinstance(hr, dict) and hr.get("result_type") == "completed":
                 completed = True
     except Exception as exc:
-        logger.error("Graph execution error: %s", exc)
+        logger.error("Graph execution error for session %s: %s", config["configurable"]["thread_id"], exc, exc_info=True)
         await publisher.send_json({"type": "error", "error": str(exc)})
         await _try_update_task_status(db, task_id, "error")
         await publish_notification("task_error", {
@@ -359,7 +376,7 @@ async def _run_graph(graph, input, config: dict) -> tuple[bool, bool, bool, dict
         if graph_state and graph_state.next:
             return True, False, False, graph_state.values or {}
     except Exception as exc:
-        logger.warning("Failed to check graph state after stream: %s", exc)
+        logger.warning("Failed to check graph state after stream for %s: %s", config["configurable"]["thread_id"], exc)
 
     return False, completed, False, None
 
