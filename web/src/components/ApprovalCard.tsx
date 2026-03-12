@@ -9,9 +9,25 @@ interface ApprovalCardProps {
 export function ApprovalCard({ approval, onApprove, onReject }: ApprovalCardProps) {
   const { fromAgent, toAgent, task, chain = [], steps = [], workflowAgents = [] } = approval;
 
-  // Build agent status: done / current / pending
-  const doneAgents = new Set(steps.map((s) => s.agent));
-  const allAgents = workflowAgents.length > 0 ? workflowAgents : [...doneAgents, toAgent];
+  // Build ordered progress entries from steps, avoiding duplicate agent rows
+  // Each step is shown once; if toAgent already appeared, mark the last occurrence as current
+  const progressEntries: { agent: string; summary?: string; status: "done" | "current" | "pending" }[] = [];
+  for (const s of steps) {
+    progressEntries.push({ agent: s.agent, summary: s.summary, status: "done" });
+  }
+  // If toAgent is not yet in steps, add as current
+  const toAgentInSteps = steps.some((s) => s.agent === toAgent);
+  if (!toAgentInSteps) {
+    progressEntries.push({ agent: toAgent, status: "current" });
+  } else {
+    // Mark the last occurrence of toAgent as current (it's being handed back)
+    for (let i = progressEntries.length - 1; i >= 0; i--) {
+      if (progressEntries[i].agent === toAgent) {
+        progressEntries[i].status = "current";
+        break;
+      }
+    }
+  }
 
   return (
     <div className="border-t border-amber-200 bg-amber-50/80 px-4 py-4 space-y-3">
@@ -29,34 +45,28 @@ export function ApprovalCard({ approval, onApprove, onReject }: ApprovalCardProp
       </div>
 
       {/* Progress tracker */}
-      {allAgents.length > 0 && (
+      {progressEntries.length > 0 && (
         <div className="space-y-1.5">
           <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Прогресс</p>
           <div className="space-y-1">
-            {allAgents.map((agent) => {
-              const step = steps.find((s) => s.agent === agent);
-              const isDone = doneAgents.has(agent);
-              const isCurrent = agent === toAgent;
-
-              return (
-                <div key={agent} className="flex items-start gap-2">
-                  <span className="mt-0.5 text-xs shrink-0">
-                    {isDone ? "✅" : isCurrent ? "⏳" : "○"}
+            {progressEntries.map((entry, idx) => (
+              <div key={`${entry.agent}-${idx}`} className="flex items-start gap-2">
+                <span className="mt-0.5 text-xs shrink-0">
+                  {entry.status === "done" ? "✅" : entry.status === "current" ? "⏳" : "○"}
+                </span>
+                <div className="min-w-0">
+                  <span className={`text-xs font-medium ${entry.status === "done" ? "text-gray-700" : entry.status === "current" ? "text-amber-700" : "text-gray-400"}`}>
+                    {entry.agent}
                   </span>
-                  <div className="min-w-0">
-                    <span className={`text-xs font-medium ${isDone ? "text-gray-700" : isCurrent ? "text-amber-700" : "text-gray-400"}`}>
-                      {agent}
-                    </span>
-                    {isDone && step?.summary && (
-                      <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-2">{step.summary}</p>
-                    )}
-                    {isCurrent && (
-                      <p className="text-[11px] text-amber-600 mt-0.5">ожидает одобрения</p>
-                    )}
-                  </div>
+                  {entry.status === "done" && entry.summary && (
+                    <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-2">{entry.summary}</p>
+                  )}
+                  {entry.status === "current" && (
+                    <p className="text-[11px] text-amber-600 mt-0.5">ожидает одобрения</p>
+                  )}
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
         </div>
       )}
