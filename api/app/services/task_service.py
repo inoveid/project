@@ -145,12 +145,10 @@ async def update_task_status(
                 prompt = prompt.replace("{{task_title}}", task.title or "")
                 prompt = prompt.replace("{{task_description}}", task.description or "")
 
-                # If prompt has no task context, append it automatically
-                has_task_context = task.title and task.title in prompt
-                if not has_task_context and task.title:
-                    prompt += f"\n\nЗадача: {task.title}"
-                    if task.description:
-                        prompt += f"\nОписание: {task.description}" 
+                # Auto-append task description if not already in prompt
+                has_task_context = task.description and task.description in prompt
+                if not has_task_context and task.description:
+                    prompt += f"\n\n{task.description}" 
 
                 session = Session(
                     agent_id=workflow.starting_agent_id,
