@@ -1,5 +1,6 @@
 import { Outlet, Link, useLocation } from "react-router-dom";
 import { AuthStatusBadge } from "./AuthStatusBadge";
+import { useCurrentUser, useUserLogout } from "../hooks/useAuth";
 
 const NAV_ITEMS = [
   { path: "/", label: "Dashboard" },
@@ -11,6 +12,8 @@ const NAV_ITEMS = [
 export function Layout() {
   const location = useLocation();
   const isFullWidth = location.pathname === "/teams";
+  const { data: user } = useCurrentUser();
+  const logout = useUserLogout();
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -34,8 +37,19 @@ export function Layout() {
               </Link>
             ))}
           </nav>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-3">
             <AuthStatusBadge />
+            {user && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600">{user.name}</span>
+                <button
+                  onClick={() => logout.mutate()}
+                  className="text-xs text-gray-400 hover:text-gray-700 border px-2 py-1 rounded"
+                >
+                  Выйти
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </header>

@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Layout } from "./components/Layout";
+import { AuthGuard } from "./components/AuthGuard";
 import { GlobalChatWidget } from "./components/GlobalChatWidget";
 import { NotificationLayer } from "./components/notifications/NotificationLayer";
 import { ToastProvider } from "./hooks/useToast";
@@ -9,12 +10,20 @@ import { ChatPage } from "./pages/ChatPage";
 import { EvalDashboard } from "./pages/EvalDashboard";
 import { BusinessListPage } from "./pages/BusinessListPage";
 import { BusinessPage } from "./pages/BusinessPage";
+import { LoginPage } from "./pages/LoginPage";
 
 export function App() {
   return (
     <ToastProvider>
       <Routes>
-        <Route element={<Layout />}>
+        <Route path="/login" element={<LoginPage />} />
+        <Route
+          element={
+            <AuthGuard>
+              <Layout />
+            </AuthGuard>
+          }
+        >
           <Route path="/" element={<Dashboard />} />
           <Route path="/teams" element={<CanvasPage />} />
           <Route path="/teams/:id" element={<Navigate to="/teams" replace />} />
