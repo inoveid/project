@@ -15,12 +15,23 @@ services:
       timeout: 3s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   api:
     build: ./api
     ports:
       - "8000:8000"
     environment:
       AC_DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/agent_console
+      AC_REDIS_URL: redis://redis:6379/0
       AC_WORKSPACE_PATH: /workspace
       AC_CORS_ORIGINS: '["http://localhost:3002"]'
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
@@ -31,6 +42,8 @@ services:
       - ${WORKSPACE_PATH:-../../workspace}:/workspace
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   web:
