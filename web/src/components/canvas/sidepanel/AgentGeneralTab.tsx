@@ -16,7 +16,6 @@ export function AgentGeneralTab({ agent, onSave, onDelete }: AgentGeneralTabProp
   const [description, setDescription] = useState(agent.description ?? "");
   const [systemPrompt, setSystemPrompt] = useState(agent.system_prompt);
   const [allowedTools, setAllowedTools] = useState(agent.allowed_tools.join(", "));
-  const [maxCycles, setMaxCycles] = useState(agent.max_cycles);
   const [canCompleteTask, setCanCompleteTask] = useState(agent.can_complete_task);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -99,24 +98,7 @@ export function AgentGeneralTab({ agent, onSave, onDelete }: AgentGeneralTabProp
         />
       </label>
 
-      <label className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-gray-600">Max Cycles</span>
-        <input
-          type="number"
-          className="border border-gray-200 rounded px-2 py-1.5 text-sm w-24"
-          value={maxCycles}
-          min={1}
-          onChange={(e) => {
-            const val = parseInt(e.target.value, 10);
-            if (!isNaN(val) && val > 0) {
-              setMaxCycles(val);
-            }
-          }}
-          onBlur={() => {
-            if (maxCycles !== agent.max_cycles) saveField("max_cycles", maxCycles);
-          }}
-        />
-      </label>
+
 
       <label className="flex items-center gap-2 pt-1">
         <input

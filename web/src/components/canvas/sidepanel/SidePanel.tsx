@@ -4,10 +4,12 @@ import { AgentGeneralTab } from "./AgentGeneralTab";
 import { AgentPromptsTab } from "./AgentPromptsTab";
 import { AgentHandoffTab } from "./AgentHandoffTab";
 import { EdgePanel } from "./EdgePanel";
+import { WorkflowPanel } from "./WorkflowPanel";
 
 export type SidePanelSelection =
   | { type: "agent"; agentId: string }
-  | { type: "edge"; edgeId: string };
+  | { type: "edge"; edgeId: string }
+  | { type: "team"; teamId: string };
 
 interface SidePanelProps {
   selection: SidePanelSelection;
@@ -88,6 +90,23 @@ export function SidePanel({
               }
             />
           )}
+        </div>
+      </PanelShell>
+    );
+  }
+
+  if (selection.type === "team") {
+    return (
+      <PanelShell title="Workflow" onClose={onClose}>
+        <div className="flex-1 overflow-y-auto">
+          <WorkflowPanel
+            teamId={selection.teamId}
+            workflows={workflows}
+            workflowEdges={workflowEdges}
+            agents={agents}
+            lockedWorkflowIds={lockedWorkflowIds}
+            onUpdateEdge={onUpdateEdge}
+          />
         </div>
       </PanelShell>
     );

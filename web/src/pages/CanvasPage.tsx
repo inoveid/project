@@ -127,6 +127,9 @@ export function CanvasPage() {
     (_event: React.MouseEvent, node: { id: string; type?: string }) => {
       if (node.type === "agentNode") {
         setPanelSelection({ type: "agent", agentId: stripNodePrefix(node.id, "agent-") });
+      } else if (node.type === "teamGroup") {
+        const teamId = node.id.replace(/^team-/, "");
+        setPanelSelection({ type: "team", teamId });
       }
     }, [],
   );
