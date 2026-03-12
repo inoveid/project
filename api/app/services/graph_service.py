@@ -15,9 +15,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Literal, TypedDict
-
-from fastapi import WebSocket
+from typing import Any, Literal, Protocol, TypedDict
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, START, StateGraph
@@ -25,7 +23,7 @@ from langgraph.types import interrupt
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.services.notification_service import broadcast_notification
+from app.services.event_bus import publish_notification
 from app.schemas.session import SessionCreate
 from app.services.handoff_server import (
     HandoffResult,
@@ -45,6 +43,11 @@ from app.services.session_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+class EventSender(Protocol):
+    """Protocol for sending JSON events — works with both WebSocket and EventPublisher."""
+    async def send_json(self, data: dict[str, Any]) -> None: ...
+
 
 MAX_DEPTH = 5
 
@@ -88,7 +91,7 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
     For depth==0 (main agent): runtime already started from ws.py.
     For depth>0 (sub-agent): runtime started in gate/auto_handoff node.
     """
-    ws: WebSocket = config["configurable"]["websocket"]
+    ws: EventSender = config["configurable"]["websocket"]
     db: AsyncSession = config["configurable"]["db"]
     is_sub = state["depth"] > 0 and state["current_session_id"] != state["main_session_id"]
     session_id = uuid.UUID(state["current_session_id"])
@@ -250,7 +253,7 @@ async def notify_handoff_node(state: WorkflowState, config: RunnableConfig) -> d
         "task": hr.get("prompt", "") if hr else "",
         "task_id": state.get("task_id", ""),
     }
-    await broadcast_notification("approval_required", event_data)
+    await publish_notification("approval_required", event_data)
     return {}
 
 
@@ -262,7 +265,7 @@ async def gate_node(state: WorkflowState, config: RunnableConfig) -> dict:
     On reject: cancel handoff.
     """
     db: AsyncSession = config["configurable"]["db"]
-    ws: WebSocket = config["configurable"]["websocket"]
+    ws: EventSender = config["configurable"]["websocket"]
 
     approved: bool = interrupt("Waiting for human approval of handoff")
 
@@ -283,7 +286,7 @@ async def auto_handoff_node(state: WorkflowState, config: RunnableConfig) -> dic
     Used when requires_approval=False on the workflow edge.
     """
     db: AsyncSession = config["configurable"]["db"]
-    ws: WebSocket = config["configurable"]["websocket"]
+    ws: EventSender = config["configurable"]["websocket"]
 
     hr = state["handoff_result"]
     if not hr or not hr.get("to_agent_id"):
@@ -302,7 +305,7 @@ async def complete_node(state: WorkflowState, config: RunnableConfig) -> dict:
         "summary": summary,
         "task_id": state.get("task_id", ""),
     }
-    await broadcast_notification("task_completed", event_data)
+    await publish_notification("task_completed", event_data)
 
     return {"handoff_result": None, "gateway_approved": None}
 
@@ -317,7 +320,7 @@ async def blocked_node(state: WorkflowState, config: RunnableConfig) -> dict:
         "reason": reason,
         "task_id": state.get("task_id", ""),
     }
-    await broadcast_notification("max_cycles_reached", event_data)
+    await publish_notification("max_cycles_reached", event_data)
 
     return {"handoff_result": None, "gateway_approved": None}
 
@@ -327,7 +330,7 @@ async def blocked_node(state: WorkflowState, config: RunnableConfig) -> dict:
 # ---------------------------------------------------------------------------
 
 async def _create_sub_session(
-    db: AsyncSession, ws: WebSocket, state: WorkflowState, hr: dict
+    db: AsyncSession, ws: EventSender, state: WorkflowState, hr: dict
 ) -> dict:
     """Create or reuse a session for the target agent."""
     from app.models.agent import Agent
