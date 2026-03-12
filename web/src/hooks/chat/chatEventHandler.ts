@@ -134,6 +134,9 @@ export function handleEvent(
         fromAgent: event.from_agent,
         toAgent: event.to_agent,
         task: event.task,
+        chain: event.chain,
+        steps: event.steps,
+        workflowAgents: event.workflow_agents,
       });
       setStatus("awaiting_approval");
       setItems((prev) => [

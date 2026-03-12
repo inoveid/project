@@ -147,7 +147,7 @@ export type WsIncoming =
   | { type: "sub_agent_error"; agent_name: string; error: string }
   | { type: "handoff_done"; agent_name: string }
   | { type: "handoff_cycle_detected"; message: string }
-  | { type: "approval_required"; from_agent: string; to_agent: string; task: string };
+  | { type: "approval_required"; from_agent: string; to_agent: string; task: string; chain?: string[][]; steps?: { agent: string; summary: string }[]; workflow_agents?: string[] };
 
 export interface HandoffItem {
   id: string;
@@ -170,6 +170,9 @@ export interface ApprovalRequest {
   fromAgent: string;
   toAgent: string;
   task: string;
+  chain?: string[][];
+  steps?: { agent: string; summary: string }[];
+  workflowAgents?: string[];
 }
 
 // ── Evaluation types ────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ import { getSession, stopSession } from "../api/sessions";
 import { useChat } from "../hooks/useChat";
 import type { ChatStatus } from "../hooks/useChat";
 import { ChatWindow } from "./ChatWindow";
+import { ApprovalCard } from "./ApprovalCard";
 
 function StatusIndicator({ status }: { status: ChatStatus }) {
   const labels: Record<ChatStatus, string> = {
@@ -66,41 +67,6 @@ function ChatInput({
         Send
       </button>
     </form>
-  );
-}
-
-function ApprovalBanner({
-  fromAgent,
-  toAgent,
-  onApprove,
-  onReject,
-}: {
-  fromAgent: string;
-  toAgent: string;
-  onApprove: () => void;
-  onReject: () => void;
-}) {
-  return (
-    <div className="border-t border-amber-200 bg-amber-50 px-4 py-3">
-      <p className="text-sm text-amber-800 mb-2">
-        <span className="font-medium">{fromAgent}</span> wants to hand off to{" "}
-        <span className="font-medium">{toAgent}</span>. Approve?
-      </p>
-      <div className="flex gap-2">
-        <button
-          onClick={onApprove}
-          className="rounded bg-green-600 px-4 py-1.5 text-sm text-white hover:bg-green-700"
-        >
-          Approve
-        </button>
-        <button
-          onClick={onReject}
-          className="rounded border border-gray-300 px-4 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
-        >
-          Reject
-        </button>
-      </div>
-    </div>
   );
 }
 
@@ -188,9 +154,8 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
       <ChatWindow items={items} />
 
       {pendingApproval ? (
-        <ApprovalBanner
-          fromAgent={pendingApproval.fromAgent}
-          toAgent={pendingApproval.toAgent}
+        <ApprovalCard
+          approval={pendingApproval}
           onApprove={approveHandoff}
           onReject={rejectHandoff}
         />
