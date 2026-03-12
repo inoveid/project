@@ -35,6 +35,8 @@
 | `test_runtime.py` | ✅ Переписан | 9 тестов: AgentSession lifecycle (start/stop/workdir/duplicates/children/stale) — SDK-based |
 | `test_notification_service.py` | ✅ Переписан | 3 теста: broadcast_notification → Redis pub/sub wrapper |
 | `test_notifications_ws.py` | ✅ Переписан | 2 теста: notifications WS accept + event forwarding |
+| `test_worker.py` | ✅ Создан | 10 тестов: EventPublisher, _handle_graph_result, _try_update_task_status, _run_graph, handle_session cleanup |
+| `test_event_bus.py` | ✅ Создан | 14 тестов: publish_event/command/notification, buffer CRUD, channel naming, constants |
 | `test_graph_service.py` | **НЕ СУЩЕСТВУЕТ** | 0 тестов для 6 nodes, routing, interrupt, MCP handoff integration |
 | `test_handoff.py` | Существует | 15 тестов: parse_handoff_block, format_handoff_instructions, build_agent_prompt |
 | `test_handoff_server.py` | **НЕ СУЩЕСТВУЕТ** | 0 тестов для generate_handoff_tools, handle_handoff_tool_call, max_cycles |
@@ -46,7 +48,7 @@
 | `useToast.test.tsx` | Существует | Toast hook тесты |
 
 При изменении core-модулей (worker, event_bus, runtime, graph_service, handoff_server) автоматической защиты мало.
-Worker и event_bus не имеют тестов — изменения требуют ручной проверки.
+Worker (10 тестов) и event_bus (14 тестов) покрыты unit-тестами.
 
 ---
 
@@ -99,7 +101,7 @@ Client ↔ WS (proxy) → Redis commands → Worker (LangGraph + SDK) → Redis 
 
 **Какие тесты запустить:**
 ```bash
-# test_worker.py НЕ СУЩЕСТВУЕТ — ручная проверка обязательна
+cd api && pytest tests/test_worker.py -v  # 10 тестов: EventPublisher, graph result, task status, cleanup
 cd api && pytest tests/test_ws.py -v  # proxy-сторона
 cd api && pytest tests/test_runtime.py -v
 ```
@@ -150,7 +152,7 @@ cd api && pytest tests/test_runtime.py -v
 
 **Какие тесты запустить:**
 ```bash
-# test_event_bus.py НЕ СУЩЕСТВУЕТ — ручная проверка обязательна
+cd api && pytest tests/test_event_bus.py -v  # 14 тестов: publish/subscribe, buffer, channels
 cd api && pytest tests/test_ws.py -v
 cd api && pytest tests/test_notification_service.py -v
 cd api && pytest tests/test_notifications_ws.py -v
