@@ -6,6 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.task import Task
+from app.models.workflow import Workflow
+from app.models.session import Session, Message
 from app.schemas.task import TaskCreate, TaskUpdate
 
 logger = logging.getLogger(__name__)
@@ -104,4 +106,36 @@ async def update_task_status(
     task.status = new_status
     await db.commit()
     await db.refresh(task)
+
+    # Auto-create session for starting agent when task starts
+    if new_status == "in_progress" and current_status == "backlog" and task.workflow_id:
+        try:
+            workflow = await db.get(Workflow, task.workflow_id)
+            if workflow:
+                # Resolve starting prompt with task variables
+                prompt = workflow.starting_prompt
+                prompt = prompt.replace("{{task_title}}", task.title or "")
+                prompt = prompt.replace("{{task_description}}", task.description or "")
+
+                session = Session(
+                    agent_id=workflow.starting_agent_id,
+                    task_id=task.id,
+                    status="active",
+                )
+                db.add(session)
+                await db.flush()
+
+                if prompt:
+                    message = Message(
+                        session_id=session.id,
+                        role="user",
+                        content=prompt,
+                    )
+                    db.add(message)
+
+                await db.commit()
+                logger.info("Auto-created session %s for task %s (agent %s)", session.id, task.id, workflow.starting_agent_id)
+        except Exception:
+            logger.exception("Failed to auto-create session for task %s", task.id)
+
     return task
