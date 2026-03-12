@@ -1,7 +1,7 @@
 """MCP Server для Agent Console.
 
 Запуск из директории api/:
-  python -m mcp.server
+  python -m mcp_server.server
 
 Или как скрипт (тогда внешний mcp пакет доступен напрямую):
   python api/mcp/server.py
@@ -15,7 +15,7 @@ if _api_dir not in sys.path:
     sys.path.insert(0, _api_dir)
 
 from mcp.server.fastmcp import FastMCP  # type: ignore[import]
-from mcp.tools.platform import register_platform_tools
+from mcp_server.tools.platform import register_platform_tools
 
 mcp = FastMCP("agent-console")
 

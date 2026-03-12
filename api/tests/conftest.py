@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from mcp.tools.platform import register_platform_tools
+from mcp_server.tools.platform import register_platform_tools
 
 
 @pytest.fixture
