@@ -5,6 +5,8 @@ import { getSession, stopSession } from '../../api/sessions';
 import { useChat } from '../../hooks/useChat';
 import { ChatWindow } from '../ChatWindow';
 import type { Task, SessionListItem } from '../../types';
+import { isHandoffItem } from '../../types';
+import { ApprovalCard } from '../ApprovalCard';
 
 interface TaskChatsTabProps {
   task: Task;
@@ -156,9 +158,17 @@ function SessionChat({
     );
   }
 
-  const showApproval =
-    task.status === 'awaiting_user' && isActiveSession && pendingApproval;
-  const canSend = status === 'connected' && isActiveSession;
+  // Derive approval from multiple sources for reliability
+  const approvalFromItems = (() => {
+    const last = items.filter((i) => isHandoffItem(i) && i.itemType === 'approval_required').pop();
+    if (last && isHandoffItem(last) && last.fromAgent && last.toAgent) {
+      return { fromAgent: last.fromAgent, toAgent: last.toAgent, task: last.content };
+    }
+    return null;
+  })();
+  const effectiveApproval = pendingApproval || approvalFromItems;
+  const showApproval = task.status === 'awaiting_user' && isActiveSession;
+  const canSend = status === 'connected' && isActiveSession && !showApproval;
 
   return (
     <div className="flex flex-1 flex-col min-w-0">
@@ -189,27 +199,11 @@ function SessionChat({
       {isActiveSession && (
         <>
           {showApproval ? (
-            <div className="border-t border-amber-200 bg-amber-50 px-4 py-3">
-              <p className="text-sm text-amber-800 mb-2">
-                <span className="font-medium">{pendingApproval.fromAgent}</span>{' '}
-                хочет передать задачу{' '}
-                <span className="font-medium">{pendingApproval.toAgent}</span>
-              </p>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleApprove}
-                  className="rounded bg-green-600 px-4 py-1.5 text-sm text-white hover:bg-green-700"
-                >
-                  Одобрить
-                </button>
-                <button
-                  onClick={handleReject}
-                  className="rounded border border-gray-300 px-4 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
-                >
-                  Отклонить
-                </button>
-              </div>
-            </div>
+            <ApprovalCard
+              approval={effectiveApproval || { fromAgent: 'Агент', toAgent: '...', task: 'Ожидает вашего решения' }}
+              onApprove={handleApprove}
+              onReject={handleReject}
+            />
           ) : (
             <ChatInput onSend={sendMessage} disabled={!canSend} />
           )}

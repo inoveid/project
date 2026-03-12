@@ -233,58 +233,19 @@ def _serialize_handoff_result(result: HandoffResult | None) -> dict | None:
 
 async def notify_handoff_node(state: WorkflowState, config: RunnableConfig) -> dict:
     """
-    Notify WebSocket about pending handoff requiring approval.
+    Broadcast approval_required notification (for dashboard toasts).
 
-    Runs ONCE before gate_node. On resume, gate_node reruns but not this node,
-    so approval_required is sent exactly once.
+    Session WS event is sent separately from ws.py _handle_graph_result
+    after the graph interrupts — this ensures reliable delivery.
     """
-    db: AsyncSession = config["configurable"]["db"]
-    ws: WebSocket = config["configurable"]["websocket"]
     hr = state["handoff_result"]
-
-    # Build agent summaries from messages history
-    steps: list[dict] = []
-    for msg in state.get("messages", []):
-        if isinstance(msg, dict) and msg.get("agent"):
-            text = msg.get("text", "")
-            summary = text[:200] + "..." if len(text) > 200 else text
-            steps.append({"agent": msg["agent"], "summary": summary})
-
-    # Collect all agents in workflow for progress visualization
-    workflow_agents: list[str] = []
-    wf_id = state.get("workflow_id")
-    if wf_id:
-        from app.models.workflow import Workflow
-        from app.models.workflow_edge import WorkflowEdge
-        from app.models.agent import Agent
-        from sqlalchemy import select
-
-        edges = (await db.execute(
-            select(WorkflowEdge).where(WorkflowEdge.workflow_id == uuid.UUID(wf_id))
-        )).scalars().all()
-        agent_ids = set()
-        for e in edges:
-            agent_ids.add(e.from_agent_id)
-            agent_ids.add(e.to_agent_id)
-        if agent_ids:
-            agents = (await db.execute(
-                select(Agent).where(Agent.id.in_(agent_ids))
-            )).scalars().all()
-            workflow_agents = [a.name for a in agents]
-
     event_data = {
         "from_agent": state["current_agent_name"],
         "to_agent": hr["to_agent_name"] if hr else "",
         "task": hr.get("prompt", "") if hr else "",
         "task_id": state.get("task_id", ""),
-        "chain": state.get("chain", []),
-        "steps": steps,
-        "workflow_agents": workflow_agents,
     }
     await broadcast_notification("approval_required", event_data)
-
-    # Also send directly to session WS so ChatPanel receives it
-    await ws.send_json({"type": "approval_required", **event_data})
     return {}
 
 

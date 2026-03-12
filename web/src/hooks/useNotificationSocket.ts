@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "./useToast";
 import {
@@ -19,6 +20,9 @@ const MAX_RECONNECT_ATTEMPTS = 10;
 export function useNotificationSocket() {
   const { addToast } = useToast();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const queryClientRef = useRef(queryClient);
+  queryClientRef.current = queryClient;
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectCount = useRef(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -46,6 +50,8 @@ export function useNotificationSocket() {
               addToast: addToastRef.current,
               navigateToTask: (taskId: string) => navigateRef.current(`/?task=${taskId}`),
             });
+            // Refresh Kanban board when task status changes
+            void queryClientRef.current.invalidateQueries({ queryKey: ["tasks"] });
           }
         } catch {
           // Ignore malformed messages
