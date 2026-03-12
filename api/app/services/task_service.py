@@ -75,8 +75,41 @@ async def update_task(
     return task
 
 
+async def _stop_task_sessions(db: AsyncSession, task_id: uuid.UUID) -> None:
+    """Stop all active sessions and their CLI processes for a task."""
+    from sqlalchemy import update
+    from datetime import datetime, timezone
+
+    stmt = select(Session).where(Session.task_id == task_id, Session.status == "active")
+    result = await db.execute(stmt)
+    active_sessions = result.scalars().all()
+
+    if not active_sessions:
+        return
+
+    # Stop CLI processes via runtime
+    try:
+        from app.services.runtime import runtime
+        for s in active_sessions:
+            if runtime.is_running(s.id):
+                await runtime.stop_session(s.id)
+    except Exception:
+        logger.exception("Failed to stop runtime sessions for task %s", task_id)
+
+    # Mark sessions as stopped in DB
+    session_ids = [s.id for s in active_sessions]
+    await db.execute(
+        update(Session)
+        .where(Session.id.in_(session_ids))
+        .values(status="stopped", stopped_at=datetime.now(timezone.utc))
+    )
+    await db.commit()
+    logger.info("Stopped %d sessions for task %s", len(session_ids), task_id)
+
+
 async def delete_task(db: AsyncSession, task_id: uuid.UUID) -> None:
     task = await get_task(db, task_id)
+    await _stop_task_sessions(db, task_id)
     await db.delete(task)
     await db.commit()
 
@@ -107,6 +140,10 @@ async def update_task_status(
     task.status = new_status
     await db.commit()
     await db.refresh(task)
+
+    # Stop all active sessions when task is done or errored
+    if new_status in ("done", "error"):
+        await _stop_task_sessions(db, task_id)
 
     # Stop stale active sessions for the same product workspace
     if new_status == "in_progress" and current_status == "backlog" and task.product_id:
