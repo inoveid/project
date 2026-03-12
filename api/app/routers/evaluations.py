@@ -42,7 +42,7 @@ async def list_eval_cases(
 async def get_eval_case(case_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     case = await eval_service.get_case(db, case_id)
     if not case:
-        raise HTTPException(404, "Eval case not found")
+        raise HTTPException(404, f"Eval case {case_id} not found")
     return case
 
 
@@ -52,7 +52,7 @@ async def update_eval_case(
 ):
     case = await eval_service.update_case(db, case_id, body)
     if not case:
-        raise HTTPException(404, "Eval case not found")
+        raise HTTPException(404, f"Eval case {case_id} not found")
     return case
 
 
@@ -60,7 +60,7 @@ async def update_eval_case(
 async def delete_eval_case(case_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     deleted = await eval_service.delete_case(db, case_id)
     if not deleted:
-        raise HTTPException(404, "Eval case not found")
+        raise HTTPException(404, f"Eval case {case_id} not found")
 
 
 # ── EvalRun endpoints ────────────────────────────────────────────────────────
@@ -107,7 +107,7 @@ async def list_eval_runs(
 async def get_eval_run(run_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     run = await eval_service.get_run(db, run_id)
     if not run:
-        raise HTTPException(404, "Eval run not found")
+        raise HTTPException(404, f"Eval run {run_id} not found")
     return run
 
 

@@ -303,5 +303,11 @@ export function handleEvent(
       setItems((prev) => [...prev, item]);
       break;
     }
+
+    default:
+      // Unknown event type — log for debugging. If you added a new backend event,
+      // also add it to WsIncoming in types/index.ts and handle it here.
+      console.warn("[chat] Unknown WS event type:", (event as Record<string, unknown>).type);
+      break;
   }
 }

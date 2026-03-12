@@ -78,7 +78,7 @@ async def get_task(db: AsyncSession, task_id: uuid.UUID) -> Task:
     result = await db.execute(stmt)
     task = result.scalar_one_or_none()
     if task is None:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
     return task
 
 
@@ -143,7 +143,7 @@ async def update_task_status(
     if new_status not in allowed:
         raise HTTPException(
             status_code=422,
-            detail=f"Invalid transition: {current_status} -> {new_status}",
+            detail=f"Invalid transition for task {task_id}: {current_status} -> {new_status}",
         )
 
     if new_status == "in_progress" and current_status == "backlog":
@@ -153,7 +153,7 @@ async def update_task_status(
         if missing:
             raise HTTPException(
                 status_code=400,
-                detail=f"Required fields missing: {', '.join(missing)}",
+                detail=f"Cannot start task {task_id}: required fields missing: {', '.join(missing)}",
             )
 
     task.status = new_status
