@@ -101,7 +101,8 @@ export function TaskChatsTab({ task }: TaskChatsTabProps) {
     return null;
   })();
   const effectiveApproval = mainChat.pendingApproval || approvalFromItems;
-  const showApproval = task.status === 'awaiting_user' && mainActive;
+  // Show approval from WS event immediately OR from task status (after refetch)
+  const showApproval = (task.status === 'awaiting_user' || mainChat.status === 'awaiting_approval') && mainActive;
 
   return (
     <div className="flex flex-1 min-h-0">

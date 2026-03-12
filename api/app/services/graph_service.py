@@ -90,7 +90,7 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
     """
     ws: WebSocket = config["configurable"]["websocket"]
     db: AsyncSession = config["configurable"]["db"]
-    is_sub = state["depth"] > 0
+    is_sub = state["depth"] > 0 and state["current_session_id"] != state["main_session_id"]
     session_id = uuid.UUID(state["current_session_id"])
 
     full_text = ""
@@ -127,13 +127,12 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
         else:
             await ws.send_json({"type": "error", "error": str(exc)})
 
-    # Sub-agent done — stop runtime, close DB session, notify UI (P7: try/finally)
+    # Sub-agent done — stop runtime but keep DB session active for reuse
     if is_sub:
         try:
             await runtime.stop_session(session_id)
-            await stop_session(db, session_id)
         except Exception as cleanup_exc:
-            logger.exception("Sub-agent cleanup failed for %s: %s", session_id, cleanup_exc)
+            logger.exception("Sub-agent runtime cleanup failed for %s: %s", session_id, cleanup_exc)
         finally:
             await ws.send_json({"type": "handoff_done", "agent_name": state["current_agent_name"]})
 
@@ -324,8 +323,10 @@ async def blocked_node(state: WorkflowState, config: RunnableConfig) -> dict:
 async def _create_sub_session(
     db: AsyncSession, ws: WebSocket, state: WorkflowState, hr: dict
 ) -> dict:
-    """Create a sub-agent session and start its runtime."""
+    """Create or reuse a session for the target agent."""
     from app.models.agent import Agent
+    from app.models.session import Session as SessionModel
+    from sqlalchemy import select
 
     target_id = uuid.UUID(hr["to_agent_id"])
     target = await db.get(Agent, target_id)
@@ -346,26 +347,48 @@ async def _create_sub_session(
         return {"gateway_approved": False, "handoff_result": None}
 
     prompt = hr.get("prompt", "") or hr.get("tool_args", {}).get("comment", "")
-
-    # Create sub-session with task_id linked
     task_id = uuid.UUID(state["task_id"]) if state.get("task_id") else None
-    sub_session = await create_session(db, SessionCreate(agent_id=target.id))
+    main_session_id = uuid.UUID(state["main_session_id"])
+
+    # Try to reuse existing session for this agent + task
+    existing_session = None
     if task_id:
-        sub_session.task_id = task_id
-        await db.commit()
-        await db.refresh(sub_session)
+        stmt = (
+            select(SessionModel)
+            .where(
+                SessionModel.agent_id == target_id,
+                SessionModel.task_id == task_id,
+                SessionModel.status == "active",
+            )
+            .order_by(SessionModel.created_at.asc())
+            .limit(1)
+        )
+        result = await db.execute(stmt)
+        existing_session = result.scalar_one_or_none()
+
+    if existing_session:
+        sub_session = existing_session
+        logger.info("Reusing session %s for agent %s", sub_session.id, target.name)
+    else:
+        sub_session = await create_session(db, SessionCreate(agent_id=target.id))
+        if task_id:
+            sub_session.task_id = task_id
+            await db.commit()
+            await db.refresh(sub_session)
+
     await add_message(db, sub_session.id, "user", prompt)
 
-    # Build system prompt with handoff tools and chain context
-    tools_prompt = await _generate_sub_tools(db, target.id, state.get("workflow_id"))
-    system_prompt = _build_sub_agent_prompt(target, state, tools_prompt)
-    workdir = _resolve_sub_agent_workdir(target)
+    # Start runtime if not already running (reused sessions may have stopped runtime)
+    if not runtime.is_running(sub_session.id):
+        tools_prompt = await _generate_sub_tools(db, target.id, state.get("workflow_id"))
+        system_prompt = _build_sub_agent_prompt(target, state, tools_prompt)
+        workdir = _resolve_sub_agent_workdir(target)
 
-    await runtime.start_session(
-        sub_session.id, workdir, system_prompt,
-        parent_session_id=uuid.UUID(state["main_session_id"]),
-        allowed_tools=target.allowed_tools or [],
-    )
+        await runtime.start_session(
+            sub_session.id, workdir, system_prompt,
+            parent_session_id=main_session_id,
+            allowed_tools=target.allowed_tools or [],
+        )
 
     await ws.send_json({
         "type": "handoff_start",
