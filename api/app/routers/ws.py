@@ -208,6 +208,7 @@ async def _handle_messages(
                 continue
 
             await add_message(db, session_id, "user", content)
+            await websocket.send_json({"type": "status", "status": "thinking"})
 
             initial_state: WorkflowState = {
                 "main_session_id": str(session_id),
@@ -231,6 +232,7 @@ async def _handle_messages(
 
         elif msg_type == "approve" and interrupted:
             await _try_update_task_status(db, task_id, "in_progress")
+            await websocket.send_json({"type": "status", "status": "thinking"})
             result = await _run_graph(
                 graph, Command(resume=True), graph_config
             )

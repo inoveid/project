@@ -64,6 +64,8 @@ export function handleEvent(
     case "assistant_text":
       setStatus("typing");
       refs.textRef.current += event.content;
+      // Remove activity indicator when real content arrives
+      setItems((prev) => prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__"));
       setItems((prev) => {
         const last = prev[prev.length - 1];
         if (last && !isHandoffItem(last) && last.role === "assistant" && last.id === "__streaming__") {
@@ -80,6 +82,7 @@ export function handleEvent(
 
     case "tool_use":
       setStatus("tool");
+      setItems((prev) => prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__"));
       refs.toolsRef.current.push({
         tool_name: event.tool_name,
         tool_input: event.tool_input,
@@ -97,6 +100,7 @@ export function handleEvent(
     }
 
     case "done": {
+      setItems((prev) => prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__"));
       const text = refs.textRef.current;
       const tools = [...refs.toolsRef.current];
       refs.textRef.current = "";
@@ -212,6 +216,26 @@ export function handleEvent(
           return [...withoutPending, final];
         });
       }
+      break;
+    }
+
+    case "status": {
+      const statusLabels: Record<string, string> = {
+        thinking: "Думает...",
+      };
+      const label = statusLabels[event.status] || event.status;
+      setItems((prev) => {
+        const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
+        const activityItem: HandoffItem = {
+          id: "__activity__",
+          itemType: "activity",
+          agentName: "system",
+          content: label,
+          created_at: new Date().toISOString(),
+        };
+        return [...withoutActivity, activityItem];
+      });
+      setStatus("typing");
       break;
     }
 

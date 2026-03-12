@@ -7,28 +7,33 @@ import { ChatWindow } from "./ChatWindow";
 import { ApprovalCard } from "./ApprovalCard";
 
 function StatusIndicator({ status }: { status: ChatStatus }) {
-  const labels: Record<ChatStatus, string> = {
-    idle: "Loading...",
-    connecting: "Connecting...",
-    connected: "Ready",
-    typing: "Agent is typing...",
-    tool: "Using tool...",
-    disconnected: "Disconnected",
-    awaiting_approval: "Waiting for approval...",
+  const dotColors: Record<ChatStatus, string> = {
+    idle: "bg-gray-300",
+    connecting: "bg-yellow-400 animate-pulse",
+    connected: "bg-green-500",
+    typing: "bg-blue-500 animate-pulse",
+    tool: "bg-purple-500 animate-pulse",
+    disconnected: "bg-red-500",
+    awaiting_approval: "bg-amber-500 animate-pulse",
   };
 
-  const colors: Record<ChatStatus, string> = {
-    idle: "text-gray-400",
-    connecting: "text-yellow-600",
-    connected: "text-green-600",
-    typing: "text-blue-600",
-    tool: "text-purple-600",
-    disconnected: "text-red-600",
-    awaiting_approval: "text-amber-600",
+  const labels: Record<ChatStatus, string> = {
+    idle: "",
+    connecting: "Connecting",
+    connected: "",
+    typing: "",
+    tool: "",
+    disconnected: "Offline",
+    awaiting_approval: "",
   };
+
+  const label = labels[status];
 
   return (
-    <span className={`text-sm ${colors[status]}`}>{labels[status]}</span>
+    <span className="flex items-center gap-1.5">
+      <span className={`w-2 h-2 rounded-full ${dotColors[status]}`} />
+      {label && <span className="text-xs text-gray-500">{label}</span>}
+    </span>
   );
 }
 

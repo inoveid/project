@@ -41,7 +41,7 @@ export function useChat(
     pendingToolsRef.current = [];
     pendingSubAgentRef.current = null;
     setItems((prev) => prev.filter((i) => {
-      if (isHandoffItem(i)) return i.id !== "__sub_agent_streaming__";
+      if (isHandoffItem(i)) return i.id !== "__sub_agent_streaming__" && i.id !== "__activity__";
       return i.id !== "__streaming__";
     }));
   }, []);
