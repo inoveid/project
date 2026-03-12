@@ -71,7 +71,7 @@ export function handleNotificationEvent(
         type: "warning",
         title: "Ожидает подтверждения",
         message: `${event.from_agent ?? "Agent"} → ${event.to_agent ?? "Agent"}`,
-        duration: 0,
+        duration: 7000,
         action: makeAction("Перейти", event.task_id),
       });
       break;
@@ -81,7 +81,7 @@ export function handleNotificationEvent(
         type: "error",
         title: "Цикл превышен",
         message: `${event.agent_name ?? "Agent"}: ${event.reason ?? "max cycles reached"}`,
-        duration: 0,
+        duration: 7000,
         action: makeAction("Перейти", event.task_id),
       });
       break;
@@ -103,7 +103,7 @@ export function handleNotificationEvent(
         type: "error",
         title: "Ошибка задачи",
         message: event.error ?? "Unknown error",
-        duration: 0,
+        duration: 7000,
         action: makeAction("Открыть", event.task_id),
       });
       break;
