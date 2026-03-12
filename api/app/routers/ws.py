@@ -329,7 +329,7 @@ async def _run_graph(graph, input, config: dict) -> tuple[bool, bool, bool, dict
     try:
         async for chunk in graph.astream(input, config, stream_mode="values"):
             if "__interrupt__" in chunk:
-                return True, False, False, last_state
+                return True, False, False, chunk
             last_state = chunk
             # Check if task was completed via complete_task tool
             hr = chunk.get("handoff_result")
@@ -346,5 +346,14 @@ async def _run_graph(graph, input, config: dict) -> tuple[bool, bool, bool, dict
             "error": str(exc),
         })
         return False, False, True, None
+
+    # Fallback: check graph state for pending interrupts not caught during streaming
+    try:
+        graph_state = await graph.aget_state(config)
+        if graph_state and graph_state.next:
+            state_values = graph_state.values or {}
+            return True, False, False, state_values
+    except Exception as exc:
+        logger.warning("Failed to check graph state after stream: %s", exc)
 
     return False, completed, False, None

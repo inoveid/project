@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTaskSessions } from '../../hooks/useTasks';
 import { getSession, stopSession } from '../../api/sessions';
@@ -141,6 +141,19 @@ export function TaskChatsTab({ task }: TaskChatsTabProps) {
   // Show approval from WS event immediately OR from task status (after refetch)
   const showApproval = (task.status === 'awaiting_user' || mainChat.status === 'awaiting_approval') && mainActive;
 
+  // Extract real-time items for the selected sub-session from main WS
+  const selectedAgentName = sessions?.find((s) => s.id === activeId)?.agent_name ?? '';
+  const subAgentRealtimeItems = useMemo(() => {
+    if (isViewingMain || !selectedAgentName) return [];
+    return mainChat.items.filter((item) => {
+      if (!isHandoffItem(item)) return false;
+      // Include streaming content and activity indicators for this agent
+      if (item.id === '__sub_agent_streaming__' && item.agentName === selectedAgentName) return true;
+      if (item.id === '__activity__' && item.agentName === selectedAgentName) return true;
+      return false;
+    });
+  }, [isViewingMain, selectedAgentName, mainChat.items]);
+
   return (
     <div className="flex flex-1 min-h-0">
       <SessionSidebar
@@ -155,7 +168,11 @@ export function TaskChatsTab({ task }: TaskChatsTabProps) {
         {isViewingMain ? (
           <MainSessionView session={mainSession} chat={mainChat} task={task} />
         ) : (
-          <SubSessionView sessionId={activeId} task={task} />
+          <SubSessionView
+            sessionId={activeId}
+            task={task}
+            realtimeItems={subAgentRealtimeItems}
+          />
         )}
 
         {/* Approval card — always visible regardless of selected session */}
@@ -212,7 +229,9 @@ function SessionSidebar({
                 </span>
               )}
               {!showAwaitingBadge && s.agent_name === activeAgentName && (
-                <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shrink-0" title="Работает" />
+                <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full shrink-0">
+                  работает
+                </span>
               )}
             </span>
           </button>
@@ -282,9 +301,11 @@ function MainSessionView({
 function SubSessionView({
   sessionId,
   task,
+  realtimeItems = [],
 }: {
   sessionId: string;
   task: Task;
+  realtimeItems?: ChatItem[];
 }) {
   const isTaskRunning = task.status === 'in_progress';
 
@@ -304,13 +325,21 @@ function SubSessionView({
   }
 
   const isActive = session?.status === 'active';
+  const hasRealtimeActivity = realtimeItems.length > 0;
+
+  // Combine DB messages with real-time streaming overlay
+  const items = useMemo(() => {
+    const dbMessages = session?.messages ?? [];
+    if (!hasRealtimeActivity) return dbMessages;
+    return [...dbMessages, ...realtimeItems];
+  }, [session?.messages, realtimeItems, hasRealtimeActivity]);
 
   return (
     <>
       <div className="flex items-center justify-between border-b px-4 py-2 bg-white">
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500">{sessionId.slice(0, 8)}...</span>
-          {isActive && isTaskRunning && (
+          {(hasRealtimeActivity || (isActive && isTaskRunning)) && (
             <span className="flex items-center gap-1.5">
               <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
               <span className="text-xs text-gray-500">Работает...</span>
@@ -319,7 +348,7 @@ function SubSessionView({
         </div>
       </div>
 
-      <ChatWindow items={session?.messages ?? []} />
+      <ChatWindow items={items} />
     </>
   );
 }
