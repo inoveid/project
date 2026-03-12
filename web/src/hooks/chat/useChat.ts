@@ -86,6 +86,7 @@ export function useChat(
   const approveHandoff = useCallback(() => {
     if (!isOpen()) return;
     setPendingApproval(null);
+    setItems((prev) => prev.filter((i) => !isHandoffItem(i) || i.itemType !== "approval_required"));
     setStatus("typing");
     send(JSON.stringify({ type: "approve" }));
   }, [send, isOpen]);
@@ -93,6 +94,7 @@ export function useChat(
   const rejectHandoff = useCallback(() => {
     if (!isOpen()) return;
     setPendingApproval(null);
+    setItems((prev) => prev.filter((i) => !isHandoffItem(i) || i.itemType !== "approval_required"));
     setStatus("connected");
     send(JSON.stringify({ type: "reject" }));
   }, [send, isOpen]);

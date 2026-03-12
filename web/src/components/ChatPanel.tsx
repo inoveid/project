@@ -4,6 +4,7 @@ import { getSession, stopSession } from "../api/sessions";
 import { useChat } from "../hooks/useChat";
 import type { ChatStatus } from "../hooks/useChat";
 import { ChatWindow } from "./ChatWindow";
+import { isHandoffItem } from "../types";
 import { ApprovalCard } from "./ApprovalCard";
 
 function StatusIndicator({ status }: { status: ChatStatus }) {
@@ -120,7 +121,18 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
     );
   }
 
-  const canSend = status === "connected";
+  // Derive approval state from items as fallback (survives reconnects)
+  const approvalFromItems = !pendingApproval
+    ? (() => {
+        const last = items.filter((i) => isHandoffItem(i) && i.itemType === "approval_required").pop();
+        if (last && isHandoffItem(last) && last.fromAgent && last.toAgent) {
+          return { fromAgent: last.fromAgent, toAgent: last.toAgent, task: last.content };
+        }
+        return null;
+      })()
+    : null;
+  const effectiveApproval = pendingApproval || approvalFromItems;
+  const canSend = status === "connected" && !effectiveApproval;
 
   return (
     <div className="flex h-full flex-col border-l first:border-l-0">
@@ -158,9 +170,9 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
 
       <ChatWindow items={items} />
 
-      {pendingApproval ? (
+      {effectiveApproval ? (
         <ApprovalCard
-          approval={pendingApproval}
+          approval={effectiveApproval}
           onApprove={approveHandoff}
           onReject={rejectHandoff}
         />
