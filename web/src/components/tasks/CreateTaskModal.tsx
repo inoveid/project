@@ -6,13 +6,14 @@ interface CreateTaskModalProps {
   productId: string;
   teams: Array<{ id: string; name: string }>;
   defaultTeamId?: string | null;
-  onSubmit: (data: { title: string; product_id: string; team_id?: string; workflow_id?: string }) => void;
+  onSubmit: (data: { title: string; description?: string; product_id: string; team_id?: string; workflow_id?: string }) => void;
   onClose: () => void;
   isLoading: boolean;
 }
 
 export function CreateTaskModal({ productId, teams, defaultTeamId, onSubmit, onClose, isLoading }: CreateTaskModalProps) {
   const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const [teamId, setTeamId] = useState(defaultTeamId ?? '');
   const [workflowId, setWorkflowId] = useState('');
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
@@ -41,10 +42,12 @@ export function CreateTaskModal({ productId, teams, defaultTeamId, onSubmit, onC
     e.preventDefault();
     const trimmed = title.trim();
     if (!trimmed) return;
-    const payload: { title: string; product_id: string; team_id?: string; workflow_id?: string } = {
+    const payload: { title: string; description?: string; product_id: string; team_id?: string; workflow_id?: string } = {
       title: trimmed,
       product_id: productId,
     };
+    const descTrimmed = description.trim();
+    if (descTrimmed) payload.description = descTrimmed;
     if (teamId) payload.team_id = teamId;
     if (workflowId) payload.workflow_id = workflowId;
     onSubmit(payload);
@@ -74,6 +77,17 @@ export function CreateTaskModal({ productId, teams, defaultTeamId, onSubmit, onC
             placeholder="Введите название задачи"
             autoFocus
             required
+          />
+
+          <label className="block text-sm font-medium text-gray-700 mb-1 mt-3">
+            Описание
+          </label>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+            placeholder="Опишите задачу для агента (необязательно)"
+            rows={3}
           />
 
           <label className="block text-sm font-medium text-gray-700 mb-1 mt-3">
