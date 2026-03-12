@@ -70,28 +70,27 @@
 │  └───────────────┘         └──────────────────────────────┘     │
 │                                                                  │
 │  ┌───────────────┐         ┌──────────────────────────────┐     │
-│  │ ws.py         │────────→│ graph_service (~501 строк)   │     │
-│  │  WS handler   │         │  Nodes (6):                  │     │
-│  │  task status   │         │  ├─ run_agent (→runtime)     │     │
-│  │  auto-update  │         │  ├─ notify_handoff           │     │
-│  │               │         │  ├─ gate (HITL interrupt)    │     │
-│  │ notif_ws.py   │────────→│  ├─ auto_handoff             │     │
-│  │  /ws/notif.   │         │  ├─ complete_node            │     │
-│  └───────────────┘         │  └─ blocked_node             │     │
-│                            │  Routing:                    │     │
-│                            │  ├─ route_after_agent        │     │
-│                            │  └─ route_after_gate         │     │
-│                            │                              │     │
-│                            │  handoff_server (~359 строк) │     │
-│                            │  (MCP tool-based handoff)    │     │
-│                            │                              │     │
-│                            │  runtime                     │     │
+│  │ ws.py         │─Redis──→│ worker.py (Task Worker)      │     │
+│  │  WS thin proxy│  pub/sub│  EventPublisher → Redis      │     │
+│  │  ↔ Redis      │         │  subscribe_commands → graph  │     │
+│  │               │         │  try/finally cleanup         │     │
+│  │ notif_ws.py   │─Redis──→│                              │     │
+│  │  /ws/notif.   │  pub/sub│ graph_service (~501 строк)   │     │
+│  └───────────────┘         │  Nodes (6):                  │     │
+│                            │  ├─ run_agent (→runtime)     │     │
+│  ┌───────────────┐         │  ├─ notify_handoff           │     │
+│  │ Redis 7       │         │  ├─ gate (HITL interrupt)    │     │
+│  │ event_bus.py  │         │  ├─ auto_handoff             │     │
+│  │  pub/sub +    │         │  ├─ complete_node            │     │
+│  │  buffer (list)│         │  └─ blocked_node             │     │
+│  │ redis_service │         │                              │     │
+│  └───────────────┘         │  runtime (Claude Agent SDK)  │     │
 │                            │  ├─ budget                   │     │
 │                            │  ├─ circuit_breaker          │     │
 │                            │  └─ telemetry                │     │
 │                            │                              │     │
 │                            │  notification_service        │     │
-│                            │  (in-memory pub/sub broker)  │     │
+│                            │  (Redis pub/sub wrapper)     │     │
 │                            └──────────────────────────────┘     │
 │                                       │                         │
 │  ┌──────────────────┐                 │                         │
@@ -108,7 +107,7 @@
 
 ┌──────────────────────────┐    ┌─────────────────────┐
 │  MCP Server (автономный) │    │  External APIs      │
-│  mcp/server.py           │    │  ├─ Claude CLI       │
+│  mcp/server.py           │    │  ├─ Claude Agent SDK │
 │  mcp/tools/platform.py   │    │  ├─ Claude API       │
 │  HTTP → localhost:8000   │    │  │   (judge_service) │
 │  ─── stdio ──→ Claude    │    │  ├─ Voyage AI        │
@@ -124,7 +123,7 @@
 | Модуль | Строк | Ответственность |
 |--------|-------|-----------------|
 | graph_service.py | ~501 | LangGraph StateGraph: 6 nodes, 2 routing functions, MCP handoff integration, checkpoint |
-| runtime/ (пакет) | ~440 | CLI subprocess lifecycle, budget tracking, circuit breaker. 4 модуля: agent_runner, cli_builder, event_parser, process_manager |
+| runtime/ (пакет) | ~220 | Claude Agent SDK sessions (ClaudeSDKClient), budget tracking, circuit breaker. 1 модуль: agent_runner |
 | handoff_server.py | ~359 | MCP tool-based handoff: generate tools from workflow edges, handle tool calls, max_cycles enforcement, prompt rendering |
 | eval_service.py | ~312 | EvalCase/EvalRun CRUD, batch execution, comparison |
 | auth_service.py | ~209 | OAuth2 PKCE, token refresh |
@@ -141,7 +140,10 @@
 | agent_service.py | ~104 | Agent CRUD |
 | session_service.py | ~95 | Session + Message CRUD |
 | business_service.py | ~90 | Business CRUD, force delete, scalar subquery products_count |
-| notification_service.py | ~63 | In-memory pub/sub broker, broadcast to WS subscribers |
+| notification_service.py | ~15 | Convenience wrapper → event_bus.publish_notification() |
+| event_bus.py | ~130 | Redis pub/sub абстракция: publish/subscribe events, commands, notifications + event buffer (Redis list) для WS reconnection replay |
+| redis_service.py | ~30 | Redis connection pool singleton (init/close/get), используется event_bus и ws.py |
+| worker.py | ~460 | Task Worker — отдельный процесс: слушает Redis commands, запускает LangGraph граф, публикует events через EventPublisher. try/finally cleanup |
 | utils/handoff.py | ~50 | format_handoff_instructions, parse_handoff_block, build_agent_prompt |
 | system_agent_service.py | ~25 | System Agent seed (idempotent) |
 | telemetry.py | ~25 | Langfuse init wrapper |
@@ -150,8 +152,8 @@
 
 | Модуль | Endpoints | Особенности |
 |--------|-----------|-------------|
-| ws.py | 1 WS | LangGraph streaming, task status auto-update, workdir resolution |
-| notifications_ws.py | 1 WS | Notification broadcast to all subscribers |
+| ws.py | 1 WS | Thin proxy: WS ↔ Redis Event Bus. Subscribe-before-buffer replay для reconnection |
+| notifications_ws.py | 1 WS | Redis pub/sub → WS forward (subscribe_notifications) |
 | evaluations.py | 8 REST | Background task execution |
 | memory.py | 3 REST | Inline Pydantic schemas |
 | agents.py | 7 REST | /agents + /teams/{id}/agents + /agents/system + /agents/{id}/can-delete |
@@ -227,65 +229,66 @@ Change isolation: **высокая** — каждый ресурс изолир�
 
 ### 2.2 Chat flow
 
+Архитектура: **WS (thin proxy) → Redis Event Bus → Task Worker → Claude Agent SDK**.
+
+```
+┌─────────┐    WS     ┌──────────┐   Redis pub/sub   ┌──────────────┐
+│  Client  │◄────────►│  ws.py   │◄─────────────────►│  worker.py   │
+│ (browser)│          │ (proxy)  │   events/commands  │ (Task Worker)│
+└─────────┘           └──────────┘                    └──────┬───────┘
+                           │                                 │
+                           │                     ┌───────────▼──────────┐
+                      Redis buffer               │  LangGraph + SDK     │
+                      (replay on                 │  graph_service.py    │
+                       reconnect)                │  runtime (Agent SDK) │
+                                                 └──────────────────────┘
+```
+
+**Последовательность:**
 ```
 1. Client → WS connect /api/ws/sessions/{session_id}
-2. ws.py: accept → load session → load agent
-3. ws.py: resolve workdir: session.task.product.workspace_path (fallback: agent.config.workdir)
-3.5. ws.py: if session has task+workflow → generate_handoff_tools(agent_id, workflow_id)
-     → handoff_server creates MCP tools from workflow edges
-     → format_handoff_tools_prompt → append to system_prompt
-4. ws.py: runtime.start_session() (если не запущен)
-     → НЕ запускает subprocess — только сохраняет конфигурацию
-       (workdir, system_prompt, claude_session_id, allowed_tools, budget)
+2. ws.py (thin proxy): accept → validate session → notify Worker (Redis publish worker:sessions)
+3. ws.py: subscribe to Redis pub/sub session:{id}:events BEFORE reading buffer
+   → replay buffered events (Redis list) → forward live events to WS
+4. Worker (handle_session → _run_session):
+   a. Load session, agent, resolve workdir (product.workspace_path → agent.config → default)
+   b. Auto-create workspace dir + git init if needed
+   c. If task+workflow → generate_handoff_tools → append to system_prompt
+   d. runtime.start_session() → сохраняет AgentSession (SDK config, не subprocess)
+   e. Subscribe to Redis commands, listen for messages
 5. Client sends {"type": "message", "content": "..."}
-6. ws.py: add_message(db, user) → build WorkflowState → _run_graph()
+   → ws.py publishes to Redis session:{id}:commands
+   → Worker receives command
+6. Worker: add_message(db, user) → build WorkflowState → _run_graph()
 7. graph.astream() → run_agent_node:
      a. runtime.send_message():
-        → kill stale CLI process этой сессии (если есть)
-        → get OAuth token (auth_service.get_current_access_token)
-        → check budget (BudgetTracker)
-        → check circuit_breaker
-        → launch NEW Claude CLI subprocess (эфемерный — новый на каждое сообщение)
-        → write content to stdin + EOF
-        → stream JSON events from stdout (_read_stream)
-        → record budget usage (может yield budget_warning/budget_exceeded)
+        → get OAuth token (auth_service)
+        → check budget + circuit_breaker
+        → ClaudeSDKClient.connect() → query(content)
+        → stream typed Python objects (AssistantMessage, StreamEvent, ResultMessage)
+        → record budget usage
         → yield events (assistant_text, tool_use, tool_result)
-     b. websocket.send_json(event) для каждого yield
+     b. EventPublisher.send_json(event) → Redis pub/sub → ws.py → Client
         — depth > 0: события получают prefix sub_agent_
      c. save response to DB (add_message assistant)
-        — depth > 0: также сохраняет в main_session для истории
-     d. parse_handoff_from_text → check for ```handoff {...}``` JSON block
-        → handle_handoff_tool_call → HandoffResult
-     e. depth > 0: runtime.stop_session() (cleanup sub-agent)
+     d. parse_handoff_from_text → handle_handoff_tool_call → HandoffResult
+     e. depth > 0: runtime.stop_session() (disconnect SDK client)
         depth == 0: сохраняет claude_session_id для resume
-8. route_after_agent:
-     → HandoffResult.AWAITING_APPROVAL → notify_handoff_node → gate_node
-     → HandoffResult.FORWARDED → auto_handoff_node → run_agent (без HITL)
-     → HandoffResult.COMPLETED → complete_node → END (broadcast task_completed)
-     → HandoffResult.BLOCKED → blocked_node → END (broadcast max_cycles_reached)
-     → no handoff → END
-9. notify_handoff_node:
-     → websocket.send_json({"type": "approval_required", ...})
-     → broadcast_notification("approval_required", ...)
-10. gate_node: interrupt() → checkpoint state → ждёт approve/reject
-10.5. ws.py: _try_update_task_status(db, task_id, "awaiting_user") — если interrupt
-11. Client sends {"type": "approve"} или {"type": "reject"}
-11.5. ws.py: _try_update_task_status(db, task_id, "in_progress") — если approve
-12. ws.py: _run_graph(Command(resume=True/False))
-13. gate_node resumes:
-     → approved: create sub-session → generate_handoff_tools for sub-agent
-       → runtime.start_session (config only) → send "handoff_start"
-       → return state с depth+1 → run_agent_node (шаг 7)
-     → rejected: END
-14. auto_handoff_node (requires_approval=false):
-     → create sub-session immediately → run_agent (без interrupt)
-15. route_after_agent: END (или новый handoff, depth limited by recursion_limit=20)
-16. ws.py: send {"type": "done"}
+8-15. (routing, handoff, gate — без изменений, см. §4 LangGraph Workflow)
+16. Worker: publish {"type": "done"} → Redis → ws.py → Client
+17. Worker cleanup (try/finally): stop children, stop runtime, clear buffer
 ```
 
-**Файлы (11+):** ws.py, graph_service.py, handoff_server.py, runtime/ (пакет), notification_service.py, utils/handoff.py, auth_service.py, budget.py, circuit_breaker.py, session_service.py, task_service.py.
+**Ключевые отличия от старой архитектуры:**
+- ws.py — **тонкий прокси** (~91 строк), не содержит бизнес-логику
+- Graph execution в **отдельном процессе** (worker.py), WS disconnect НЕ останавливает Worker
+- Runtime использует **Claude Agent SDK** (typed Python API) вместо subprocess + stdout parsing
+- Events буферизуются в **Redis list** (500 events, 1h TTL) для reconnection replay
+- `product_workspace` пропагируется через WorkflowState для изоляции проектов
 
-Change isolation: **низкая** — изменение любого из 10+ файлов может сломать chat.
+**Файлы (14+):** ws.py (proxy), worker.py, event_bus.py, redis_service.py, graph_service.py, handoff_server.py, runtime/ (agent_runner.py), notification_service.py, utils/handoff.py, auth_service.py, budget.py, circuit_breaker.py, session_service.py, task_service.py.
+
+Change isolation: **средняя** — ws.py изолирован как прокси; worker.py содержит orchestration; graph_service и runtime — ядро.
 
 ### 2.3 Memory flow
 
@@ -347,7 +350,7 @@ Change isolation: **высокая** — polling изолирован в useProd
    → PATCH /api/tasks/{id}/status {status: "in_progress"}
    → task_service validates VALID_TRANSITIONS + REQUIRED_FOR_IN_PROGRESS
    → creates session via ws.py → connects to agent
-3. During chat: ws.py auto-updates task status:
+3. During chat: worker.py auto-updates task status:
    → interrupt (approval_required) → task.status = "awaiting_user"
    → approve → task.status = "in_progress"
    → error → task.status = "error"
@@ -364,9 +367,9 @@ done → in_progress
 error → in_progress
 ```
 
-**Файлы:** task_service.py, tasks.py (router), ws.py (auto-update), Dashboard.tsx, TaskCard.tsx, KanbanColumn.tsx, CreateTaskModal.tsx.
+**Файлы:** task_service.py, tasks.py (router), worker.py (auto-update), Dashboard.tsx, TaskCard.tsx, KanbanColumn.tsx, CreateTaskModal.tsx.
 
-Change isolation: **средняя** — task_service изолирован, но auto-update в ws.py тесно связан с chat flow.
+Change isolation: **средняя** — task_service изолирован, но auto-update в worker.py тесно связан с chat flow.
 
 ### 2.7 Canvas / Workflow flow
 
@@ -396,13 +399,12 @@ Change isolation: **высокая** — Canvas изолирован от chat f
 
 ```
 1. Client → WS connect /api/ws/notifications
-   → notifications_ws.py: subscribes to notification_broker
-   → keeps connection alive, receives broadcasts
-2. Backend events trigger broadcast:
-   → graph_service: approval_required, task_completed, max_cycles_reached
-   → ws.py: task_error
-3. notification_service.broadcast_notification(event_type, data)
-   → iterates all subscribers → send_json to each
+   → notifications_ws.py: subscribes to Redis pub/sub (subscribe_notifications)
+   → forwards events from Redis → WS
+2. Backend events trigger broadcast (through Redis):
+   → worker.py / graph_service: approval_required, task_completed, max_cycles_reached, task_error
+   → event_bus.publish_notification(event_type, data) → Redis channel "notifications"
+3. notification_service.broadcast_notification() — convenience wrapper → event_bus
 4. Frontend: useNotificationSocket receives event
    → notificationEventHandler maps to toast:
      → approval_required → warning toast (duration=0, requires action)
@@ -412,9 +414,9 @@ Change isolation: **высокая** — Canvas изолирован от chat f
 5. ToastContainer renders toasts (fixed top-right)
 ```
 
-**Файлы:** notification_service.py, notifications_ws.py, useNotificationSocket.ts, notificationEventHandler.ts, useToast.tsx, ToastContainer.tsx, NotificationLayer.tsx.
+**Файлы:** notification_service.py, event_bus.py, notifications_ws.py, useNotificationSocket.ts, notificationEventHandler.ts, useToast.tsx, ToastContainer.tsx, NotificationLayer.tsx.
 
-Change isolation: **высокая** — notification система изолирована, fire-and-forget broadcast.
+Change isolation: **высокая** — notification система изолирована, fire-and-forget через Redis pub/sub.
 
 ### 2.9 GlobalChatWidget flow
 
@@ -456,7 +458,7 @@ Endpoint: `WS /api/ws/sessions/{session_id}`
 | `approve` | HITL: одобрить handoff | `{ type: "approve" }` |
 | `reject` | HITL: отклонить handoff | `{ type: "reject" }` |
 
-Типы определены: `web/src/types/index.ts` (`WsOutgoing`), обработка: `api/app/routers/ws.py` (`_handle_messages`).
+Типы определены: `web/src/types/index.ts` (`WsOutgoing`), обработка: ws.py публикует в Redis → `api/app/worker.py` обрабатывает.
 
 ### 3.2 Входящие от сервера (WsIncoming)
 
@@ -499,7 +501,9 @@ Endpoint: `WS /api/ws/sessions/{session_id}`
 
 Типы определены: `web/src/types/index.ts` (`WsIncoming`), обработка: `web/src/hooks/chat/chatEventHandler.ts` (`handleEvent`).
 
-### 3.3 State machine (ws.py)
+### 3.3 State machine (worker.py)
+
+State machine переместилась из ws.py в worker.py (_run_session). ws.py — тонкий прокси.
 
 ```
                     ┌──────────────────────────────────┐
@@ -508,13 +512,14 @@ Endpoint: `WS /api/ws/sessions/{session_id}`
                     └──────┬──────────┬────────────────┘
                            │          │
                   "message" │          │ "stop"
+                  (Redis)   │          │ (Redis)
                            ▼          ▼
-              save to DB          kill process
-              build WorkflowState  send "done"
-              _run_graph(state)    break (close WS)
+              save to DB          stop runtime
+              build WorkflowState  publish "done"
+              _run_graph(state)    break (end session)
                      │
                      ├─ graph завершён (return false)
-                     │  → send "done"
+                     │  → publish "done" → Redis → ws.py → Client
                      │  → остаёмся в interrupted=false
                      │
                      └─ graph interrupted (return true)
@@ -526,37 +531,29 @@ Endpoint: `WS /api/ws/sessions/{session_id}`
                     └──────┬──────────┬───────┬────────┘
                            │          │       │
                  "approve"  │ "reject" │       │ "message"
+                 (Redis)    │ (Redis)  │       │ (Redis)
                            ▼          ▼       ▼
-              _run_graph(       _run_graph(    send error:
+              _run_graph(       _run_graph(    publish error:
                Command(          Command(      "waiting for
                resume=True))     resume=False)) approval"
-                     │                │
-                     ├─ return false  ├─ return false
-                     │  → send "done" │  → send "done"
-                     │  → interrupted │  → interrupted
-                     │    = false     │    = false
-                     │                │
-                     └─ return true   └─ (теоретически
-                        → остаёмся       возможно, но
-                        interrupted      маловероятно)
-                        = true
 ```
 
 **Ключевые точки:**
-- `interrupted` — единственный boolean флаг, управляющий состоянием WS-соединения
-- Паузируется через `interrupt()` в `gate_node` (LangGraph checkpoint)
-- Возобновляется через `Command(resume=True/False)` от LangGraph
-- `_run_graph()` возвращает `True` если граф паузирован, `False` если завершён
+- `interrupted` — единственный boolean флаг, управляющий состоянием сессии в Worker
+- Команды приходят через Redis (subscribe_commands), не напрямую через WS
+- WS disconnect НЕ влияет на Worker — граф продолжает работать
+- Events публикуются через EventPublisher → Redis → ws.py → Client
+- Cleanup (try/finally): stop children → stop runtime → clear buffer
 
-### 3.4 Reconnection strategy (frontend)
+### 3.4 Reconnection strategy (frontend + backend)
 
 Реализована в `web/src/hooks/chat/useChatSocket.ts` (константы в `chatState.ts`):
 
 | Параметр | Значение |
 |----------|----------|
-| `RECONNECT_DELAY_MS` | 2000 мс (фиксированная задержка) |
-| `MAX_RECONNECT_ATTEMPTS` | 5 попыток |
-| Стратегия | Фиксированная задержка (не exponential backoff) |
+| `RECONNECT_BASE_DELAY_MS` | 1000 мс (начальная задержка) |
+| `MAX_RECONNECT_ATTEMPTS` | 20 попыток |
+| Стратегия | Exponential backoff: `base × 2^(attempt-1)`, cap 30s |
 | Сброс счётчика | При успешном `onopen` (`reconnectCount = 0`) |
 | Отмена reconnect | При вызове `stopAgent()` или cleanup effect |
 
@@ -564,8 +561,14 @@ Endpoint: `WS /api/ws/sessions/{session_id}`
 1. `ws.onclose` → статус `disconnected`
 2. Сброс streaming-состояния (pendingText, pendingTools, pendingSubAgent)
 3. Удаление `__streaming__` и `__sub_agent_streaming__` элементов из items
-4. Если `reconnectCount < MAX_RECONNECT_ATTEMPTS` → setTimeout → повторное подключение
-5. После 5 неудачных попыток — остаёмся в `disconnected`
+4. Если `reconnectCount < MAX_RECONNECT_ATTEMPTS` → setTimeout с exponential backoff → повторное подключение
+5. После 20 неудачных попыток — остаёмся в `disconnected`
+
+**Backend resilience (event buffer):**
+- Worker продолжает работу при WS disconnect (публикует events в Redis)
+- Events буферизуются в Redis list: `session:{id}:buffer` (max 500 events, TTL 1h)
+- При reconnect ws.py: subscribe to pub/sub FIRST → replay buffer → forward live events
+- Race condition решён: подписка на pub/sub ДО чтения буфера (нет зазора для потери событий)
 
 ---
 
@@ -596,19 +599,19 @@ START → run_agent ──→ [route_after_agent] ──→ END
               run_agent (цикл)
 ```
 
-Файл: `api/app/services/graph_service.py` (~501 строк). Компилируется в `main.py` lifespan → `build_graph(checkpointer)`.
+Файл: `api/app/services/graph_service.py` (~501 строк). Компилируется в `main.py` lifespan и `worker.py` run_worker() → `build_graph(checkpointer)`.
 
 **Лимиты:**
 - `MAX_DEPTH = 5` (graph_service.py) — макс. глубина sub-agent handoff
 - `max_cycles` (per agent, per task) — из WorkflowEdge/Agent model, проверяется handoff_server
-- `recursion_limit = 20` (ws.py) — LangGraph recursion limit в graph_config
+- `recursion_limit = 20` (worker.py) — LangGraph recursion limit в graph_config
 
 ### 4.2 Nodes
 
 | Node | Функция | Что делает |
 |------|---------|------------|
-| `run_agent` | `run_agent_node()` | Стримит события из `runtime.send_message()` в WebSocket. Сохраняет ответ в DB. Парсит `\`\`\`handoff {...}\`\`\`` JSON-блок через `parse_handoff_from_text()` → `handle_handoff_tool_call()` → `HandoffResult`. Для sub-агентов (depth>0): добавляет prefix `sub_agent_` к событиям, останавливает runtime после завершения. |
-| `notify_handoff` | `notify_handoff_node()` | Отправляет `approval_required` в WebSocket + `broadcast_notification()`. Выполняется один раз — при resume графа не повторяется. |
+| `run_agent` | `run_agent_node()` | Стримит события из `runtime.send_message()` через EventPublisher (→ Redis → WS). Сохраняет ответ в DB. Парсит `\`\`\`handoff {...}\`\`\`` JSON-блок через `parse_handoff_from_text()` → `handle_handoff_tool_call()` → `HandoffResult`. Для sub-агентов (depth>0): добавляет prefix `sub_agent_` к событиям, останавливает runtime после завершения. |
+| `notify_handoff` | `notify_handoff_node()` | Отправляет `approval_required` через EventPublisher + `broadcast_notification()` (Redis). Выполняется один раз — при resume графа не повторяется. |
 | `gate` | `gate_node()` | Вызывает `interrupt()` — граф паузируется, state сохраняется в checkpoint. При resume с `Command(resume=True)`: создаёт sub-сессию, генерирует handoff tools для sub-agent, запускает runtime, отправляет `handoff_start`. При `Command(resume=False)`: отменяет handoff. |
 | `auto_handoff` | `auto_handoff_node()` | Автоматический handoff (requires_approval=false). Создаёт sub-сессию и сразу переходит к run_agent без interrupt. |
 | `complete` | `complete_node()` | Агент вызвал `complete_task` tool. Broadcast `task_completed` notification. → END. |
@@ -630,32 +633,33 @@ START → run_agent ──→ [route_after_agent] ──→ END
 
 | Поле | Тип | Кто пишет | Кто читает | Описание |
 |------|-----|-----------|------------|----------|
-| `main_session_id` | str | ws.py (init) | run_agent, gate, auto_handoff | WebSocket-сессия (неизменна) |
-| `current_session_id` | str | ws.py (init), gate, auto_handoff | run_agent | Claude CLI сессия текущего агента |
-| `current_agent_id` | str | ws.py (init), gate, auto_handoff | gate | UUID текущего агента |
-| `current_agent_name` | str | ws.py (init), gate, auto_handoff | run_agent, notify_handoff | Имя агента для UI |
-| `workflow_id` | str\|None | ws.py (init) | run_agent, gate, auto_handoff | ID текущего workflow |
-| `task_id` | str\|None | ws.py (init) | run_agent, gate, auto_handoff | ID текущей задачи (для max_cycles) |
-| `task` | str | ws.py (init), gate, auto_handoff | run_agent | Текст задачи/сообщения |
-| `depth` | int | ws.py (init=0), gate/auto_handoff (+1) | run_agent, route_after_agent | 0=main, >0=sub-agent |
-| `chain` | list | ws.py (init=[]), gate, auto_handoff | gate | Пары `[[from, to], ...]` для детекции циклов |
+| `main_session_id` | str | worker.py (init) | run_agent, gate, auto_handoff | WebSocket-сессия (неизменна) |
+| `current_session_id` | str | worker.py (init), gate, auto_handoff | run_agent | Claude SDK сессия текущего агента |
+| `current_agent_id` | str | worker.py (init), gate, auto_handoff | gate | UUID текущего агента |
+| `current_agent_name` | str | worker.py (init), gate, auto_handoff | run_agent, notify_handoff | Имя агента для UI |
+| `workflow_id` | str\|None | worker.py (init) | run_agent, gate, auto_handoff | ID текущего workflow |
+| `task_id` | str\|None | worker.py (init) | run_agent, gate, auto_handoff | ID текущей задачи (для max_cycles) |
+| `task` | str | worker.py (init), gate, auto_handoff | run_agent | Текст задачи/сообщения |
+| `depth` | int | worker.py (init=0), gate/auto_handoff (+1) | run_agent, route_after_agent | 0=main, >0=sub-agent |
+| `chain` | list | worker.py (init=[]), gate, auto_handoff | gate | Пары `[[from, to], ...]` для детекции циклов |
 | `handoff_result` | HandoffResult\|None | run_agent | route_after_agent, notify_handoff, gate, auto_handoff | Результат MCP handoff tool call |
 | `gateway_approved` | bool\|None | run_agent (None), gate | route_after_gate | Решение HITL gate |
-| `messages` | list | ws.py (init=[]), run_agent | — | Накопленные `{agent, text, tools}` |
+| `product_workspace` | str\|None | worker.py (init) | gate, auto_handoff | cwd для SDK — пропагируется через все handoffs |
+| `messages` | list | worker.py (init=[]), run_agent | — | Накопленные `{agent, text, tools}` |
 
 ### 4.5 Checkpoint Persistence
 
 - **Backend:** `AsyncPostgresSaver` (LangGraph) — таблицы `langgraph_checkpoints`, `langgraph_writes`
-- **Инициализация:** `main.py` lifespan → `checkpointer.setup()` → `build_graph(checkpointer)` → `_compiled_graph`
-- **Thread ID:** `session_id` — каждая WS-сессия имеет изолированную историю checkpoints
+- **Инициализация:** `main.py` lifespan + `worker.py` run_worker() → `checkpointer.setup()` → `build_graph(checkpointer)` → `_compiled_graph`
+- **Thread ID:** `session_id` — каждая сессия имеет изолированную историю checkpoints
 - **Когда сохраняется:** после каждого node (автоматически LangGraph)
 - **interrupt():** сохраняет state в checkpoint, паузирует граф. Resume через `Command(resume=value)`
-- **Детекция interrupt:** `_run_graph()` (ws.py:191) проверяет `"__interrupt__" in chunk` при `stream_mode="values"`
-- **Non-serializable configurable:** `websocket`, `db` и `task_id` передаются через `config["configurable"]` и НЕ персистируются в checkpoint — нужно передавать при каждом `astream()`
-- **DB session:** одна `AsyncSession` (из `Depends(get_db)`) живёт весь WS connection и используется всеми nodes. `expire_on_commit=False` (database.py:6) предотвращает инвалидацию ORM-объектов после commit внутри nodes
-- **"stop" non-preemptive:** цикл `_handle_messages` блокируется на `_run_graph()` — команда "stop" обрабатывается только после завершения текущего graph execution
-- **Disconnect cleanup:** при `WebSocketDisconnect` ws.py сначала закрывает orphaned child sessions в DB (`stop_session(db, child_id)` для каждого `runtime.get_children()`), затем вызывает `runtime.stop_session(session_id)`
-- **Singleton:** `_compiled_graph` — module-level, устанавливается в lifespan, доступ через `get_graph()`
+- **Детекция interrupt:** `_run_graph()` (worker.py) проверяет `"__interrupt__" in chunk` при `stream_mode="values"`
+- **Non-serializable configurable:** `websocket` (EventPublisher), `db` и `task_id` передаются через `config["configurable"]` и НЕ персистируются в checkpoint — нужно передавать при каждом `astream()`
+- **DB session:** одна `AsyncSession` (из `async_session()`) живёт весь Worker session handler и используется всеми nodes. `expire_on_commit=False` (database.py:6) предотвращает инвалидацию ORM-объектов после commit внутри nodes
+- **"stop" non-preemptive:** цикл `subscribe_commands` в worker.py блокируется на `_run_graph()` — команда "stop" обрабатывается только после завершения текущего graph execution
+- **Disconnect resilience:** WS disconnect НЕ останавливает Worker. Cleanup (try/finally): stop child sessions → stop runtime → clear Redis buffer
+- **Singleton:** `_compiled_graph` — module-level, устанавливается в lifespan (API) и run_worker (Worker), доступ через `get_graph()`
 
 ---
 
@@ -665,24 +669,35 @@ START → run_agent ──→ [route_after_agent] ──→ END
 
 ```
 main.py (lifespan)
+  ├─→ redis_service.init_redis()       — Redis connection pool
   ├─→ graph_service.build_graph(checkpointer)
   ├─→ graph_service._compiled_graph (singleton)
-  └─→ system_agent_service.seed_system_agent() (idempotent)
+  ├─→ system_agent_service.seed_system_agent() (idempotent)
+  └─→ redis_service.close_redis()      — cleanup
 
-ws.py (WebSocket handler)
-  ├─→ graph_service.get_graph()        — скомпилированный граф
-  ├─→ runtime.start_session()          — запуск CLI config
-  ├─→ runtime.is_running()             — проверка перед start
-  ├─→ runtime.get_children()           — orphaned children при disconnect
-  ├─→ runtime.stop_session()           — cleanup
-  ├─→ session_service                  — CRUD сессий
-  ├─→ task_service                     — auto-update task status (awaiting_user, in_progress, error)
+worker.py (Task Worker — отдельный процесс)
+  ├─→ redis_service.init_redis()       — собственный Redis pool
+  ├─→ graph_service.build_graph()      — собственный _compiled_graph
+  ├─→ event_bus.subscribe_commands()   — входящие команды
+  ├─→ event_bus.publish_event()        — через EventPublisher
+  ├─→ event_bus.clear_buffer()         — cleanup
+  ├─→ runtime.start_session()          — запуск SDK config
+  ├─→ runtime.stop_session()           — cleanup (disconnect SDK client)
+  ├─→ runtime.get_children()           — cleanup child sessions
+  ├─→ session_service                  — CRUD сессий, add_message
+  ├─→ task_service                     — auto-update task status
   ├─→ handoff_server                   — generate_handoff_tools, format_handoff_tools_prompt
-  ├─→ notification_service             — broadcast task_error
-  └─→ utils/handoff                     — format_handoff_instructions (legacy, System Agent)
+  └─→ notification_service             — broadcast task_error (через event_bus)
+
+ws.py (WS thin proxy)
+  ├─→ redis_service.get_redis()        — pub/sub подписка
+  ├─→ event_bus.get_buffered_events()  — replay при reconnect
+  ├─→ event_bus.publish_command()      — forward команд в Worker
+  ├─→ session_service                  — валидация session exists
+  └─→ (NO graph_service, NO runtime)   — только прокси
 
 graph_service
-  ├─→ runtime.send_message()           — CLI subprocess
+  ├─→ runtime.send_message()           — Claude Agent SDK
   ├─→ runtime.start_session()          — sub-agent config
   ├─→ runtime.stop_session()           — sub-agent cleanup
   ├─→ handoff_server                   — parse_handoff_from_text, handle_handoff_tool_call, generate_handoff_tools
@@ -690,19 +705,23 @@ graph_service
   ├─→ session_service                  — create/get/stop session, add_message
   └─→ agent_link_service               — get_agent_handoff_targets (legacy fallback)
 
-handoff_server
-  ├─→ workflow_edge_service            — ⚠ implicit via DB queries on WorkflowEdge
-  ├─→ session_service                  — count_agent_visits (via Session queries)
-  └─→ (DB models: Agent, WorkflowEdge, Task, Session)
+event_bus
+  └─→ redis_service.get_redis()        — все операции через Redis
 
-notification_service (NotificationBroker)
-  └─→ (нет зависимостей — in-memory pub/sub, subscribers=WebSocket connections)
+notification_service
+  └─→ event_bus.publish_notification() — Redis pub/sub (не in-memory)
 
-runtime (AgentRuntime)
+runtime (AgentRuntime — Claude Agent SDK)
+  ├─→ claude_agent_sdk (ClaudeSDKClient) — typed Python API
   ├─→ budget (BudgetTracker)           — встроен в __init__
   ├─→ circuit_breaker (CircuitBreaker) — встроен в __init__
   ├─→ auth_service                     — ⚠ lazy import в send_message()
   └─→ telemetry                        — ⚠ lazy import в send_message()
+
+handoff_server
+  ├─→ workflow_edge_service            — ⚠ implicit via DB queries on WorkflowEdge
+  ├─→ session_service                  — count_agent_visits (via Session queries)
+  └─→ (DB models: Agent, WorkflowEdge, Task, Session)
 
 workflow_service
   └─→ (DB models: Workflow, Agent, Team, Task)
@@ -740,16 +759,16 @@ Lazy imports в runtime нужны для избежания циклическ�
 
 | Singleton | Файл | Mutable | Инициализация |
 |-----------|------|---------|---------------|
-| `runtime` | runtime/agent_runner.py | Да (_processes, _budget, _breaker) | При импорте модуля |
-| `_compiled_graph` | graph_service.py | Да | В main.py lifespan |
-| `notification_broker` | notification_service.py | Да (_subscribers set) | При импорте модуля |
+| `runtime` | runtime/agent_runner.py | Да (_sessions, _budget, _breaker) | При импорте модуля |
+| `_compiled_graph` | graph_service.py | Да | В main.py lifespan + worker.py run_worker() |
+| `_redis` | redis_service.py | Да | В main.py lifespan + worker.py run_worker() |
 | `_langfuse` | telemetry.py | Да | При импорте модуля (если `LANGFUSE_SECRET_KEY` установлен) |
 | `_code_verifier` | auth_service.py | Да | При вызове login |
 | `_oauth_state` | auth_service.py | Да | При вызове login |
 | `settings` | config.py | Нет | При импорте |
 | `engine` | database.py | Нет | При импорте |
 
-6 из 8 singletons имеют mutable state. `runtime`, `_compiled_graph` и `notification_broker` — ключевые для работы приложения.
+6 из 8 singletons имеют mutable state. `runtime`, `_compiled_graph` и `_redis` — ключевые для работы приложения. `notification_broker` удалён (заменён на Redis pub/sub через event_bus).
 
 ---
 
@@ -764,9 +783,9 @@ Lazy imports в runtime нужны для избежания циклическ�
 **6 файлов:**
 
 1. **Backend — генерация события:**
-   - `api/app/services/graph_service.py` или `api/app/routers/ws.py` — добавить `await ws.send_json({"type": "new_event", ...})`
+   - `api/app/services/graph_service.py` или `api/app/worker.py` — добавить `await ws.send_json({"type": "new_event", ...})`
    - Если событие из node — в соответствующем node в graph_service
-   - Если событие из WS handler — в ws.py
+   - Если событие из Worker — в worker.py (через EventPublisher → Redis → ws.py → Client)
 
 2. **Backend — sub-agent prefix (если нужен):**
    - `api/app/services/graph_service.py` `run_agent_node()` — добавить prefix `sub_agent_` для depth>0
@@ -792,7 +811,7 @@ Lazy imports в runtime нужны для избежания циклическ�
    ```python
    async def new_node(state: WorkflowState, config: RunnableConfig) -> dict:
        # Получить websocket/db из config["configurable"]
-       ws: WebSocket = config["configurable"]["websocket"]
+       ws = config["configurable"]["websocket"]  # EventPublisher or WebSocket
        db: AsyncSession = config["configurable"]["db"]
        # ... логика ...
        return {"field": new_value}  # partial update WorkflowState
@@ -815,7 +834,7 @@ Lazy imports в runtime нужны для избежания циклическ�
 
 4. **Тест** — `api/tests/test_graph_service.py`
 
-**Если node использует `interrupt()`** — дополнительно обновить `_handle_messages` в `api/app/routers/ws.py` для обработки нового типа resume.
+**Если node использует `interrupt()`** — дополнительно обновить command handling в `api/app/worker.py` для обработки нового типа resume.
 
 **Если node генерирует новые WS-события** — дополнительно см. секцию 6.2.
 
