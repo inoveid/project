@@ -13,6 +13,7 @@ export function EdgePanel({ edge, toAgentPrompts, onSave, onDelete, readOnly }: 
   const [condition, setCondition] = useState(edge.condition ?? "");
   const [promptTemplate, setPromptTemplate] = useState(edge.prompt_template ?? "");
   const [requiresApproval, setRequiresApproval] = useState(edge.requires_approval);
+  const [maxRounds, setMaxRounds] = useState(edge.max_rounds ?? 3);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const disabledClass = readOnly ? "opacity-60 pointer-events-none" : "";
@@ -89,6 +90,28 @@ export function EdgePanel({ edge, toAgentPrompts, onSave, onDelete, readOnly }: 
           disabled={readOnly}
         />
         <span className="text-sm text-gray-700">Requires approval</span>
+      </label>
+
+
+      <label className={`flex flex-col gap-1 ${disabledClass}`}>
+        <span className="text-xs font-medium text-gray-600">Max rounds</span>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={1}
+            max={50}
+            className="border border-gray-200 rounded px-2 py-1.5 text-sm w-20"
+            value={maxRounds}
+            onChange={(e) => setMaxRounds(Number(e.target.value))}
+            onBlur={() => {
+              const val = Math.max(1, Math.min(50, maxRounds));
+              setMaxRounds(val);
+              if (val !== edge.max_rounds) onSave({ max_rounds: val });
+            }}
+            disabled={readOnly}
+          />
+          <span className="text-xs text-gray-400">How many times this edge can be traversed</span>
+        </div>
       </label>
 
       {!readOnly && (
