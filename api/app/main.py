@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
@@ -10,6 +10,7 @@ from app.database import async_session
 from app.routers import agents, auth, businesses, evaluations, memory, notifications_ws, products, sessions, specs, tasks, teams, workflow_edges, workflows, ws
 import app.services.graph_service as graph_svc
 from app.services.system_agent_service import seed_system_agent
+from app.services.auth_user_service import get_current_user
 
 
 @asynccontextmanager
@@ -43,17 +44,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Auth — public (no JWT required)
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
-app.include_router(teams.router, prefix="/api/teams", tags=["teams"])
-app.include_router(agents.router, prefix="/api", tags=["agents"])
-app.include_router(workflows.router, prefix="/api", tags=["workflows"])
-app.include_router(workflow_edges.router, prefix="/api", tags=["workflow_edges"])
-app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
-app.include_router(businesses.router, prefix="/api", tags=["businesses"])
-app.include_router(products.router, prefix="/api", tags=["products"])
+
+# Protected routes — require JWT
+_auth = [Depends(get_current_user)]
+
+app.include_router(teams.router, prefix="/api/teams", tags=["teams"], dependencies=_auth)
+app.include_router(agents.router, prefix="/api", tags=["agents"], dependencies=_auth)
+app.include_router(workflows.router, prefix="/api", tags=["workflows"], dependencies=_auth)
+app.include_router(workflow_edges.router, prefix="/api", tags=["workflow_edges"], dependencies=_auth)
+app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"], dependencies=_auth)
+app.include_router(businesses.router, prefix="/api", tags=["businesses"], dependencies=_auth)
+app.include_router(products.router, prefix="/api", tags=["products"], dependencies=_auth)
+app.include_router(memory.router, prefix="/api", tags=["memory"], dependencies=_auth)
+app.include_router(tasks.router, prefix="/api", tags=["tasks"], dependencies=_auth)
+app.include_router(evaluations.router, prefix="/api", tags=["evaluations"], dependencies=_auth)
+app.include_router(specs.router, prefix="/api", tags=["specs"], dependencies=_auth)
+
+# WebSocket — без JWT (используют session-based auth при необходимости)
 app.include_router(ws.router, prefix="/api/ws", tags=["websocket"])
 app.include_router(notifications_ws.router, prefix="/api/ws", tags=["notifications"])
-app.include_router(memory.router, prefix="/api", tags=["memory"])
-app.include_router(tasks.router, prefix="/api", tags=["tasks"])
-app.include_router(evaluations.router, prefix="/api", tags=["evaluations"])
-app.include_router(specs.router, prefix="/api", tags=["specs"])
