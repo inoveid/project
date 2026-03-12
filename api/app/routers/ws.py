@@ -5,7 +5,6 @@ WS resilience:
 - WS disconnect does NOT stop the Worker — graph keeps running
 - On reconnect, missed events are replayed from Redis buffer
 - Only explicit "stop" command stops the Worker
-- Client sends last_event_index on reconnect to get missed events
 """
 from __future__ import annotations
 
@@ -20,7 +19,6 @@ from starlette.websockets import WebSocketState
 
 from app.database import get_db
 from app.services.event_bus import (
-    get_buffer_length,
     get_buffered_events,
     publish_command,
     subscribe_events,
@@ -63,38 +61,52 @@ async def websocket_session(
 
     sid = str(session_id)
 
-    # Tell Worker to start handling this session (idempotent — Worker ignores if already active)
+    # Tell Worker to start handling this session (idempotent)
     await _notify_worker_start(sid)
-
-    # Replay buffered events the client may have missed during disconnection.
-    # Client can pass last_event_index as query param (default 0 = full replay).
-    # We get the current buffer length BEFORE subscribing to avoid duplicates.
-    buffer_len = await get_buffer_length(sid)
 
     # Two concurrent tasks:
     # 1. Forward Redis events → WebSocket (to client)
     # 2. Forward WebSocket messages → Redis commands (to Worker)
 
     async def forward_events_to_ws():
-        """Replay buffered events, then subscribe to live events."""
-        try:
-            # Phase 1: Replay missed events from buffer
-            if buffer_len > 0:
-                missed_events = await get_buffered_events(sid)
-                for event in missed_events:
-                    if websocket.client_state != WebSocketState.CONNECTED:
-                        return
-                    try:
-                        await websocket.send_json(event)
-                    except Exception:
-                        return
-                logger.info("Replayed %d buffered events for session %s", len(missed_events), sid)
+        """
+        Subscribe to live events FIRST, then replay buffer.
+        
+        This avoids the race condition where events published between
+        buffer read and subscribe would be lost.
+        
+        Flow:
+        1. Subscribe to pub/sub channel (captures all new events from this moment)
+        2. Read buffer snapshot (events before subscription)
+        3. Send buffer events to client (replay)
+        4. Forward live events from subscription
+        """
+        r = get_redis()
+        pubsub = r.pubsub()
+        channel = f"session:{sid}:events"
+        await pubsub.subscribe(channel)
 
-            # Phase 2: Subscribe to live events (new events from Worker)
-            async for event in subscribe_events(sid):
+        try:
+            # Replay buffered events while subscribed (no gap possible)
+            buffered = await get_buffered_events(sid)
+            for event in buffered:
+                if websocket.client_state != WebSocketState.CONNECTED:
+                    return
+                try:
+                    await websocket.send_json(event)
+                except Exception:
+                    return
+            if buffered:
+                logger.info("Replayed %d buffered events for session %s", len(buffered), sid)
+
+            # Now forward live events
+            async for raw_message in pubsub.listen():
+                if raw_message["type"] != "message":
+                    continue
                 if websocket.client_state != WebSocketState.CONNECTED:
                     break
                 try:
+                    event = json.loads(raw_message["data"])
                     await websocket.send_json(event)
                 except Exception:
                     break
@@ -102,6 +114,9 @@ async def websocket_session(
             pass
         except Exception as exc:
             logger.error("Event forwarding error for %s: %s", sid, exc)
+        finally:
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
 
     async def forward_ws_to_commands():
         """Receive WebSocket messages and publish as Redis commands."""
@@ -114,10 +129,8 @@ async def websocket_session(
                     await websocket.send_json({"type": "error", "error": "Invalid JSON"})
                     continue
 
-                # Forward command to Worker via Redis
                 await publish_command(sid, data)
 
-                # If stop — we're done (this is the ONLY way to stop the Worker)
                 if data.get("type") == "stop":
                     break
         except WebSocketDisconnect:
@@ -142,6 +155,4 @@ async def websocket_session(
             except asyncio.CancelledError:
                 pass
     finally:
-        # NOTE: NO _notify_worker_stop here — Worker keeps running!
-        # Worker only stops on explicit "stop" command from client.
         pass
