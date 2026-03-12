@@ -97,6 +97,21 @@ export function useChat(
     send(JSON.stringify({ type: "reject" }));
   }, [send, isOpen]);
 
+  // Auto-send first pending message when WebSocket connects
+  // (e.g. starting_prompt created by task start)
+  const autoSentRef = useRef(false);
+  useEffect(() => {
+    if (status !== "connected" || autoSentRef.current) return;
+    const msgs = initialMessagesRef.current;
+    if (msgs.length === 0) return;
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg.role === "user") {
+      autoSentRef.current = true;
+      send(JSON.stringify({ type: "message", content: lastMsg.content }));
+      setStatus("typing");
+    }
+  }, [status, send]);
+
   const messages = items.filter((i): i is Message => !isHandoffItem(i));
 
   return { items, messages, status, error, pendingApproval, sendMessage, stopAgent, approveHandoff, rejectHandoff };
