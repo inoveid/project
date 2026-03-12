@@ -7,7 +7,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "008_add_agent_can_complete_task"
-down_revision = "007_replace_agent_links_with_workflows"
+down_revision = "007"
 branch_labels = None
 depends_on = None
 
