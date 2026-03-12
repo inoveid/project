@@ -11,6 +11,7 @@ interface KanbanColumnProps {
   tasks: Task[];
   onTaskClick: (task: Task) => void;
   onStartTask?: (taskId: string) => void;
+  onDeleteTask?: (taskId: string) => void;
   showAddButton?: boolean;
   onAddClick?: () => void;
 }
@@ -21,6 +22,7 @@ export function KanbanColumn({
   tasks,
   onTaskClick,
   onStartTask,
+  onDeleteTask,
   showAddButton,
   onAddClick,
 }: KanbanColumnProps) {
@@ -68,6 +70,7 @@ export function KanbanColumn({
             task={task}
             onClick={() => onTaskClick(task)}
             onStart={status === 'backlog' ? onStartTask : undefined}
+            onDelete={onDeleteTask}
           />
         ))}
 

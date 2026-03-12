@@ -3,12 +3,13 @@ import { useTeams } from '../../hooks/useTeams';
 import { useAuthStatus } from '../../hooks/useAuth';
 import { getWorkflows } from '../../api/workflows';
 import type { Workflow } from '../../types';
-import { useUpdateTask, useUpdateTaskStatus } from '../../hooks/useTasks';
+import { useUpdateTask, useUpdateTaskStatus, useDeleteTask } from '../../hooks/useTasks';
 import { getStatusConfig, isTaskValid } from './statusConfig';
 import type { Task, TaskUpdate } from '../../types';
 
 interface TaskDetailsTabProps {
   task: Task;
+  onDelete?: () => void;
 }
 
 const REQUIRED_FIELDS: ReadonlyArray<keyof Task> = ['description', 'team_id', 'workflow_id'];
@@ -21,7 +22,7 @@ function getMissingFields(task: Task): Set<string> {
   return missing;
 }
 
-export function TaskDetailsTab({ task }: TaskDetailsTabProps) {
+export function TaskDetailsTab({ task, onDelete }: TaskDetailsTabProps) {
   const { data: teams } = useTeams();
   const updateTask = useUpdateTask();
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
@@ -34,6 +35,8 @@ export function TaskDetailsTab({ task }: TaskDetailsTabProps) {
     getWorkflows(task.team_id).then(setWorkflows);
   }, [task.team_id]);
   const updateStatus = useUpdateTaskStatus();
+  const deleteMutation = useDeleteTask();
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? '');
@@ -155,6 +158,43 @@ export function TaskDetailsTab({ task }: TaskDetailsTabProps) {
         <span className={`inline-block text-xs px-2 py-0.5 rounded-full ${statusCfg.colorClasses}`}>
           {statusCfg.label}
         </span>
+      </div>
+
+      {/* Delete */}
+      <div className="pt-4 border-t border-gray-100">
+        {!showDeleteConfirm ? (
+          <button
+            type="button"
+            onClick={() => setShowDeleteConfirm(true)}
+            className="text-sm text-red-500 hover:text-red-700"
+          >
+            Удалить задачу
+          </button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-red-600">Удалить?</span>
+            <button
+              type="button"
+              className="text-sm bg-red-600 text-white rounded px-3 py-1 hover:bg-red-700"
+              disabled={deleteMutation.isPending}
+              onClick={() => {
+                deleteMutation.mutate(
+                  { id: task.id, productId: task.product_id ?? '' },
+                  { onSuccess: () => onDelete?.() },
+                );
+              }}
+            >
+              {deleteMutation.isPending ? 'Удаление...' : 'Да, удалить'}
+            </button>
+            <button
+              type="button"
+              className="text-sm text-gray-500 hover:text-gray-700"
+              onClick={() => setShowDeleteConfirm(false)}
+            >
+              Отмена
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Action buttons */}

@@ -3,7 +3,7 @@ import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, PointerSensor, u
 import { useBusinesses } from '../hooks/useBusinesses';
 import { useProducts } from '../hooks/useProducts';
 import { useTeams } from '../hooks/useTeams';
-import { useTasks, useCreateTask, useUpdateTaskStatus } from '../hooks/useTasks';
+import { useTasks, useCreateTask, useUpdateTaskStatus, useDeleteTask } from '../hooks/useTasks';
 import { KanbanColumn } from '../components/tasks/KanbanColumn';
 import { TaskCard } from '../components/tasks/TaskCard';
 import { CreateTaskModal } from '../components/tasks/CreateTaskModal';
@@ -73,6 +73,7 @@ export function Dashboard() {
   const { data: tasks, isLoading: tasksLoading } = useTasks(filters.productId);
   const createTask = useCreateTask();
   const updateTaskStatus = useUpdateTaskStatus();
+  const deleteTaskMutation = useDeleteTask();
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -136,6 +137,11 @@ export function Dashboard() {
     );
   }
 
+  function handleDeleteTask(taskId: string) {
+    if (!filters.productId) return;
+    deleteTaskMutation.mutate({ id: taskId, productId: filters.productId });
+  }
+
   function handleStartTask(taskId: string) {
     updateTaskStatus.mutate(
       { id: taskId, status: 'in_progress' },
@@ -193,6 +199,7 @@ export function Dashboard() {
           onDragEnd={handleDragEnd}
           onTaskClick={handleTaskClick}
           onStartTask={handleStartTask}
+          onDeleteTask={handleDeleteTask}
           onAddClick={() => setShowCreateModal(true)}
         />
       )}
@@ -238,13 +245,14 @@ interface KanbanBoardProps {
   onDragEnd: (event: DragEndEvent) => void;
   onTaskClick: (task: Task) => void;
   onStartTask: (taskId: string) => void;
+  onDeleteTask: (taskId: string) => void;
   onAddClick: () => void;
 }
 
 function KanbanBoard({
   columns, tasksByStatus, showDone, hasErrorTasks, activeDragTask,
   sensors, onShowDoneChange, onDragStart, onDragEnd,
-  onTaskClick, onStartTask, onAddClick,
+  onTaskClick, onStartTask, onDeleteTask, onAddClick,
 }: KanbanBoardProps) {
   return (
     <>
@@ -271,15 +279,16 @@ function KanbanBoard({
                 tasks={tasksByStatus[col.status]}
                 onTaskClick={onTaskClick}
                 onStartTask={col.status === 'backlog' ? onStartTask : undefined}
+                onDeleteTask={onDeleteTask}
                 showAddButton={col.status === 'backlog'}
                 onAddClick={col.status === 'backlog' ? onAddClick : undefined}
               />
             ))}
             {showDone && (
-              <KanbanColumn title="Готово" status="done" tasks={tasksByStatus.done} onTaskClick={onTaskClick} />
+              <KanbanColumn title="Готово" status="done" tasks={tasksByStatus.done} onTaskClick={onTaskClick} onDeleteTask={onDeleteTask} />
             )}
             {hasErrorTasks && (
-              <KanbanColumn title="Ошибка" status="error" tasks={tasksByStatus.error} onTaskClick={onTaskClick} />
+              <KanbanColumn title="Ошибка" status="error" tasks={tasksByStatus.error} onTaskClick={onTaskClick} onDeleteTask={onDeleteTask} />
             )}
           </div>
         </div>
