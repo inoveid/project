@@ -398,6 +398,7 @@ export interface WorkflowEdge {
   prompt_id: string | null;
   order: number;
   requires_approval: boolean;
+  max_rounds: number;
   created_at: string;
 }
 
@@ -409,6 +410,7 @@ export interface WorkflowEdgeCreate {
   prompt_id?: string | null;
   order?: number;
   requires_approval?: boolean;
+  max_rounds?: number;
 }
 
 export interface WorkflowEdgeUpdate {
@@ -417,6 +419,7 @@ export interface WorkflowEdgeUpdate {
   prompt_id?: string | null;
   order?: number;
   requires_approval?: boolean;
+  max_rounds?: number;
 }
 
 // ── Canvas validation types ─────────────────────────────────────────────────

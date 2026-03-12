@@ -53,6 +53,9 @@ class WorkflowEdge(Base):
     requires_approval: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
+    max_rounds: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=3, server_default="3"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

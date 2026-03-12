@@ -278,6 +278,8 @@ async def handle_handoff_tool_call(
     workflow_id: uuid.UUID,
     agent_id: uuid.UUID,
     tools: list[HandoffTool] | None = None,
+    chain: list | None = None,
+    agent_name: str = "",
 ) -> HandoffResult:
     """
     Handle a handoff tool call from an agent.
@@ -311,25 +313,21 @@ async def handle_handoff_tool_call(
             reason=f"Unknown handoff tool: {tool_name}",
         )
 
-    # Check max_cycles
-    if task_id:
-        target_agent = await db.get(Agent, tool.to_agent_id)
-        if not target_agent:
-            return HandoffResult(
-                result_type=HandoffResultType.BLOCKED,
-                reason=f"Target agent {tool.to_agent_name} not found in database",
-                to_agent_id=tool.to_agent_id,
-                to_agent_name=tool.to_agent_name,
-            )
-
-        visits = await count_agent_visits(db, task_id, tool.to_agent_id)
-        if visits >= target_agent.max_cycles:
-            return HandoffResult(
-                result_type=HandoffResultType.BLOCKED,
-                reason=f"max_cycles ({target_agent.max_cycles}) reached for agent {tool.to_agent_name}",
-                to_agent_id=tool.to_agent_id,
-                to_agent_name=tool.to_agent_name,
-            )
+    # Check max_rounds on the edge (loaded via edge_id from tool)
+    if tool.edge_id:
+        from app.models.workflow_edge import WorkflowEdge
+        edge = await db.get(WorkflowEdge, tool.edge_id)
+        if edge:
+            max_rounds = edge.max_rounds
+            # Count how many times this exact pair appears in chain
+            pair_count = chain.count([agent_name, tool.to_agent_name]) if chain else 0
+            if pair_count >= max_rounds:
+                return HandoffResult(
+                    result_type=HandoffResultType.BLOCKED,
+                    reason=f"max_rounds ({max_rounds}) reached for {agent_name} → {tool.to_agent_name}",
+                    to_agent_id=tool.to_agent_id,
+                    to_agent_name=tool.to_agent_name,
+                )
 
     # Resolve prompt for next agent
     task = None

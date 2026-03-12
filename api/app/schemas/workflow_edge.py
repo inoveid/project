@@ -12,6 +12,7 @@ class WorkflowEdgeCreate(BaseModel):
     prompt_id: str | None = None
     order: int = 0
     requires_approval: bool = True
+    max_rounds: int = 3
 
     @model_validator(mode="after")
     def check_no_self_edge(self) -> "WorkflowEdgeCreate":
@@ -26,6 +27,7 @@ class WorkflowEdgeUpdate(BaseModel):
     prompt_id: str | None = None
     order: int | None = None
     requires_approval: bool | None = None
+    max_rounds: int | None = None
 
 
 class WorkflowEdgeRead(BaseModel):
@@ -38,6 +40,7 @@ class WorkflowEdgeRead(BaseModel):
     prompt_id: str | None
     order: int
     requires_approval: bool
+    max_rounds: int
     created_at: datetime
 
     model_config = {"from_attributes": True}

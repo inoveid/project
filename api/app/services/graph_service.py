@@ -168,6 +168,8 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
     handoff_result = await _resolve_handoff(
         db, full_text, state.get("workflow_id"), state.get("task_id"),
         uuid.UUID(state["current_agent_id"]),
+        chain=state.get("chain", []),
+        agent_name=state["current_agent_name"],
     )
 
     return {
@@ -187,6 +189,8 @@ async def _resolve_handoff(
     workflow_id: str | None,
     task_id: str | None,
     agent_id: uuid.UUID,
+    chain: list | None = None,
+    agent_name: str = "",
 ) -> HandoffResult | None:
     """Parse handoff from agent text and resolve via handoff_server."""
     if not workflow_id:
@@ -211,6 +215,8 @@ async def _resolve_handoff(
         workflow_id=wf_id,
         agent_id=agent_id,
         tools=tools,
+        chain=chain,
+        agent_name=agent_name,
     )
 
 
@@ -334,18 +340,7 @@ async def _create_sub_session(
         logger.warning("Handoff target agent %s not found", target_id)
         return {"gateway_approved": False, "handoff_result": None}
 
-    # Check for repeated cycle in chain (P8)
     current_name = state["current_agent_name"]
-    if _has_repeated_cycle(state["chain"], current_name, target.name):
-        logger.warning("Cycle detected: %s → %s already in chain", current_name, target.name)
-        cycle_data = {
-            "agent_name": target.name,
-            "reason": f"Cycle detected: {current_name} → {target.name} repeated in chain",
-            "task_id": state.get("task_id", ""),
-        }
-        await broadcast_notification("max_cycles_reached", cycle_data)
-        return {"gateway_approved": False, "handoff_result": None}
-
     prompt = hr.get("prompt", "") or hr.get("tool_args", {}).get("comment", "")
     task_id = uuid.UUID(state["task_id"]) if state.get("task_id") else None
     main_session_id = uuid.UUID(state["main_session_id"])
@@ -440,9 +435,7 @@ def _resolve_sub_agent_workdir(target) -> str:
     return settings.workspace_path
 
 
-def _has_repeated_cycle(chain: list, from_name: str, to_name: str) -> bool:
-    """Check if this exact transition already occurred in the chain (indicates a loop)."""
-    return [from_name, to_name] in chain
+
 
 
 # ---------------------------------------------------------------------------
