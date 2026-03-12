@@ -1,49 +1,59 @@
-"""Tests for notifications WebSocket endpoint logic.
+"""Tests for notifications WebSocket endpoint — Redis pub/sub based."""
 
-Since TestClient(app) triggers the DB lifespan, we test the endpoint handler
-directly using a lightweight FastAPI app with just the notifications router.
-"""
+import asyncio
+import json
+from unittest.mock import AsyncMock, patch, MagicMock
 
-from unittest.mock import patch
+import pytest
 
-from fastapi import FastAPI
-from starlette.testclient import TestClient
-
-from app.routers.notifications_ws import router
-from app.services.notification_service import NotificationBroker
+from app.routers.notifications_ws import notifications_ws
 
 
-def _make_test_app(broker: NotificationBroker) -> FastAPI:
-    """Create a minimal app with only the notifications router."""
-    test_app = FastAPI()
-    test_app.include_router(router, prefix="/ws")
-    return test_app
+@pytest.fixture
+def mock_websocket():
+    ws = AsyncMock()
+    ws.client_state = MagicMock()
+
+    from starlette.websockets import WebSocketState
+    ws.client_state = WebSocketState.CONNECTED
+
+    # Simulate disconnect after first receive
+    ws.receive_text = AsyncMock(side_effect=Exception("disconnect"))
+    return ws
 
 
-def test_connect_subscribes_and_disconnect_unsubscribes():
-    """Client connects → subscribed; client disconnects → unsubscribed."""
-    test_broker = NotificationBroker()
-    app = _make_test_app(test_broker)
+@pytest.mark.asyncio
+async def test_notifications_ws_accepts_connection(mock_websocket):
+    """Endpoint accepts WebSocket connection."""
+    async def fake_subscribe():
+        return
+        yield  # make it async gen
 
-    with patch("app.routers.notifications_ws.notification_broker", test_broker):
-        client = TestClient(app)
-        with client.websocket_connect("/ws/notifications") as ws:
-            assert test_broker.subscriber_count == 1
-            ws.send_text("ping")  # keep-alive — server receives and loops
+    with patch("app.routers.notifications_ws.subscribe_notifications", side_effect=fake_subscribe):
+        await notifications_ws(mock_websocket)
 
-        assert test_broker.subscriber_count == 0
+    mock_websocket.accept.assert_awaited_once()
 
 
-def test_multiple_clients():
-    """Multiple clients can connect simultaneously."""
-    test_broker = NotificationBroker()
-    app = _make_test_app(test_broker)
+@pytest.mark.asyncio
+async def test_notifications_ws_forwards_events(mock_websocket):
+    """Events from Redis are forwarded to WebSocket."""
+    events = [
+        {"type": "task_completed", "task_id": "123"},
+        {"type": "task_error", "error": "fail"},
+    ]
 
-    with patch("app.routers.notifications_ws.notification_broker", test_broker):
-        client = TestClient(app)
-        with client.websocket_connect("/ws/notifications"):
-            assert test_broker.subscriber_count == 1
-            with client.websocket_connect("/ws/notifications"):
-                assert test_broker.subscriber_count == 2
-            assert test_broker.subscriber_count == 1
-        assert test_broker.subscriber_count == 0
+    async def fake_subscribe():
+        for e in events:
+            yield e
+
+    # Let receive_text raise WebSocketDisconnect to end the loop
+    from fastapi import WebSocketDisconnect
+    mock_websocket.receive_text = AsyncMock(side_effect=WebSocketDisconnect())
+
+    with patch("app.routers.notifications_ws.subscribe_notifications", side_effect=fake_subscribe):
+        await notifications_ws(mock_websocket)
+
+    assert mock_websocket.send_json.await_count == 2
+    mock_websocket.send_json.assert_any_await(events[0])
+    mock_websocket.send_json.assert_any_await(events[1])
