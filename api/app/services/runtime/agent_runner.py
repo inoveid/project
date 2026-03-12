@@ -48,13 +48,15 @@ class AgentRuntime:
         if session_id in self._processes:
             raise AgentRuntimeError(f"Session {session_id} already running")
 
-        # Reject if workdir is actively used by another session
+        # Stop any existing session using the same workdir
         effective_workdir = workdir or settings.workspace_path
-        for sid, r in self._processes.items():
-            if r.workdir == effective_workdir and r.process and r.process.returncode is None:
-                raise AgentRuntimeError(
-                    f"Workdir {effective_workdir} already in use by session {sid}"
-                )
+        stale_sessions = [
+            sid for sid, r in self._processes.items()
+            if r.workdir == effective_workdir and r.process and r.process.returncode is None
+        ]
+        for sid in stale_sessions:
+            logger.info("Stopping stale session %s (workdir %s reused by %s)", sid, effective_workdir, session_id)
+            await self.stop_session(sid)
 
         self._processes[session_id] = RunningProcess(
             process=None,

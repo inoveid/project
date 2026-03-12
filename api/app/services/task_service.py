@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.task import Task
+from app.models.product import Product
 from app.models.workflow import Workflow
 from app.models.session import Session, Message
 from app.schemas.task import TaskCreate, TaskUpdate
@@ -106,6 +107,33 @@ async def update_task_status(
     task.status = new_status
     await db.commit()
     await db.refresh(task)
+
+    # Stop stale active sessions for the same product workspace
+    if new_status == "in_progress" and current_status == "backlog" and task.product_id:
+        try:
+            from sqlalchemy import update
+            stale_stmt = (
+                select(Session.id)
+                .join(Task, Session.task_id == Task.id)
+                .where(
+                    Task.product_id == task.product_id,
+                    Session.status == "active",
+                    Session.task_id != task.id,
+                )
+            )
+            stale_result = await db.execute(stale_stmt)
+            stale_ids = [row[0] for row in stale_result.all()]
+            if stale_ids:
+                from datetime import datetime, timezone
+                await db.execute(
+                    update(Session)
+                    .where(Session.id.in_(stale_ids))
+                    .values(status="stopped", stopped_at=datetime.now(timezone.utc))
+                )
+                await db.commit()
+                logger.info("Stopped %d stale sessions for product %s", len(stale_ids), task.product_id)
+        except Exception:
+            logger.exception("Failed to stop stale sessions")
 
     # Auto-create session for starting agent when task starts
     if new_status == "in_progress" and current_status == "backlog" and task.workflow_id:
