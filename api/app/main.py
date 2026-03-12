@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from app.config import settings
+from app.services.redis_service import init_redis, close_redis
 from app.database import async_session
 from app.routers import agents, auth, businesses, evaluations, memory, notifications_ws, products, sessions, tasks, teams, workflow_edges, workflows, ws
 import app.services.graph_service as graph_svc
@@ -13,6 +14,9 @@ from app.services.system_agent_service import seed_system_agent
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Redis
+    await init_redis()
+
     # Преобразовать asyncpg URL → psycopg3 URL для AsyncPostgresSaver
     postgres_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
 
@@ -25,6 +29,8 @@ async def lifespan(app: FastAPI):
         async with async_session() as db:
             await seed_system_agent(db)
         yield
+    # Cleanup
+    await close_redis()
 
 
 app = FastAPI(title="Agent Console API", version="0.1.0", lifespan=lifespan)

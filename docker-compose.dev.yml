@@ -46,6 +46,25 @@ services:
       redis:
         condition: service_healthy
 
+  worker:
+    build: ./api
+    command: python -m app.worker
+    environment:
+      AC_DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/agent_console
+      AC_REDIS_URL: redis://redis:6379/0
+      AC_WORKSPACE_PATH: /workspace
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_HOST: http://host.docker.internal:3001
+    volumes:
+      - ./api:/src
+      - ${WORKSPACE_PATH:-../../workspace}:/workspace
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   web:
     build: ./web
     ports:
