@@ -92,6 +92,11 @@ export function handleEvent(
         Agent: "Запускает подзадачу...",
       };
       const toolLabel = toolLabels[event.tool_name] || `${event.tool_name}...`;
+      refs.toolsRef.current.push({
+        tool_name: event.tool_name,
+        tool_input: event.tool_input,
+      });
+      updateStreamingItem(refs, setItems);
       setItems((prev) => {
         const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
         const activityItem: HandoffItem = {
@@ -105,12 +110,6 @@ export function handleEvent(
       });
       break;
     }
-      refs.toolsRef.current.push({
-        tool_name: event.tool_name,
-        tool_input: event.tool_input,
-      });
-      updateStreamingItem(refs, setItems);
-      break;
 
     case "tool_result": {
       const lastTool = refs.toolsRef.current[refs.toolsRef.current.length - 1];
