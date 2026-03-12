@@ -37,7 +37,7 @@
 | `test_notifications_ws.py` | ✅ Переписан | 2 теста: notifications WS accept + event forwarding |
 | `test_worker.py` | ✅ Создан | 10 тестов: EventPublisher, _handle_graph_result, _try_update_task_status, _run_graph, handle_session cleanup |
 | `test_event_bus.py` | ✅ Создан | 14 тестов: publish_event/command/notification, buffer CRUD, channel naming, constants |
-| `test_graph_service.py` | **НЕ СУЩЕСТВУЕТ** | 0 тестов для 6 nodes, routing, interrupt, MCP handoff integration |
+| `test_graph_service.py` | ✅ (45 tests) | 14 classes: routing, helpers, all 6 nodes, run_agent main/sub, build_graph |
 | `test_handoff.py` | Существует | 15 тестов: parse_handoff_block, format_handoff_instructions, build_agent_prompt |
 | `test_handoff_server.py` | **НЕ СУЩЕСТВУЕТ** | 0 тестов для generate_handoff_tools, handle_handoff_tool_call, max_cycles |
 | `test_tasks.py` | Существует | 10 тестов: Task CRUD router endpoints |
@@ -249,7 +249,7 @@ cd web && npm test -- --run useChat
 
 **Какие тесты запустить:**
 ```bash
-# test_graph_service.py НЕ СУЩЕСТВУЕТ — ручная проверка обязательна
+# test_graph_service.py ✅ 45 tests — покрывает routing, helpers, все nodes, run_agent main/sub
 # test_handoff_server.py НЕ СУЩЕСТВУЕТ — ручная проверка обязательна
 cd api && pytest tests/test_handoff.py -v
 cd api && pytest tests/test_ws.py -v
