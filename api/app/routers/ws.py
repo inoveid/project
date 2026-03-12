@@ -143,6 +143,7 @@ async def _handle_graph_result(
     interrupted: bool,
     completed: bool,
     errored: bool,
+    last_state: dict | None = None,
 ) -> bool:
     """
     Handle graph result: update task status and send done event.
@@ -156,6 +157,26 @@ async def _handle_graph_result(
 
     if interrupted:
         await _try_update_task_status(db, task_id, "awaiting_user")
+        # Send approval_required to session WS so chat shows ApprovalCard
+        hr = (last_state or {}).get("handoff_result")
+        if hr:
+            # Build steps from messages history
+            steps = []
+            for msg in (last_state or {}).get("messages", []):
+                if isinstance(msg, dict) and msg.get("agent"):
+                    text = msg.get("text", "")
+                    summary = text[:200] + "..." if len(text) > 200 else text
+                    steps.append({"agent": msg["agent"], "summary": summary})
+            await websocket.send_json({
+                "type": "approval_required",
+                "from_agent": (last_state or {}).get("current_agent_name", ""),
+                "to_agent": hr.get("to_agent_name", ""),
+                "task": hr.get("prompt", ""),
+                "task_id": str(task_id) if task_id else "",
+                "chain": (last_state or {}).get("chain", []),
+                "steps": steps,
+                "workflow_agents": [],
+            })
         return True
 
     if completed:
@@ -260,25 +281,27 @@ async def _handle_messages(
             await websocket.send_json({"type": "error", "error": f"Unknown type: {msg_type}"})
 
 
-async def _run_graph(graph, input, config: dict) -> tuple[bool, bool, bool]:
+async def _run_graph(graph, input, config: dict) -> tuple[bool, bool, bool, dict | None]:
     """
     Stream graph until completion or interrupt.
 
-    Returns (interrupted, completed, errored):
-    - (True, False, False) if graph paused at interrupt
-    - (False, True, False) if task_completed event was seen
-    - (False, False, True) if graph raised an exception
-    - (False, False, False) if graph finished normally
+    Returns (interrupted, completed, errored, last_state):
+    - (True, False, False, state) if graph paused at interrupt
+    - (False, True, False, None) if task_completed event was seen
+    - (False, False, True, None) if graph raised an exception
+    - (False, False, False, None) if graph finished normally
     """
     websocket: WebSocket = config["configurable"]["websocket"]
     db: AsyncSession = config["configurable"]["db"]
     task_id: uuid.UUID | None = config["configurable"]["task_id"]
     completed = False
+    last_state: dict | None = None
 
     try:
         async for chunk in graph.astream(input, config, stream_mode="values"):
             if "__interrupt__" in chunk:
-                return True, False, False
+                return True, False, False, last_state
+            last_state = chunk
             # Check if task was completed via complete_task tool
             hr = chunk.get("handoff_result")
             if isinstance(hr, dict) and hr.get("result_type") == "completed":
@@ -293,6 +316,6 @@ async def _run_graph(graph, input, config: dict) -> tuple[bool, bool, bool]:
             "task_id": str(task_id) if task_id else "",
             "error": str(exc),
         })
-        return False, False, True
+        return False, False, True, None
 
-    return False, completed, False
+    return False, completed, False, None
