@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTeams } from '../../hooks/useTeams';
+import { useAuthStatus } from '../../hooks/useAuth';
 import { getWorkflows } from '../../api/workflows';
 import type { Workflow } from '../../types';
 import { useUpdateTask, useUpdateTaskStatus } from '../../hooks/useTasks';
@@ -81,6 +82,8 @@ export function TaskDetailsTab({ task }: TaskDetailsTabProps) {
     saveField({ team_id: teamId, workflow_id: undefined });
   }
 
+  const { data: authStatus } = useAuthStatus();
+  const isAuthed = authStatus?.logged_in ?? false;
   const statusCfg = getStatusConfig(task.status);
   const valid = isTaskValid(task);
 
@@ -159,6 +162,7 @@ export function TaskDetailsTab({ task }: TaskDetailsTabProps) {
         <StatusActions
           task={task}
           valid={valid}
+          isAuthed={isAuthed}
           onChangeStatus={(status) => updateStatus.mutate({ id: task.id, status })}
           isPending={updateStatus.isPending}
           onValidationFail={() => setShowValidation(true)}
@@ -174,6 +178,7 @@ export function TaskDetailsTab({ task }: TaskDetailsTabProps) {
 function StatusActions({
   task,
   valid,
+  isAuthed,
   onChangeStatus,
   isPending,
   onValidationFail,
@@ -181,6 +186,7 @@ function StatusActions({
 }: {
   task: Task;
   valid: boolean;
+  isAuthed: boolean;
   onChangeStatus: (status: Task['status']) => void;
   isPending: boolean;
   onValidationFail: () => void;
@@ -188,10 +194,13 @@ function StatusActions({
 }) {
   if (task.status === 'backlog') {
     const missing = getMissingFields(task);
-    const canStart = valid && missing.size === 0;
+    const canStart = valid && missing.size === 0 && isAuthed;
     return (
       <div>
-        {showValidation && !canStart && (
+        {!isAuthed && (
+          <p className="text-sm text-red-500 mb-2">Claude не авторизован. Авторизуйтесь для запуска задач.</p>
+        )}
+        {showValidation && !canStart && isAuthed && (
           <p className="text-sm text-red-500 mb-2">Заполните обязательные поля в задаче</p>
         )}
         <button
