@@ -57,7 +57,8 @@ export function TaskChatsTab({ task }: TaskChatsTabProps) {
     );
   }
 
-  const mainSessionId = sessions[0]?.id ?? '';
+  // Sessions sorted by created_at DESC — main session is the oldest (last)
+  const mainSessionId = sessions[sessions.length - 1]?.id ?? '';
   const activeId = selectedId ?? mainSessionId;
   const isMainSession = activeId === mainSessionId;
 
