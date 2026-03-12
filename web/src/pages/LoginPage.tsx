@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { login, register } from '../api/auth';
-import { setToken } from '../api/client';
+import { setToken, fetchApi } from '../api/client';
 
 type Mode = 'login' | 'register';
 
@@ -11,6 +11,16 @@ export function LoginPage() {
   const [form, setForm] = useState({ email: '', password: '', name: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [registrationOpen, setRegistrationOpen] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetchApi<{ open: boolean }>('/auth/registration-open')
+      .then((res) => {
+        setRegistrationOpen(res.open);
+        if (res.open) setMode('register');
+      })
+      .catch(() => setRegistrationOpen(false));
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -25,11 +35,18 @@ export function LoginPage() {
       setToken(res.access_token);
       navigate('/', { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      if (msg.includes('403')) {
+        setError('Регистрация закрыта. Обратитесь к администратору.');
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
   }
+
+  const showRegisterTab = registrationOpen === true;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -38,30 +55,40 @@ export function LoginPage() {
           Agent Console
         </h1>
 
-        <div className="flex mb-6 border rounded overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setMode('login')}
-            className={`flex-1 py-2 text-sm font-medium ${
-              mode === 'login'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            Вход
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('register')}
-            className={`flex-1 py-2 text-sm font-medium ${
-              mode === 'register'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            Регистрация
-          </button>
-        </div>
+        {showRegisterTab ? (
+          <div className="flex mb-6 border rounded overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setMode('login')}
+              className={`flex-1 py-2 text-sm font-medium ${
+                mode === 'login'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              Вход
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('register')}
+              className={`flex-1 py-2 text-sm font-medium ${
+                mode === 'register'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              Регистрация
+            </button>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500 text-center mb-4">Войдите в аккаунт</p>
+        )}
+
+        {registrationOpen && mode === 'register' && (
+          <p className="text-sm text-blue-600 bg-blue-50 rounded p-2 mb-4 text-center">
+            Первый пользователь станет администратором
+          </p>
+        )}
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           {mode === 'register' && (
@@ -113,7 +140,7 @@ export function LoginPage() {
               ? 'Загрузка...'
               : mode === 'login'
                 ? 'Войти'
-                : 'Зарегистрироваться'}
+                : 'Создать аккаунт'}
           </button>
         </form>
       </div>

@@ -5,7 +5,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -37,6 +37,42 @@ def create_access_token(user_id: uuid.UUID, email: str) -> str:
 async def register_user(
     db: AsyncSession, email: str, password: str, name: str
 ) -> User:
+    # Check if any users exist
+    count_result = await db.execute(select(func.count()).select_from(User))
+    user_count = count_result.scalar() or 0
+
+    if user_count > 0:
+        # Registration closed — only admin can invite
+        raise HTTPException(
+            status_code=403,
+            detail="Registration is closed. Contact admin for an invite.",
+        )
+
+    # Check email uniqueness
+    result = await db.execute(select(User).where(User.email == email))
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Email already registered")
+
+    # First user = admin
+    user = User(
+        email=email,
+        password_hash=hash_password(password),
+        name=name,
+        role="admin",
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+async def invite_user(
+    db: AsyncSession, email: str, password: str, name: str, inviter: User
+) -> User:
+    """Only admin can create new users after initial registration."""
+    if inviter.role != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can invite users")
+
     result = await db.execute(select(User).where(User.email == email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Email already registered")
@@ -45,6 +81,7 @@ async def register_user(
         email=email,
         password_hash=hash_password(password),
         name=name,
+        role="member",
     )
     db.add(user)
     await db.commit()
