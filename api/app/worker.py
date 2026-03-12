@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import uuid
 from typing import Any
 
@@ -96,15 +97,39 @@ async def handle_session(session_id: uuid.UUID) -> None:
                 if tools_prompt:
                     system_prompt += tools_prompt
 
-        # Resolve workdir
+        # Resolve workdir from product (primary) or agent config (fallback)
         workdir = ""
+        product_workspace = None
         if session.task_id:
             if session.task and session.task.product_id:
                 await db.refresh(session.task, ["product"])
                 if session.task.product:
                     workdir = session.task.product.workspace_path
+                    product_workspace = workdir
         if not workdir:
             workdir = agent.config.get("workdir", "") if agent.config else ""
+
+        # Ensure workspace directory exists
+        effective_workdir = workdir or settings.workspace_path
+        if not os.path.isdir(effective_workdir):
+            os.makedirs(effective_workdir, exist_ok=True)
+            logger.info("Created workspace directory: %s", effective_workdir)
+
+        # Auto-init git if not present (agents need git for tracking changes)
+        git_dir = os.path.join(effective_workdir, ".git")
+        if not os.path.exists(git_dir):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "init",
+                    cwd=effective_workdir,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await proc.communicate()
+                if proc.returncode == 0:
+                    logger.info("Initialized git in %s", effective_workdir)
+            except Exception as exc:
+                logger.warning("Failed to init git in %s: %s", effective_workdir, exc)
 
         # Start runtime
         if not runtime.is_running(session_id):
@@ -168,6 +193,7 @@ async def handle_session(session_id: uuid.UUID) -> None:
                     "depth": 0,
                     "chain": [],
                     "handoff_result": None,
+                    "product_workspace": product_workspace,
                     "gateway_approved": None,
                     "messages": [],
                 }

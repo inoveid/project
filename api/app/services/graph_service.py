@@ -77,6 +77,7 @@ class WorkflowState(TypedDict):
     chain: list
     handoff_result: dict | None
     gateway_approved: bool | None
+    product_workspace: str | None
     messages: list
 
 
@@ -380,7 +381,7 @@ async def _create_sub_session(
     if not runtime.is_running(sub_session.id):
         tools_prompt = await _generate_sub_tools(db, target.id, state.get("workflow_id"))
         system_prompt = _build_sub_agent_prompt(target, state, tools_prompt)
-        workdir = _resolve_sub_agent_workdir(target)
+        workdir = _resolve_sub_agent_workdir(target, state)
 
         await runtime.start_session(
             sub_session.id, workdir, system_prompt,
@@ -431,8 +432,16 @@ async def _generate_sub_tools(db: AsyncSession, agent_id, workflow_id: str | Non
     return format_handoff_tools_prompt(sub_tools)
 
 
-def _resolve_sub_agent_workdir(target) -> str:
-    """Determine workdir for a sub-agent."""
+def _resolve_sub_agent_workdir(target, state: WorkflowState) -> str:
+    """Determine workdir for a sub-agent.
+    
+    Priority: product_workspace (from task) > agent.config.workdir > global workspace.
+    All agents in a workflow share the product workspace for isolation.
+    """
+    # Product workspace propagates through the entire workflow
+    product_ws = state.get("product_workspace")
+    if product_ws:
+        return product_ws
     if target.config:
         return target.config.get("workdir") or settings.workspace_path
     return settings.workspace_path
