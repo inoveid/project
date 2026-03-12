@@ -10,6 +10,7 @@ import { CreateTaskModal } from '../components/tasks/CreateTaskModal';
 import { FilterBar } from '../components/tasks/FilterBar';
 import { TaskModal } from '../components/tasks/TaskModal';
 import { useToast } from '../hooks/useToast';
+import { useAuthStatus } from '../hooks/useAuth';
 import { isTransitionAllowed, getTransitionError } from '../components/tasks/statusConfig';
 import type { Task, TaskStatus } from '../types';
 import { isTask, isTaskStatus } from '../types';
@@ -74,6 +75,8 @@ export function Dashboard() {
   const createTask = useCreateTask();
   const updateTaskStatus = useUpdateTaskStatus();
   const deleteTaskMutation = useDeleteTask();
+  const { data: authStatus } = useAuthStatus();
+  const isAuthed = authStatus?.logged_in ?? false;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -131,6 +134,11 @@ export function Dashboard() {
       return;
     }
 
+    if (maybeStatus === 'in_progress' && !isAuthed) {
+      addToast({ type: "error", title: "Claude не авторизован", message: "Авторизуйтесь для запуска задач" });
+      return;
+    }
+
     updateTaskStatus.mutate(
       { id: maybeTask.id, status: maybeStatus },
       { onError: (err: Error) => addToast({ type: "error", title: "Ошибка", message: err.message }) },
@@ -143,6 +151,10 @@ export function Dashboard() {
   }
 
   function handleStartTask(taskId: string) {
+    if (!isAuthed) {
+      addToast({ type: "error", title: "Claude не авторизован", message: "Авторизуйтесь для запуска задач" });
+      return;
+    }
     updateTaskStatus.mutate(
       { id: taskId, status: 'in_progress' },
       {
