@@ -301,9 +301,9 @@ function ReturnEdgeBadge({
         </span>
       ) : (
         <button
-          className="text-xs text-amber-600 hover:text-amber-800 font-medium disabled:opacity-50"
-          onClick={() => !isLocked && setEditing(true)}
-          disabled={isLocked}
+          type="button"
+          className="text-xs text-amber-600 hover:text-amber-800 font-medium cursor-pointer"
+          onClick={(e) => { e.stopPropagation(); setEditing(true); }}
           title={`Максимум ${edge.max_rounds} повторов`}
         >
           ×{edge.max_rounds}
