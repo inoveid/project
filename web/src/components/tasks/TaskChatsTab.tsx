@@ -4,7 +4,7 @@ import { useTaskSessions } from '../../hooks/useTasks';
 import { getSession, stopSession } from '../../api/sessions';
 import { useChat } from '../../hooks/useChat';
 import { ChatWindow } from '../ChatWindow';
-import type { Task, SessionListItem } from '../../types';
+import type { Task, Session, SessionListItem, ChatItem } from '../../types';
 import { isHandoffItem } from '../../types';
 import { ApprovalCard } from '../ApprovalCard';
 
@@ -13,11 +13,31 @@ interface TaskChatsTabProps {
 }
 
 export function TaskChatsTab({ task }: TaskChatsTabProps) {
+  const queryClient = useQueryClient();
   const { data: sessions, isLoading } = useTaskSessions(task.id, task.status);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const prevSessionIdsRef = useRef<Set<string>>(new Set());
 
-  // Auto-switch to active session when task awaits approval
+  // Main session (oldest, depth=0) — WS always connected at this level
+  const mainSessionId = sessions?.[sessions.length - 1]?.id ?? '';
+
+  const { data: mainSession } = useQuery({
+    queryKey: ['session', mainSessionId],
+    queryFn: () => getSession(mainSessionId),
+    enabled: Boolean(mainSessionId),
+  });
+
+  const mainLoaded = Boolean(mainSession);
+  const mainActive = mainSession?.status === 'active';
+
+  // This hook keeps the main session WS alive regardless of which chat is selected
+  const mainChat = useChat(
+    mainSessionId,
+    mainSession?.messages ?? [],
+    mainLoaded && mainActive,
+  );
+
+  // Auto-switch to active session on approval
   useEffect(() => {
     if (task.status === 'awaiting_user' && sessions?.length) {
       const activeSession = sessions.find((s) => s.status === 'active');
@@ -32,11 +52,9 @@ export function TaskChatsTab({ task }: TaskChatsTabProps) {
     if (!sessions?.length) return;
     const currentIds = new Set(sessions.map((s) => s.id));
     const prevIds = prevSessionIdsRef.current;
-
     if (prevIds.size > 0) {
       for (const id of currentIds) {
         if (!prevIds.has(id)) {
-          // New session appeared — switch to it
           setSelectedId(id);
           break;
         }
@@ -44,6 +62,18 @@ export function TaskChatsTab({ task }: TaskChatsTabProps) {
     }
     prevSessionIdsRef.current = currentIds;
   }, [sessions]);
+
+  // Approve / Reject — always goes through main session WS
+  function handleApprove() {
+    mainChat.approveHandoff();
+    void queryClient.invalidateQueries({ queryKey: ['tasks', 'detail', task.id] });
+    void queryClient.invalidateQueries({ queryKey: ['sessions', 'by-task', task.id] });
+  }
+
+  function handleReject() {
+    mainChat.rejectHandoff();
+    void queryClient.invalidateQueries({ queryKey: ['tasks', 'detail', task.id] });
+  }
 
   if (isLoading) {
     return <p className="text-gray-400 text-sm p-6">Загрузка сессий...</p>;
@@ -57,10 +87,21 @@ export function TaskChatsTab({ task }: TaskChatsTabProps) {
     );
   }
 
-  // Sessions sorted by created_at DESC — main session is the oldest (last)
-  const mainSessionId = sessions[sessions.length - 1]?.id ?? '';
   const activeId = selectedId ?? mainSessionId;
-  const isMainSession = activeId === mainSessionId;
+  const isViewingMain = activeId === mainSessionId;
+
+  // Approval — derived from main session WS (always connected)
+  const approvalFromItems = (() => {
+    const last = mainChat.items
+      .filter((i) => isHandoffItem(i) && i.itemType === 'approval_required')
+      .pop();
+    if (last && isHandoffItem(last) && last.fromAgent && last.toAgent) {
+      return { fromAgent: last.fromAgent, toAgent: last.toAgent, task: last.content };
+    }
+    return null;
+  })();
+  const effectiveApproval = mainChat.pendingApproval || approvalFromItems;
+  const showApproval = task.status === 'awaiting_user' && mainActive;
 
   return (
     <div className="flex flex-1 min-h-0">
@@ -70,12 +111,23 @@ export function TaskChatsTab({ task }: TaskChatsTabProps) {
         taskStatus={task.status}
         onSelect={setSelectedId}
       />
-      <SessionChat
-        key={activeId}
-        sessionId={activeId}
-        task={task}
-        enableWs={isMainSession}
-      />
+
+      <div className="flex flex-1 flex-col min-w-0">
+        {isViewingMain ? (
+          <MainSessionView session={mainSession} chat={mainChat} task={task} />
+        ) : (
+          <SubSessionView sessionId={activeId} task={task} />
+        )}
+
+        {/* Approval card — always visible regardless of selected session */}
+        {showApproval && (
+          <ApprovalCard
+            approval={effectiveApproval || { fromAgent: 'Агент', toAgent: '...', task: 'Ожидает вашего решения' }}
+            onApprove={handleApprove}
+            onReject={handleReject}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -126,106 +178,39 @@ function SessionSidebar({
   );
 }
 
-// ── Session chat area ────────────────────────────────────────────────────────
+// ── Main session view (uses shared useChat from parent) ─────────────────────
 
-function SessionChat({
-  sessionId,
+function MainSessionView({
+  session,
+  chat,
   task,
-  enableWs,
 }: {
-  sessionId: string;
+  session: Session | undefined;
+  chat: ReturnType<typeof useChat>;
   task: Task;
-  enableWs: boolean;
 }) {
   const queryClient = useQueryClient();
-
-  const {
-    data: session,
-    isLoading,
-    error: loadError,
-  } = useQuery({
-    queryKey: ['session', sessionId],
-    queryFn: () => getSession(sessionId),
-    enabled: Boolean(sessionId),
-    // Sub-sessions: poll DB for messages since no WS events
-    refetchInterval: !enableWs && task.status === 'in_progress' ? 2000 : false,
-  });
-
-  const sessionLoaded = Boolean(session);
-  const isActiveSession = session?.status === 'active';
-
-  const {
-    items,
-    status,
-    error: chatError,
-    pendingApproval,
-    sendMessage,
-    stopAgent,
-    approveHandoff,
-    rejectHandoff,
-  } = useChat(sessionId, session?.messages ?? [], sessionLoaded && isActiveSession && enableWs);
+  const isActive = session?.status === 'active';
 
   async function handleStop() {
-    stopAgent();
-    await stopSession(sessionId);
-    void queryClient.invalidateQueries({ queryKey: ['sessions'] });
-    void queryClient.invalidateQueries({ queryKey: ['sessions', 'by-task', task.id] });
-  }
-
-  function handleApprove() {
-    approveHandoff();
-    void queryClient.invalidateQueries({ queryKey: ['tasks', 'detail', task.id] });
-  }
-
-  function handleReject() {
-    rejectHandoff();
-    void queryClient.invalidateQueries({ queryKey: ['tasks', 'detail', task.id] });
-  }
-
-  if (isLoading) {
-    return <p className="text-gray-400 text-sm p-4 flex-1">Загрузка чата...</p>;
-  }
-
-  if (loadError) {
-    return (
-      <p className="text-red-600 text-sm p-4 flex-1">
-        Ошибка загрузки: {loadError.message}
-      </p>
-    );
-  }
-
-  // Derive approval from multiple sources for reliability
-  const approvalFromItems = (() => {
-    const last = items.filter((i) => isHandoffItem(i) && i.itemType === 'approval_required').pop();
-    if (last && isHandoffItem(last) && last.fromAgent && last.toAgent) {
-      return { fromAgent: last.fromAgent, toAgent: last.toAgent, task: last.content };
+    chat.stopAgent();
+    if (session?.id) {
+      await stopSession(session.id);
+      void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      void queryClient.invalidateQueries({ queryKey: ['sessions', 'by-task', task.id] });
     }
-    return null;
-  })();
-  const effectiveApproval = pendingApproval || approvalFromItems;
-  const showApproval = task.status === 'awaiting_user' && isActiveSession && enableWs;
-  const canSend = status === 'connected' && isActiveSession && enableWs && !showApproval;
+  }
 
-  // For sub-sessions or stopped sessions: show DB messages
-  const displayItems = (enableWs && isActiveSession) ? items : (session?.messages ?? []);
+  const canSend = chat.status === 'connected' && isActive && task.status !== 'awaiting_user';
 
   return (
-    <div className="flex flex-1 flex-col min-w-0">
-      {/* Header */}
+    <>
       <div className="flex items-center justify-between border-b px-4 py-2 bg-white">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500">{sessionId.slice(0, 8)}...</span>
-          {!enableWs && isActiveSession && task.status === 'in_progress' && (
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
-              <span className="text-xs text-gray-500">Работает...</span>
-            </span>
-          )}
-        </div>
-        {isActiveSession && enableWs && (
+        <span className="text-xs text-gray-500">Главная сессия</span>
+        {isActive && (
           <button
             onClick={() => void handleStop()}
-            disabled={status === 'disconnected' || status === 'idle'}
+            disabled={chat.status === 'disconnected' || chat.status === 'idle'}
             className="rounded border border-red-300 px-3 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
           >
             Stop
@@ -233,26 +218,65 @@ function SessionChat({
         )}
       </div>
 
-      {chatError && (
+      {chat.error && (
         <div className="bg-red-50 border-b border-red-200 px-4 py-2 text-sm text-red-600">
-          {chatError}
+          {chat.error}
         </div>
       )}
 
-      {/* Messages */}
-      <ChatWindow items={displayItems} />
+      <ChatWindow items={isActive ? chat.items : (session?.messages ?? [])} />
 
-      {/* Input / Approval */}
-      {showApproval ? (
-        <ApprovalCard
-          approval={effectiveApproval || { fromAgent: 'Агент', toAgent: '...', task: 'Ожидает вашего решения' }}
-          onApprove={handleApprove}
-          onReject={handleReject}
-        />
-      ) : canSend ? (
-        <ChatInput onSend={sendMessage} disabled={!canSend} />
-      ) : null}
-    </div>
+      {canSend && (
+        <ChatInput onSend={chat.sendMessage} disabled={!canSend} />
+      )}
+    </>
+  );
+}
+
+// ── Sub-session view (DB messages with polling) ─────────────────────────────
+
+function SubSessionView({
+  sessionId,
+  task,
+}: {
+  sessionId: string;
+  task: Task;
+}) {
+  const isTaskRunning = task.status === 'in_progress';
+
+  const { data: session, isLoading, error } = useQuery({
+    queryKey: ['session', sessionId],
+    queryFn: () => getSession(sessionId),
+    enabled: Boolean(sessionId),
+    refetchInterval: isTaskRunning ? 2000 : false,
+  });
+
+  if (isLoading) {
+    return <p className="text-gray-400 text-sm p-4 flex-1">Загрузка чата...</p>;
+  }
+
+  if (error) {
+    return <p className="text-red-600 text-sm p-4 flex-1">Ошибка: {error.message}</p>;
+  }
+
+  const isActive = session?.status === 'active';
+
+  return (
+    <>
+      <div className="flex items-center justify-between border-b px-4 py-2 bg-white">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">{sessionId.slice(0, 8)}...</span>
+          {isActive && isTaskRunning && (
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+              <span className="text-xs text-gray-500">Работает...</span>
+            </span>
+          )}
+        </div>
+      </div>
+
+      <ChatWindow items={session?.messages ?? []} />
+    </>
   );
 }
 
