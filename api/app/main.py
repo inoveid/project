@@ -7,7 +7,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from app.config import settings
 from app.services.redis_service import init_redis, close_redis
 from app.database import async_session
-from app.routers import agents, auth, businesses, evaluations, memory, notifications_ws, products, sessions, tasks, teams, workflow_edges, workflows, ws
+from app.routers import agents, auth, businesses, evaluations, memory, notifications_ws, products, sessions, specs, tasks, teams, workflow_edges, workflows, ws
 import app.services.graph_service as graph_svc
 from app.services.system_agent_service import seed_system_agent
 
@@ -56,3 +56,4 @@ app.include_router(notifications_ws.router, prefix="/api/ws", tags=["notificatio
 app.include_router(memory.router, prefix="/api", tags=["memory"])
 app.include_router(tasks.router, prefix="/api", tags=["tasks"])
 app.include_router(evaluations.router, prefix="/api", tags=["evaluations"])
+app.include_router(specs.router, prefix="/api", tags=["specs"])

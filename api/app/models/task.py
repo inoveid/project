@@ -37,6 +37,11 @@ class Task(Base):
     workflow_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
+    spec_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("specs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="backlog"
     )
@@ -46,4 +51,5 @@ class Task(Base):
 
     product = relationship("Product", foreign_keys=[product_id])
     team = relationship("Team", foreign_keys=[team_id])
+    spec = relationship("Spec", foreign_keys=[spec_id])
     sessions = relationship("Session", back_populates="task")

@@ -13,6 +13,7 @@ class TaskCreate(BaseModel):
     product_id: Optional[uuid.UUID] = None
     team_id: Optional[uuid.UUID] = None
     workflow_id: Optional[uuid.UUID] = None
+    spec_id: Optional[uuid.UUID] = None
 
 
 class TaskUpdate(BaseModel):
@@ -21,6 +22,7 @@ class TaskUpdate(BaseModel):
     product_id: Optional[uuid.UUID] = None
     team_id: Optional[uuid.UUID] = None
     workflow_id: Optional[uuid.UUID] = None
+    spec_id: Optional[uuid.UUID] = None
 
 
 class TaskStatusUpdate(BaseModel):
@@ -34,6 +36,7 @@ class TaskRead(BaseModel):
     product_id: Optional[uuid.UUID]
     team_id: Optional[uuid.UUID]
     workflow_id: Optional[uuid.UUID]
+    spec_id: Optional[uuid.UUID]
     status: str
     created_at: datetime
 

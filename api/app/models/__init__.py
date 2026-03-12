@@ -16,5 +16,6 @@ from app.models.evaluation import EvalCase, EvalRun, EvalResult
 from app.models.business import Business
 from app.models.product import Product
 from app.models.task import Task
+from app.models.spec import Spec, SpecVersion
 
-__all__ = ["Base", "Team", "Agent", "Workflow", "WorkflowEdge", "Session", "Message", "OAuthToken", "EpisodicMemory", "SemanticMemory", "EvalCase", "EvalRun", "EvalResult", "Business", "Product", "Task"]
+__all__ = ["Base", "Team", "Agent", "Workflow", "WorkflowEdge", "Session", "Message", "OAuthToken", "EpisodicMemory", "SemanticMemory", "EvalCase", "EvalRun", "EvalResult", "Business", "Product", "Task", "Spec", "SpecVersion"]
