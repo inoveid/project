@@ -62,6 +62,7 @@ class EventPublisher:
         self.session_id = session_id
 
     async def send_json(self, data: dict[str, Any]) -> None:
+        """Publish event to Redis (implements EventSender protocol from graph_service)."""
         await publish_event(self.session_id, data)
 
 
@@ -104,6 +105,8 @@ async def _run_session(
     session_id: uuid.UUID, sid: str, publisher: EventPublisher,
 ) -> None:
     """Core session logic — separated for try/finally in handle_session."""
+    # NOTE: single async_session for entire session lifetime — stale reads possible
+    # for long-running sessions. Use db.refresh() if fresh data needed.
     async with async_session() as db:
         try:
             session = await get_session(db, session_id)
@@ -294,6 +297,11 @@ async def _restore_interrupt_state(
 async def _try_update_task_status(
     db, task_id: uuid.UUID | None, new_status: str,
 ) -> None:
+    """Update task status, suppressing errors (auto-update should not crash session).
+
+    Called on: interrupt → awaiting_user, approve → in_progress, error → error, done → done.
+    Uses VALID_TRANSITIONS from task_service — invalid transitions log error, not raise.
+    """
     if not task_id:
         return
     try:
@@ -311,6 +319,11 @@ async def _handle_graph_result(
     errored: bool,
     last_state: dict | None = None,
 ) -> bool:
+    """Dispatch graph result: send appropriate events and update task status.
+
+    Returns True if graph is interrupted (waiting for approve/reject), False otherwise.
+    Priority: errored → interrupted (approval_required) → completed (done) → done.
+    """
     if errored:
         await publisher.send_json({"type": "done"})
         return False

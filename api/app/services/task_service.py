@@ -1,3 +1,22 @@
+"""
+Task service — CRUD and status machine for Tasks.
+
+Status machine (VALID_TRANSITIONS):
+    backlog → in_progress (requires: title, description, product_id, team_id, workflow_id)
+    in_progress → awaiting_user | done | error
+    awaiting_user → in_progress | error
+    done → in_progress (retry)
+    error → in_progress (retry)
+
+Side effects on transition:
+    → in_progress (from backlog): auto-creates session for starting agent, stops stale sessions
+    → done | error: stops all active sessions for the task
+    → awaiting_user: set by worker._try_update_task_status on LangGraph interrupt
+
+Used by:
+    - worker.py (_try_update_task_status) — auto-updates on graph events
+    - routers/tasks.py — manual updates from Dashboard/Kanban
+"""
 import logging
 import uuid
 

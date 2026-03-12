@@ -49,7 +49,7 @@ class EventSender(Protocol):
     async def send_json(self, data: dict[str, Any]) -> None: ...
 
 
-MAX_DEPTH = 5
+MAX_DEPTH = 5  # Maximum nested handoff depth to prevent infinite recursion
 
 
 # ---------------------------------------------------------------------------
@@ -523,6 +523,12 @@ _compiled_graph = None
 
 
 def get_graph():
+    """Return the compiled LangGraph workflow graph (module-level singleton).
+
+    Initialized in BOTH main.py lifespan (API process) and worker.py run_worker()
+    (Worker process). Both MUST use the same database URL for checkpoints,
+    otherwise interrupt/resume state will be lost.
+    """
     if _compiled_graph is None:
         raise RuntimeError("Workflow graph not initialized. Call setup_graph() in app lifespan.")
     return _compiled_graph
