@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTaskSessions } from '../../hooks/useTasks';
 import { getSession, stopSession } from '../../api/sessions';
@@ -15,6 +15,17 @@ interface TaskChatsTabProps {
 export function TaskChatsTab({ task }: TaskChatsTabProps) {
   const { data: sessions, isLoading } = useTaskSessions(task.id, task.status);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Auto-switch to active session when task awaits approval
+  // Ensures ApprovalCard shows regardless of which session user was viewing
+  useEffect(() => {
+    if (task.status === 'awaiting_user' && sessions?.length) {
+      const activeSession = sessions.find((s) => s.status === 'active');
+      if (activeSession && activeSession.id !== selectedId) {
+        setSelectedId(activeSession.id);
+      }
+    }
+  }, [task.status, sessions, selectedId]);
 
   if (isLoading) {
     return <p className="text-gray-400 text-sm p-6">Загрузка сессий...</p>;
