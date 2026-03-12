@@ -31,6 +31,7 @@ from app.services.event_bus import (
 )
 from app.services.redis_service import init_redis, close_redis
 import app.services.graph_service as graph_svc
+from app.services.graph_service import GraphConfigurable
 from app.services.runtime import runtime
 from app.services.session_service import (
     SessionNotFoundError,
@@ -177,13 +178,14 @@ async def _run_session(
                 return
 
         # LangGraph config — EventPublisher instead of WebSocket
+        configurable: GraphConfigurable = {
+            "thread_id": sid,
+            "websocket": publisher,  # EventPublisher implements EventSender
+            "db": db,
+            "task_id": session.task_id,
+        }
         graph_config = {
-            "configurable": {
-                "thread_id": sid,
-                "websocket": publisher,  # EventPublisher implements send_json
-                "db": db,
-                "task_id": session.task_id,
-            },
+            "configurable": configurable,
             "recursion_limit": 20,
         }
         graph = graph_svc.get_graph()

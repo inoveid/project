@@ -49,6 +49,18 @@ class EventSender(Protocol):
     async def send_json(self, data: dict[str, Any]) -> None: ...
 
 
+class GraphConfigurable(TypedDict):
+    """Typed configurable dict passed to all graph nodes via RunnableConfig["configurable"].
+
+    Assembled in worker.py (_run_session), consumed by graph nodes.
+    All keys are required — missing keys will raise KeyError at runtime.
+    """
+    thread_id: str
+    websocket: EventSender  # EventPublisher in Worker, WebSocket in tests
+    db: AsyncSession
+    task_id: uuid.UUID | None
+
+
 MAX_DEPTH = 5  # Maximum nested handoff depth to prevent infinite recursion
 
 
@@ -85,6 +97,11 @@ class WorkflowState(TypedDict):
 # Nodes
 # ---------------------------------------------------------------------------
 
+def _get_configurable(config: RunnableConfig) -> GraphConfigurable:
+    """Extract typed configurable from RunnableConfig."""
+    return config["configurable"]  # type: ignore[return-value]
+
+
 async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
     """
     Run the current agent via claude CLI and stream events to WebSocket.
@@ -92,8 +109,9 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
     For depth==0 (main agent): runtime already started from ws.py.
     For depth>0 (sub-agent): runtime started in gate/auto_handoff node.
     """
-    ws: EventSender = config["configurable"]["websocket"]
-    db: AsyncSession = config["configurable"]["db"]
+    cfg = _get_configurable(config)
+    ws: EventSender = cfg["websocket"]
+    db: AsyncSession = cfg["db"]
     is_sub = state["depth"] > 0 and state["current_session_id"] != state["main_session_id"]
     session_id = uuid.UUID(state["current_session_id"])
 
@@ -265,8 +283,9 @@ async def gate_node(state: WorkflowState, config: RunnableConfig) -> dict:
     On approve: create sub-agent session and start runtime.
     On reject: cancel handoff.
     """
-    db: AsyncSession = config["configurable"]["db"]
-    ws: EventSender = config["configurable"]["websocket"]
+    cfg = _get_configurable(config)
+    ws: EventSender = cfg["websocket"]
+    db: AsyncSession = cfg["db"]
 
     approved: bool = interrupt("Waiting for human approval of handoff")
 
@@ -286,8 +305,9 @@ async def auto_handoff_node(state: WorkflowState, config: RunnableConfig) -> dic
 
     Used when requires_approval=False on the workflow edge.
     """
-    db: AsyncSession = config["configurable"]["db"]
-    ws: EventSender = config["configurable"]["websocket"]
+    cfg = _get_configurable(config)
+    ws: EventSender = cfg["websocket"]
+    db: AsyncSession = cfg["db"]
 
     hr = state["handoff_result"]
     if not hr or not hr.get("to_agent_id"):

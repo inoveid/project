@@ -380,7 +380,7 @@ cd web && npm test -- --run ChatPanel          # 6 тестов компонен
 **Контракт frontend ↔ backend:**
 - `WsIncoming` (frontend) должен точно соответствовать событиям из worker.py/graph_service.py (через Redis → ws.py proxy)
 - `WsOutgoing` (frontend) должен соответствовать обработчикам в worker.py (через ws.py proxy)
-- При рассинхронизации: события игнорируются молча (нет default case с ошибкой в handleEvent switch)
+- При рассинхронизации: неизвестные события логируются через console.warn (default case в handleEvent switch)
 
 
 **Что проверить после изменения:**
@@ -589,7 +589,7 @@ cd api && pytest tests/test_handoff.py -v  # legacy handoff utils тесты
 
 **Что проверить после изменения:**
 - [ ] Все переходы из Kanban drag & drop работают
-- [ ] ws.py auto-update: awaiting_user, in_progress, error — не бросают unhandled exceptions
+- [ ] worker.py auto-update: awaiting_user, in_progress, error — не бросают unhandled exceptions
 - [ ] backlog→in_progress требует все required fields
 - [ ] done→in_progress (retry) работает
 
