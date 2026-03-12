@@ -4,6 +4,7 @@ import { AuthStatusBadge } from "./AuthStatusBadge";
 const NAV_ITEMS = [
   { path: "/", label: "Dashboard" },
   { path: "/teams", label: "Teams" },
+  { path: "/businesses", label: "Businesses" },
   { path: "/eval", label: "Evaluations" },
 ] as const;
 
