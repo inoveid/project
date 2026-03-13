@@ -24,6 +24,7 @@ interface SidePanelProps {
   onDeleteEdge: (edgeId: string) => void;
   onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string) => void;
   onUpdateWorkflow: (workflowId: string, data: WorkflowUpdate) => void;
+  onCreateWorkflow: (teamId: string, data: { name: string; starting_agent_id: string; starting_prompt: string }) => void;
 }
 
 type AgentTab = "general" | "handoff" | "sub-agents";
@@ -41,6 +42,7 @@ export function SidePanel({
   onDeleteEdge,
   onCreateEdge,
   onUpdateWorkflow,
+  onCreateWorkflow,
 }: SidePanelProps) {
   const [activeTab, setActiveTab] = useState<AgentTab>("general");
 
@@ -108,6 +110,7 @@ export function SidePanel({
             agents={agents}
             onUpdateEdge={onUpdateEdge}
             onUpdateWorkflow={onUpdateWorkflow}
+            onCreateWorkflow={onCreateWorkflow}
           />
         </div>
       </PanelShell>

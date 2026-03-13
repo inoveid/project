@@ -24,7 +24,6 @@ import { TeamGroupNode } from "../components/canvas/TeamGroupNode";
 import { WorkflowEdgeComponent } from "../components/canvas/WorkflowEdge";
 import { WorkflowFilter } from "../components/canvas/WorkflowFilter";
 import { CreateTeamForm } from "../components/canvas/CreateTeamForm";
-import { CreateWorkflowForm } from "../components/canvas/CreateWorkflowForm";
 import { CreateAgentModal } from "../components/canvas/CreateAgentModal";
 import { ConnectEdgeDialog } from "../components/canvas/ConnectEdgeDialog";
 import { SidePanel, type SidePanelSelection } from "../components/canvas/sidepanel/SidePanel";
@@ -53,7 +52,6 @@ export function CanvasPage() {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
   const [panelSelection, setPanelSelection] = useState<SidePanelSelection | null>(null);
   const [showCreateTeam, setShowCreateTeam] = useState(false);
-  const [createWorkflowTeamId, setCreateWorkflowTeamId] = useState<string | null>(null);
   const [createAgentTeamId, setCreateAgentTeamId] = useState<string | null>(null);
   const [pendingConnection, setPendingConnection] = useState<{
     fromId: string;
@@ -90,7 +88,7 @@ export function CanvasPage() {
   }, []);
 
   const handleAddWorkflow = useCallback((teamId: string) => {
-    setCreateWorkflowTeamId(teamId);
+    setPanelSelection({ type: "team", teamId });
   }, []);
 
   // Build layout
@@ -219,20 +217,6 @@ export function CanvasPage() {
         </div>
       </div>
 
-      {createWorkflowTeamId && (
-        <div className="px-1 pb-2">
-          <CreateWorkflowForm
-            teamId={createWorkflowTeamId}
-            agents={allAgents ?? []}
-            onSubmit={(teamId, data) => {
-              void mutations.handleCreateWorkflow(teamId, data);
-              setCreateWorkflowTeamId(null);
-            }}
-            onCancel={() => setCreateWorkflowTeamId(null)}
-          />
-        </div>
-      )}
-
       <div className="flex flex-1 border rounded-lg overflow-hidden bg-gray-50">
         <div className="flex-1">
           <ReactFlow
@@ -295,6 +279,9 @@ export function CanvasPage() {
             }}
             onUpdateWorkflow={(workflowId, data) => {
               void mutations.handleUpdateWorkflow(workflowId, data);
+            }}
+            onCreateWorkflow={(teamId, data) => {
+              void mutations.handleCreateWorkflow(teamId, data);
             }}
           />
         )}

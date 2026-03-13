@@ -9,6 +9,7 @@ interface WorkflowPanelProps {
   agents: Agent[];
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
   onUpdateWorkflow: (workflowId: string, data: WorkflowUpdate) => void;
+  onCreateWorkflow: (teamId: string, data: { name: string; starting_agent_id: string; starting_prompt: string }) => void;
 }
 
 interface ChainStep {
@@ -84,44 +85,59 @@ export function WorkflowPanel({
   agents,
   onUpdateEdge,
   onUpdateWorkflow,
+  onCreateWorkflow,
 }: WorkflowPanelProps) {
   const teamWorkflows = workflows.filter((w) => w.team_id === teamId);
+  const teamAgents = agents.filter((a) => a.team_id === teamId);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(
     teamWorkflows[0]?.id ?? "",
   );
+  const [showCreateForm, setShowCreateForm] = useState(false);
 
   const selectedWorkflow = teamWorkflows.find((w) => w.id === selectedWorkflowId);
   const wfEdges = workflowEdges.filter((e) => e.workflow_id === selectedWorkflowId);
 
-  if (teamWorkflows.length === 0) {
-    return (
-      <div className="p-4 text-sm text-gray-400">
-        Нет workflow в этой команде
-      </div>
-    );
-  }
-
   return (
     <div className="p-4 space-y-4">
-      {/* Workflow selector */}
-      {teamWorkflows.length > 1 ? (
-        <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Workflow</label>
+      {/* Workflow selector + create button */}
+      <div className="flex items-center gap-2">
+        {teamWorkflows.length > 0 ? (
           <select
             value={selectedWorkflowId}
             onChange={(e) => setSelectedWorkflowId(e.target.value)}
-            className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+            className="flex-1 border border-gray-300 rounded px-3 py-1.5 text-sm"
           >
             {teamWorkflows.map((w) => (
               <option key={w.id} value={w.id}>{w.name}</option>
             ))}
           </select>
-        </div>
-      ) : (
-        <div className="text-sm font-medium text-gray-800">{teamWorkflows[0]!.name}</div>
+        ) : (
+          <span className="flex-1 text-sm text-gray-400">Нет workflow</span>
+        )}
+        <button
+          type="button"
+          onClick={() => setShowCreateForm(!showCreateForm)}
+          className="text-xs text-blue-600 border border-blue-200 rounded px-2 py-1 hover:bg-blue-50 whitespace-nowrap"
+        >
+          {showCreateForm ? "Отмена" : "+ Workflow"}
+        </button>
+      </div>
+
+      {/* Inline create form */}
+      {showCreateForm && (
+        <CreateWorkflowInline
+          teamId={teamId}
+          agents={teamAgents}
+          onSubmit={(data) => {
+            onCreateWorkflow(teamId, data);
+            setShowCreateForm(false);
+          }}
+          onCancel={() => setShowCreateForm(false)}
+        />
       )}
 
-      {selectedWorkflow && (
+      {/* Selected workflow editor */}
+      {selectedWorkflow && !showCreateForm && (
         <WorkflowPromptEditor
           workflow={selectedWorkflow}
           edges={wfEdges}
@@ -386,5 +402,91 @@ function ReturnEdgeSection({
         />
       )}
     </div>
+  );
+}
+
+
+// ── Inline create workflow form ──────────────────────────────────────────────
+
+function CreateWorkflowInline({
+  teamId,
+  agents,
+  onSubmit,
+  onCancel,
+}: {
+  teamId: string;
+  agents: Agent[];
+  onSubmit: (data: { name: string; starting_agent_id: string; starting_prompt: string }) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [startingAgentId, setStartingAgentId] = useState("");
+  const [startingPrompt, setStartingPrompt] = useState("");
+
+  const isValid = name.trim() && startingAgentId && startingPrompt.trim();
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!isValid) return;
+    onSubmit({
+      name: name.trim(),
+      starting_agent_id: startingAgentId,
+      starting_prompt: startingPrompt.trim(),
+    });
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3 p-3 border border-blue-200 rounded bg-blue-50/50">
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Название</label>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="w-full border border-gray-300 rounded px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+          placeholder="Например: Dev → Review"
+          autoFocus
+        />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Стартовый агент</label>
+        <select
+          value={startingAgentId}
+          onChange={(e) => setStartingAgentId(e.target.value)}
+          className="w-full border border-gray-300 rounded px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+        >
+          <option value="">— выбрать —</option>
+          {agents.map((a) => (
+            <option key={a.id} value={a.id}>{a.name}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Стартовый промпт</label>
+        <textarea
+          value={startingPrompt}
+          onChange={(e) => setStartingPrompt(e.target.value)}
+          className="w-full border border-gray-300 rounded px-2.5 py-1.5 text-sm font-mono resize-y min-h-[60px] focus:outline-none focus:ring-2 focus:ring-blue-400"
+          placeholder="Промпт для первого агента..."
+          rows={3}
+        />
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={!isValid}
+          className="text-sm bg-blue-600 text-white rounded px-3 py-1.5 hover:bg-blue-700 disabled:opacity-50"
+        >
+          Создать
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="text-sm text-gray-500 hover:text-gray-700"
+        >
+          Отмена
+        </button>
+      </div>
+    </form>
   );
 }
