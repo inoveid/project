@@ -127,7 +127,6 @@ export function WorkflowPanel({
           workflow={selectedWorkflow}
           edges={wfEdges}
           agents={agents}
-          isLocked={lockedWorkflowIds.has(selectedWorkflowId)}
           onUpdateEdge={onUpdateEdge}
         />
       )}
@@ -141,13 +140,11 @@ function WorkflowChainStepper({
   workflow,
   edges,
   agents,
-  isLocked,
   onUpdateEdge,
 }: {
   workflow: Workflow;
   edges: WorkflowEdge[];
   agents: Agent[];
-  isLocked: boolean;
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
 }) {
   const { steps, returnEdges } = buildChain(workflow, edges, agents);
