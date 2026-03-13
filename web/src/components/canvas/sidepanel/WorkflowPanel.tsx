@@ -10,6 +10,7 @@ interface WorkflowPanelProps {
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
   onUpdateWorkflow: (workflowId: string, data: WorkflowUpdate) => void;
   onCreateWorkflow: (teamId: string, data: { name: string; starting_agent_id: string; starting_prompt: string }) => void;
+  onDeleteWorkflow: (id: string) => void;
 }
 
 interface ChainStep {
@@ -86,6 +87,7 @@ export function WorkflowPanel({
   onUpdateEdge,
   onUpdateWorkflow,
   onCreateWorkflow,
+  onDeleteWorkflow,
 }: WorkflowPanelProps) {
   const teamWorkflows = workflows.filter((w) => w.team_id === teamId);
   const teamAgents = agents.filter((a) => a.team_id === teamId);
@@ -93,6 +95,7 @@ export function WorkflowPanel({
     teamWorkflows[0]?.id ?? "",
   );
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const selectedWorkflow = teamWorkflows.find((w) => w.id === selectedWorkflowId);
   const wfEdges = workflowEdges.filter((e) => e.workflow_id === selectedWorkflowId);
@@ -138,13 +141,55 @@ export function WorkflowPanel({
 
       {/* Selected workflow editor */}
       {selectedWorkflow && !showCreateForm && (
-        <WorkflowPromptEditor
-          workflow={selectedWorkflow}
-          edges={wfEdges}
-          agents={agents}
-          onUpdateEdge={onUpdateEdge}
-          onUpdateWorkflow={onUpdateWorkflow}
-        />
+        <>
+          <WorkflowPromptEditor
+            key={selectedWorkflow.id}
+            workflow={selectedWorkflow}
+            edges={wfEdges}
+            agents={agents}
+            onUpdateEdge={onUpdateEdge}
+            onUpdateWorkflow={onUpdateWorkflow}
+          />
+
+          {/* Delete workflow */}
+          <div className="pt-4 border-t border-gray-100">
+            {!showDeleteConfirm ? (
+              <button
+                type="button"
+                className="text-sm text-red-500 hover:text-red-700"
+                onClick={() => setShowDeleteConfirm(true)}
+              >
+                Удалить workflow
+              </button>
+            ) : (
+              <div className="p-3 border border-red-200 rounded bg-red-50 space-y-2">
+                <p className="text-sm text-red-700">
+                  Удалить <b>{selectedWorkflow.name}</b>? Все связи этого workflow будут удалены.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="text-sm bg-red-600 text-white rounded px-3 py-1 hover:bg-red-700"
+                    onClick={() => {
+                      onDeleteWorkflow(selectedWorkflow.id);
+                      setShowDeleteConfirm(false);
+                      setSelectedWorkflowId(teamWorkflows.find(w => w.id !== selectedWorkflow.id)?.id ?? "");
+                    }}
+                  >
+                    Да, удалить
+                  </button>
+                  <button
+                    type="button"
+                    className="text-sm text-gray-500 hover:text-gray-700"
+                    onClick={() => setShowDeleteConfirm(false)}
+                  >
+                    Отмена
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );

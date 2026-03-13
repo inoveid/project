@@ -7,6 +7,7 @@ import {
   createWorkflowEdge,
   updateWorkflow,
   updateWorkflowEdge,
+  deleteWorkflow,
   deleteWorkflowEdge,
 } from "../api/workflows";
 import type {
@@ -111,7 +112,17 @@ export function useCanvasMutations() {
     }
   }, [invalidateWorkflows, addToast]);
 
-    const handleCreateEdge = useCallback(async (workflowId: string, data: WorkflowEdgeCreate) => {
+    const handleDeleteWorkflow = useCallback(async (id: string) => {
+    try {
+      await deleteWorkflow(id);
+      invalidateWorkflows();
+      invalidateEdges();
+    } catch (err) {
+      addToast({ type: "error", title: "Ошибка удаления workflow", message: formatError(err) });
+    }
+  }, [invalidateWorkflows, invalidateEdges, addToast]);
+
+  const handleCreateEdge = useCallback(async (workflowId: string, data: WorkflowEdgeCreate) => {
     try {
       await createWorkflowEdge(workflowId, data);
       invalidateEdges();
@@ -154,6 +165,7 @@ export function useCanvasMutations() {
     handleDeleteAgent,
     handleCreateWorkflow,
     handleUpdateWorkflow,
+    handleDeleteWorkflow,
     handleCreateEdge,
     handleUpdateEdge,
     handleDeleteEdge,

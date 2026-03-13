@@ -8,6 +8,7 @@ import { WorkflowPanel } from "./WorkflowPanel";
 
 export type SidePanelSelection =
   | { type: "agent"; agentId: string }
+  | { type: "agent-create"; teamId: string }
   | { type: "edge"; edgeId: string }
   | { type: "team"; teamId: string };
 
@@ -25,6 +26,8 @@ interface SidePanelProps {
   onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string) => void;
   onUpdateWorkflow: (workflowId: string, data: WorkflowUpdate) => void;
   onCreateWorkflow: (teamId: string, data: { name: string; starting_agent_id: string; starting_prompt: string }) => void;
+  onDeleteWorkflow: (id: string) => void;
+  onCreateAgent: (teamId: string, data: { name: string; system_prompt: string; role: string }) => void;
 }
 
 type AgentTab = "general" | "handoff" | "sub-agents";
@@ -43,6 +46,8 @@ export function SidePanel({
   onCreateEdge,
   onUpdateWorkflow,
   onCreateWorkflow,
+  onDeleteWorkflow,
+  onCreateAgent,
 }: SidePanelProps) {
   const [activeTab, setActiveTab] = useState<AgentTab>("general");
 
@@ -99,6 +104,21 @@ export function SidePanel({
     );
   }
 
+  if (selection.type === "agent-create") {
+    return (
+      <PanelShell title="Новый агент" onClose={onClose}>
+        <div className="flex-1 overflow-y-auto p-4">
+          <AgentCreateForm
+            onSubmit={(data) => {
+              onCreateAgent(selection.teamId, data);
+              onClose();
+            }}
+          />
+        </div>
+      </PanelShell>
+    );
+  }
+
   if (selection.type === "team") {
     return (
       <PanelShell title="Workflow" onClose={onClose}>
@@ -111,6 +131,7 @@ export function SidePanel({
             onUpdateEdge={onUpdateEdge}
             onUpdateWorkflow={onUpdateWorkflow}
             onCreateWorkflow={onCreateWorkflow}
+            onDeleteWorkflow={onDeleteWorkflow}
           />
         </div>
       </PanelShell>
@@ -203,5 +224,58 @@ function TabBar<T extends string>({
         </button>
       ))}
     </div>
+  );
+}
+
+
+function AgentCreateForm({
+  onSubmit,
+}: {
+  onSubmit: (data: { name: string; system_prompt: string; role: string }) => void;
+}) {
+  const [name, setName] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
+
+  const canSubmit = name.trim().length > 0 && systemPrompt.trim().length > 0;
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canSubmit) return;
+    onSubmit({ name: name.trim(), system_prompt: systemPrompt.trim(), role: "agent" });
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <label className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-gray-600">Имя <span className="text-red-400">*</span></span>
+        <input
+          type="text"
+          className="border border-gray-200 rounded px-2 py-1.5 text-sm"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Например: Developer"
+          autoFocus
+          maxLength={100}
+        />
+      </label>
+
+      <label className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-gray-600">Системный промпт <span className="text-red-400">*</span></span>
+        <textarea
+          className="border border-gray-200 rounded px-2 py-1.5 text-sm resize-y min-h-[120px] font-mono text-xs"
+          value={systemPrompt}
+          onChange={(e) => setSystemPrompt(e.target.value)}
+          placeholder="Инструкции для агента..."
+        />
+      </label>
+
+      <button
+        type="submit"
+        disabled={!canSubmit}
+        className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50 self-start"
+      >
+        Создать
+      </button>
+    </form>
   );
 }

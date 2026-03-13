@@ -24,7 +24,6 @@ import { TeamGroupNode } from "../components/canvas/TeamGroupNode";
 import { WorkflowEdgeComponent } from "../components/canvas/WorkflowEdge";
 import { WorkflowFilter } from "../components/canvas/WorkflowFilter";
 import { CreateTeamForm } from "../components/canvas/CreateTeamForm";
-import { CreateAgentModal } from "../components/canvas/CreateAgentModal";
 import { ConnectEdgeDialog } from "../components/canvas/ConnectEdgeDialog";
 import { SidePanel, type SidePanelSelection } from "../components/canvas/sidepanel/SidePanel";
 import {
@@ -52,7 +51,6 @@ export function CanvasPage() {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
   const [panelSelection, setPanelSelection] = useState<SidePanelSelection | null>(null);
   const [showCreateTeam, setShowCreateTeam] = useState(false);
-  const [createAgentTeamId, setCreateAgentTeamId] = useState<string | null>(null);
   const [pendingConnection, setPendingConnection] = useState<{
     fromId: string;
     toId: string;
@@ -84,7 +82,7 @@ export function CanvasPage() {
 
   // Callbacks for group node buttons
   const handleAddAgent = useCallback((teamId: string) => {
-    setCreateAgentTeamId(teamId);
+    setPanelSelection({ type: "agent-create", teamId });
   }, []);
 
   const handleAddWorkflow = useCallback((teamId: string) => {
@@ -283,23 +281,15 @@ export function CanvasPage() {
             onCreateWorkflow={(teamId, data) => {
               void mutations.handleCreateWorkflow(teamId, data);
             }}
+            onDeleteWorkflow={(id) => {
+              void mutations.handleDeleteWorkflow(id);
+            }}
+            onCreateAgent={(teamId, data) => {
+              void mutations.handleCreateAgent(teamId, data);
+            }}
           />
         )}
       </div>
-
-      {createAgentTeamId && (
-        <CreateAgentModal
-          defaultName={`Agent ${(allAgents?.filter((a) => a.team_id === createAgentTeamId).length ?? 0) + 1}`}
-          onSubmit={(data) => {
-            void mutations.handleCreateAgent(createAgentTeamId, {
-              ...data,
-              role: "agent",
-            });
-            setCreateAgentTeamId(null);
-          }}
-          onClose={() => setCreateAgentTeamId(null)}
-        />
-      )}
 
       {pendingConnection && (
         <ConnectEdgeDialog
