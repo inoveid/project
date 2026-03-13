@@ -104,7 +104,6 @@ export function SidePanel({
             workflows={workflows}
             workflowEdges={workflowEdges}
             agents={agents}
-            lockedWorkflowIds={lockedWorkflowIds}
             onUpdateEdge={onUpdateEdge}
           />
         </div>

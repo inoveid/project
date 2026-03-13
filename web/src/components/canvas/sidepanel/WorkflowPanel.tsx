@@ -6,7 +6,6 @@ interface WorkflowPanelProps {
   workflows: Workflow[];
   workflowEdges: WorkflowEdge[];
   agents: Agent[];
-  lockedWorkflowIds: Set<string>;
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
 }
 
@@ -83,7 +82,6 @@ export function WorkflowPanel({
   workflows,
   workflowEdges,
   agents,
-  lockedWorkflowIds,
   onUpdateEdge,
 }: WorkflowPanelProps) {
   const teamWorkflows = workflows.filter((w) => w.team_id === teamId);
