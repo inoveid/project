@@ -28,31 +28,6 @@ function makeHandoffItem(
   };
 }
 
-function updateStreamingItem(refs: PendingRefs, setItems: Dispatch<SetStateAction<ChatItem[]>>): void {
-  setItems((prev) => {
-    const idx = prev.findIndex((i) => !isHandoffItem(i) && i.id === "__streaming__");
-    if (idx === -1) return prev;
-    const current = prev[idx] as Message;
-    const updated: Message = {
-      ...current,
-      content: refs.textRef.current,
-      tool_uses: refs.toolsRef.current.length > 0 ? refs.toolsRef.current.map((t) => ({ ...t })) : null,
-    };
-    const result = [...prev];
-    result[idx] = updated;
-    return result;
-  });
-}
-
-function updateSubAgentStreamingItem(refs: PendingRefs, setItems: Dispatch<SetStateAction<ChatItem[]>>): void {
-  if (!refs.subAgentRef.current) return;
-  const snapshot = { ...refs.subAgentRef.current, toolUses: (refs.subAgentRef.current.toolUses ?? []).map((t) => ({ ...t })) };
-  setItems((prev) => {
-    const withoutPending = prev.filter((i) => i.id !== "__sub_agent_streaming__");
-    return [...withoutPending, snapshot];
-  });
-}
-
 export function handleEvent(
   event: WsIncoming,
   refs: PendingRefs,
@@ -64,7 +39,6 @@ export function handleEvent(
     case "assistant_text":
       setStatus("typing");
       refs.textRef.current += event.content;
-      // Remove activity indicator when real content arrives
       setItems((prev) => prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__"));
       setItems((prev) => {
         const last = prev[prev.length - 1];
@@ -96,7 +70,20 @@ export function handleEvent(
         tool_name: event.tool_name,
         tool_input: event.tool_input,
       });
-      updateStreamingItem(refs, setItems);
+      // Update streaming message with tool info
+      setItems((prev) => {
+        const idx = prev.findIndex((i) => !isHandoffItem(i) && i.id === "__streaming__");
+        if (idx === -1) return prev;
+        const current = prev[idx] as Message;
+        const updated: Message = {
+          ...current,
+          content: refs.textRef.current,
+          tool_uses: refs.toolsRef.current.map((t) => ({ ...t })),
+        };
+        const result = [...prev];
+        result[idx] = updated;
+        return result;
+      });
       setItems((prev) => {
         const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
         const activityItem: HandoffItem = {
@@ -116,8 +103,19 @@ export function handleEvent(
       if (lastTool) {
         lastTool.result = event.content;
       }
-      updateStreamingItem(refs, setItems);
-      // Update activity to "thinking" after tool completes
+      setItems((prev) => {
+        const idx = prev.findIndex((i) => !isHandoffItem(i) && i.id === "__streaming__");
+        if (idx === -1) return prev;
+        const current = prev[idx] as Message;
+        const updated: Message = {
+          ...current,
+          content: refs.textRef.current,
+          tool_uses: refs.toolsRef.current.map((t) => ({ ...t })),
+        };
+        const result = [...prev];
+        result[idx] = updated;
+        return result;
+      });
       setItems((prev) => {
         const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
         const activityItem: HandoffItem = {
@@ -140,9 +138,6 @@ export function handleEvent(
       refs.toolsRef.current = [];
 
       setItems((prev) => {
-        const streamingIdx = prev.findIndex(
-          (i) => !isHandoffItem(i) && i.id === "__streaming__",
-        );
         const withoutStreaming = prev.filter(
           (i) => !(!isHandoffItem(i) && i.id === "__streaming__"),
         );
@@ -150,6 +145,9 @@ export function handleEvent(
 
         const msg = makeLocalMessage("assistant", text);
         msg.tool_uses = tools.length > 0 ? tools : null;
+        const streamingIdx = prev.findIndex(
+          (i) => !isHandoffItem(i) && i.id === "__streaming__",
+        );
         if (streamingIdx !== -1) {
           const result = [...withoutStreaming];
           result.splice(streamingIdx, 0, msg);
@@ -191,87 +189,6 @@ export function handleEvent(
       break;
     }
 
-    case "sub_agent_assistant_text": {
-      if (!refs.subAgentRef.current) {
-        refs.subAgentRef.current = {
-          id: "__sub_agent_streaming__",
-          itemType: "sub_agent_turn",
-          agentName: event.agent_name,
-          content: "",
-          toolUses: [],
-          created_at: new Date().toISOString(),
-        };
-      }
-      refs.subAgentRef.current.content += event.content;
-      const snapshot = { ...refs.subAgentRef.current };
-      setItems((prev) => {
-        const withoutPending = prev.filter((i) => i.id !== "__sub_agent_streaming__");
-        return [...withoutPending, snapshot];
-      });
-      break;
-    }
-
-    case "sub_agent_tool_use": {
-      if (refs.subAgentRef.current) {
-        refs.subAgentRef.current.toolUses = [
-          ...(refs.subAgentRef.current.toolUses ?? []),
-          { tool_name: event.tool_name, tool_input: event.tool_input },
-        ];
-        updateSubAgentStreamingItem(refs, setItems);
-      }
-      const subToolLabels: Record<string, string> = {
-        Read: "Читает файл...",
-        Edit: "Редактирует файл...",
-        Write: "Пишет файл...",
-        Bash: "Выполняет команду...",
-        Grep: "Ищет в файлах...",
-        Glob: "Ищет файлы...",
-      };
-      const subLabel = subToolLabels[event.tool_name] || `${event.tool_name}...`;
-      setItems((prev) => {
-        const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
-        const activityItem: HandoffItem = {
-          id: "__activity__",
-          itemType: "activity",
-          agentName: event.agent_name,
-          content: `${event.agent_name}: ${subLabel}`,
-          created_at: new Date().toISOString(),
-        };
-        return [...withoutActivity, activityItem];
-      });
-      break;
-    }
-
-    case "sub_agent_tool_result": {
-      if (refs.subAgentRef.current) {
-        const tools = refs.subAgentRef.current.toolUses ?? [];
-        const last = tools[tools.length - 1];
-        if (last) last.result = event.content;
-        updateSubAgentStreamingItem(refs, setItems);
-      }
-      break;
-    }
-
-    case "sub_agent_error":
-      setError(`[${event.agent_name}] ${event.error}`);
-      break;
-
-    case "handoff_done": {
-      if (refs.subAgentRef.current) {
-        const final: HandoffItem = {
-          ...refs.subAgentRef.current,
-          id: crypto.randomUUID(),
-          itemType: "handoff_done",
-        };
-        refs.subAgentRef.current = null;
-        setItems((prev) => {
-          const withoutPending = prev.filter((i) => i.id !== "__sub_agent_streaming__");
-          return [...withoutPending, final];
-        });
-      }
-      break;
-    }
-
     case "status": {
       const statusLabels: Record<string, string> = {
         thinking: "Думает...",
@@ -305,8 +222,6 @@ export function handleEvent(
     }
 
     default:
-      // Unknown event type — log for debugging. If you added a new backend event,
-      // also add it to WsIncoming in types/index.ts and handle it here.
       console.warn("[chat] Unknown WS event type:", (event as Record<string, unknown>).type);
       break;
   }

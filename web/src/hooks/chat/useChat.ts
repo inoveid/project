@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ApprovalRequest, ChatItem, HandoffItem, Message, ToolUse, WsIncoming } from "../../types";
+import type { ApprovalRequest, ChatItem, Message, ToolUse, WsIncoming } from "../../types";
 import { isHandoffItem } from "../../types";
 import type { ChatStatus, PendingRefs, UseChatResult } from "./chatState";
 import { makeLocalMessage } from "./chatState";
@@ -18,7 +18,6 @@ export function useChat(
 
   const pendingTextRef = useRef("");
   const pendingToolsRef = useRef<ToolUse[]>([]);
-  const pendingSubAgentRef = useRef<HandoffItem | null>(null);
   const initializedRef = useRef(false);
   const initialMessagesRef = useRef(initialMessages);
   initialMessagesRef.current = initialMessages;
@@ -26,7 +25,6 @@ export function useChat(
   const refs: PendingRefs = useMemo(() => ({
     textRef: pendingTextRef,
     toolsRef: pendingToolsRef,
-    subAgentRef: pendingSubAgentRef,
   }), []);
 
   const onEvent = useCallback(
@@ -39,15 +37,13 @@ export function useChat(
   const onDisconnect = useCallback(() => {
     pendingTextRef.current = "";
     pendingToolsRef.current = [];
-    pendingSubAgentRef.current = null;
     setItems((prev) => prev.filter((i) => {
-      if (isHandoffItem(i)) return i.id !== "__sub_agent_streaming__" && i.id !== "__activity__";
+      if (isHandoffItem(i)) return i.id !== "__activity__";
       return i.id !== "__streaming__";
     }));
   }, []);
 
-  // Set initial messages when session loads or API data refreshes.
-  // IMPORTANT: must be declared before useChatSocket to preserve effect ordering.
+  // Set initial messages — MUST be before useChatSocket for effect ordering
   useEffect(() => {
     if (!enabled) return;
     if (initializedRef.current && initialMessagesRef.current.length === 0) return;
@@ -100,7 +96,6 @@ export function useChat(
   }, [send, isOpen]);
 
   // Auto-send first pending message when WebSocket connects
-  // (e.g. starting_prompt created by task start)
   const autoSentRef = useRef(false);
   useEffect(() => {
     if (status !== "connected" || autoSentRef.current) return;

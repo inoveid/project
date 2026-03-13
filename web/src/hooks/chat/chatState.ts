@@ -1,5 +1,5 @@
 import type { MutableRefObject } from "react";
-import type { ApprovalRequest, ChatItem, HandoffItem, Message, ToolUse } from "../../types";
+import type { ApprovalRequest, ChatItem, Message, ToolUse } from "../../types";
 
 export type ChatStatus = "idle" | "connecting" | "connected" | "typing" | "tool" | "disconnected" | "awaiting_approval";
 
@@ -18,7 +18,6 @@ export interface UseChatResult {
 export interface PendingRefs {
   textRef: MutableRefObject<string>;
   toolsRef: MutableRefObject<ToolUse[]>;
-  subAgentRef: MutableRefObject<HandoffItem | null>;
 }
 
 export function makeLocalMessage(role: "user" | "assistant", content: string): Message {
