@@ -38,6 +38,7 @@ class TaskRead(BaseModel):
     workflow_id: Optional[uuid.UUID]
     spec_id: Optional[uuid.UUID]
     status: str
+    error_message: Optional[str] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

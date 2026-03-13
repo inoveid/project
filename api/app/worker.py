@@ -458,7 +458,11 @@ async def _run_graph(graph, input, config: dict) -> tuple[bool, bool, bool, dict
         logger.error("Graph error for session %s: %s",
                      config["configurable"]["thread_id"], exc, exc_info=True)
         await publisher.send_json({"type": "error", "error": str(exc)})
-        await _try_update_task_status(db, task_id, "error")
+        # Save readable error to task
+        if task_id:
+            from app.services.task_service import set_task_error
+            readable = f"Ошибка агента: {str(exc)[:200]}"
+            await set_task_error(db, task_id, readable)
         await publish_notification("task_error", {
             "task_id": str(task_id) if task_id else "",
             "error": str(exc),

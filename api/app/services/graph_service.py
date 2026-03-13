@@ -320,13 +320,31 @@ async def complete_node(state: WorkflowState, config: RunnableConfig) -> dict:
 
 
 async def blocked_node(state: WorkflowState, config: RunnableConfig) -> dict:
-    """Handoff blocked (max_cycles exceeded)."""
+    """Handoff blocked (max_cycles exceeded) — set task to error."""
+    cfg = _get_configurable(config)
+    db: AsyncSession = cfg["db"]
     hr = state["handoff_result"]
     reason = hr.get("reason", "unknown") if hr else "unknown"
+
+    # Human-readable error message
+    from_name = state.get("current_agent_name", "")
+    to_name = hr.get("to_agent_name", "") if hr else ""
+    max_r = ""
+    if hr and "max_rounds" in hr.get("reason", ""):
+        import re as _re
+        m = _re.search(r"max_rounds \((\d+)\)", reason)
+        max_r = m.group(1) if m else "3"
+    readable = f"Агенты {from_name} и {to_name} обменялись {max_r or 3} раза без результата. Цикл остановлен."
+
+    task_id = state.get("task_id")
+    if task_id:
+        from app.services.task_service import set_task_error
+        await set_task_error(db, uuid.UUID(task_id), readable)
+
     await publish_notification("max_cycles_reached", {
-        "agent_name": hr.get("to_agent_name", "") if hr else "",
-        "reason": reason,
-        "task_id": state.get("task_id", ""),
+        "agent_name": to_name,
+        "reason": readable,
+        "task_id": task_id or "",
     })
     return {"handoff_result": None, "gateway_approved": None}
 

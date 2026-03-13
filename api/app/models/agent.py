@@ -28,9 +28,6 @@ class Agent(Base):
     system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
     allowed_tools: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    prompts: Mapped[list] = mapped_column(
-        JSONB, nullable=False, default=list, server_default="[]"
-    )
     sub_agent_templates: Mapped[list] = mapped_column(
         JSONB, nullable=False, default=list, server_default="[]"
     )

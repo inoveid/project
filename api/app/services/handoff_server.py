@@ -37,7 +37,6 @@ class HandoffTool:
     edge_id: uuid.UUID | None = None
     to_agent_id: uuid.UUID | None = None
     prompt_template: str | None = None
-    prompt_id: str | None = None
 
 
 class HandoffResultType(str, Enum):
@@ -154,7 +153,6 @@ async def generate_handoff_tools(
             to_agent_name=to_name,
             requires_approval=edge.requires_approval,
             prompt_template=edge.prompt_template,
-            prompt_id=edge.prompt_id,
         ))
 
     # Add complete_task only if agent has the permission
@@ -250,16 +248,6 @@ async def resolve_handoff_prompt(
 
     if tool.prompt_template:
         return tool.prompt_template
-
-    if tool.prompt_id:
-        agent = await db.get(Agent, tool.to_agent_id)
-        if agent and agent.prompts:
-            for prompt_entry in agent.prompts:
-                if isinstance(prompt_entry, dict) and prompt_entry.get("id") == tool.prompt_id:
-                    content = prompt_entry.get("content", "")
-                    if content and task:
-                        return render_prompt(content, task)
-                    return content
 
     # Fallback: use comment/notes/summary from tool args
     return (

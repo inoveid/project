@@ -45,6 +45,7 @@ class Task(Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="backlog"
     )
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

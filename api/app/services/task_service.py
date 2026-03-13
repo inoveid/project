@@ -133,6 +133,21 @@ async def delete_task(db: AsyncSession, task_id: uuid.UUID) -> None:
     await db.commit()
 
 
+async def set_task_error(db: AsyncSession, task_id: uuid.UUID, message: str) -> None:
+    """Set task to error status with human-readable message."""
+    try:
+        task = await get_task(db, task_id)
+        current = task.status
+        allowed = VALID_TRANSITIONS.get(current, [])
+        if "error" in allowed:
+            task.status = "error"
+            task.error_message = message
+            await db.commit()
+            logger.info("Task %s → error: %s", task_id, message)
+    except Exception as exc:
+        logger.error("Failed to set task error for %s: %s", task_id, exc)
+
+
 async def update_task_status(
     db: AsyncSession, task_id: uuid.UUID, new_status: str
 ) -> Task:
@@ -157,6 +172,8 @@ async def update_task_status(
             )
 
     task.status = new_status
+    if new_status == "in_progress":
+        task.error_message = None
     await db.commit()
     await db.refresh(task)
 
