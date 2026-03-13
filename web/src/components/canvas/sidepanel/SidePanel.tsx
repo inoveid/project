@@ -207,24 +207,26 @@ function AgentsPanel({
       title="Agents"
       onClose={onClose}
       headerButtons={
-        <>
-          <button
-            type="button"
-            onClick={() => { setShowCreateForm(!showCreateForm); setShowDeleteConfirm(false); }}
-            className="text-[11px] text-blue-600 border border-blue-200 rounded px-2 py-0.5 hover:bg-blue-50"
-          >
-            {showCreateForm ? "Отмена" : "Добавить"}
-          </button>
-          {selectedAgent && !showCreateForm && (
+        teamAgents.length > 0 ? (
+          <>
             <button
               type="button"
-              onClick={() => { setShowDeleteConfirm(!showDeleteConfirm); }}
-              className="text-[11px] text-red-500 border border-red-200 rounded px-2 py-0.5 hover:bg-red-50"
+              onClick={() => { setShowCreateForm(!showCreateForm); setShowDeleteConfirm(false); }}
+              className="text-[11px] text-blue-600 border border-blue-200 rounded px-2 py-0.5 hover:bg-blue-50"
             >
-              Удалить
+              {showCreateForm ? "Отмена" : "Добавить"}
             </button>
-          )}
-        </>
+            {selectedAgent && !showCreateForm && (
+              <button
+                type="button"
+                onClick={() => { setShowDeleteConfirm(!showDeleteConfirm); }}
+                className="text-[11px] text-red-500 border border-red-200 rounded px-2 py-0.5 hover:bg-red-50"
+              >
+                Удалить
+              </button>
+            )}
+          </>
+        ) : undefined
       }
     >
       <div className="flex-1 overflow-y-auto">

@@ -103,24 +103,26 @@ export function WorkflowPanel({
   return (
     <div className="p-4 space-y-4">
       {/* Header buttons */}
-      <div className="flex items-center gap-1">
-        <button
-          type="button"
-          onClick={() => { setShowCreateForm(!showCreateForm); setShowDeleteConfirm(false); }}
-          className="text-[11px] text-blue-600 border border-blue-200 rounded px-2 py-0.5 hover:bg-blue-50"
-        >
-          {showCreateForm ? "Отмена" : "Добавить"}
-        </button>
-        {selectedWorkflow && !showCreateForm && (
+      {teamWorkflows.length > 0 && (
+        <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => setShowDeleteConfirm(!showDeleteConfirm)}
-            className="text-[11px] text-red-500 border border-red-200 rounded px-2 py-0.5 hover:bg-red-50"
+            onClick={() => { setShowCreateForm(!showCreateForm); setShowDeleteConfirm(false); }}
+            className="text-[11px] text-blue-600 border border-blue-200 rounded px-2 py-0.5 hover:bg-blue-50"
           >
-            Удалить
+            {showCreateForm ? "Отмена" : "Добавить"}
           </button>
-        )}
-      </div>
+          {selectedWorkflow && !showCreateForm && (
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(!showDeleteConfirm)}
+              className="text-[11px] text-red-500 border border-red-200 rounded px-2 py-0.5 hover:bg-red-50"
+            >
+              Удалить
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Delete confirm */}
       {showDeleteConfirm && selectedWorkflow && (
