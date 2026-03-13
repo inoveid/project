@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
-  MiniMap,
+
   Controls,
   Background,
   type NodeTypes,
@@ -237,13 +237,6 @@ export function CanvasPage() {
             deleteKeyCode="Delete"
             proOptions={{ hideAttribution: true }}
           >
-            <MiniMap
-              nodeColor={(node) => {
-                if (node.type === "teamGroup") return "#dbeafe";
-                return "#ffffff";
-              }}
-              className="!bg-gray-100"
-            />
             <Controls showInteractive={false} />
             <Background gap={20} size={1} />
           </ReactFlow>
