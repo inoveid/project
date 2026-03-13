@@ -41,7 +41,7 @@ export function ProductPreview({ productId }: ProductPreviewProps) {
 
   if (!product) return null;
 
-  const statusCfg = STATUS_MAP[product.status] ?? STATUS_MAP.pending;
+  const statusCfg = STATUS_MAP[product.status] ?? STATUS_MAP["pending"]!;
   const displayFiles = files.slice(0, 7);
   const hasMore = files.length > 7;
 

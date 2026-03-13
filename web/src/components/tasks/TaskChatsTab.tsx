@@ -129,11 +129,11 @@ export function TaskChatsTab({ task }: TaskChatsTabProps) {
   const activeAgentFromWs = (() => {
     // If status is streaming/thinking, the current active agent is working
     // Check the last handoff item to know which agent that is
-    if (mainChat.status === 'streaming' || mainChat.status === 'thinking') {
+    if (mainChat.status === 'typing' || mainChat.status === 'tool') {
       const lastHandoff = [...mainChat.items]
         .reverse()
         .find((i) => isHandoffItem(i) && i.itemType === 'handoff_start');
-      if (lastHandoff && isHandoffItem(lastHandoff)) return lastHandoff.toAgent;
+      if (lastHandoff && isHandoffItem(lastHandoff)) return lastHandoff.toAgent ?? null;
     }
     return null;
   })();

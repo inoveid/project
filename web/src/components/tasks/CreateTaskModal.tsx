@@ -34,7 +34,7 @@ export function CreateTaskModal({ productId, teams, defaultTeamId, onSubmit, onC
     }
     getWorkflows(teamId).then((wfs) => {
       setWorkflows(wfs);
-      setWorkflowId(wfs.length === 1 ? wfs[0].id : '');
+      setWorkflowId(wfs.length === 1 ? wfs[0]!.id : '');
     });
   }, [teamId]);
 
