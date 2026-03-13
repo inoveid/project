@@ -222,16 +222,25 @@ export function handleEvent(
     }
 
     case "sub_agent_spawned": {
+      // Persistent item showing sub-agent was spawned
+      const spawnItem: HandoffItem = {
+        id: \`sub-spawn-\${event.sub_session_id}\`,
+        itemType: "activity",
+        agentName: event.name,
+        content: \`→ \${event.name} (\${event.role}): \${event.task.slice(0, 150)}\`,
+        created_at: new Date().toISOString(),
+      };
       setItems((prev) => {
         const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
+        // Also add activity indicator
         const activityItem: HandoffItem = {
           id: "__activity__",
           itemType: "activity",
           agentName: event.name,
-          content: \`Sub-agent \${event.name} (\${event.role}): \${event.task.slice(0, 100)}\`,
+          content: \`\${event.name}: запущен...\`,
           created_at: new Date().toISOString(),
         };
-        return [...withoutActivity, activityItem];
+        return [...withoutActivity, spawnItem, activityItem];
       });
       break;
     }
@@ -257,31 +266,44 @@ export function handleEvent(
     }
 
     case "sub_agent_done": {
+      // Update the spawn item to show completion
       setItems((prev) => {
         const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
-        const activityItem: HandoffItem = {
-          id: "__activity__",
-          itemType: "activity",
-          agentName: event.name,
-          content: \`Sub-agent \${event.name} завершил работу\`,
-          created_at: new Date().toISOString(),
-        };
-        return [...withoutActivity, activityItem];
+        return withoutActivity.map((item) => {
+          if (isHandoffItem(item) && item.id === \`sub-spawn-\${event.sub_session_id}\`) {
+            return {
+              ...item,
+              content: \`✓ \${event.name} (\${event.role}): завершён\${event.output_preview ? " — " + event.output_preview.slice(0, 100) : ""}\`,
+            };
+          }
+          return item;
+        });
       });
       break;
     }
 
     case "sub_agent_error": {
+      // Update spawn item to show error
+      const errSubId = (event as any).sub_session_id;
       setItems((prev) => {
         const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
-        const activityItem: HandoffItem = {
-          id: "__activity__",
+        if (errSubId) {
+          return withoutActivity.map((item) => {
+            if (isHandoffItem(item) && item.id === \`sub-spawn-\${errSubId}\`) {
+              return { ...item, content: \`✗ \${event.name || "sub-agent"}: \${(event as any).error || "error"}\` };
+            }
+            return item;
+          });
+        }
+        // Fallback: add error item
+        const errorItem: HandoffItem = {
+          id: crypto.randomUUID(),
           itemType: "activity",
           agentName: event.name || "sub-agent",
-          content: \`Sub-agent error: \${(event as any).error || "unknown"}\`,
+          content: \`✗ Sub-agent error: \${(event as any).error || "unknown"}\`,
           created_at: new Date().toISOString(),
         };
-        return [...withoutActivity, activityItem];
+        return [...withoutActivity, errorItem];
       });
       break;
     }

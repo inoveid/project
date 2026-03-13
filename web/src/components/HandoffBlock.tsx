@@ -1,4 +1,5 @@
 import type { HandoffItem } from "../types";
+import { SubAgentBlock } from "./SubAgentBlock";
 import { ToolUseBlock } from "./ToolUseBlock";
 
 interface HandoffBlockProps {
@@ -7,6 +8,17 @@ interface HandoffBlockProps {
 
 export function HandoffBlock({ item }: HandoffBlockProps) {
   if (item.itemType === "activity") {
+    // Sub-agent items get rich rendering
+    const isSubAgent = item.id.startsWith("sub-spawn-");
+    if (isSubAgent) {
+      return (
+        <div className="my-1">
+          <SubAgentBlock content={item.content} agentName={item.agentName} />
+        </div>
+      );
+    }
+
+    // Regular activity (thinking, tool use)
     return (
       <div className="flex items-center gap-2 py-2">
         <div className="flex items-center gap-1.5 bg-gray-100 rounded-2xl px-4 py-2">

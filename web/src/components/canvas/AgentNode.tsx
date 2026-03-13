@@ -81,6 +81,14 @@ export function AgentNode({ data }: NodeProps) {
             End
           </span>
         )}
+        {agent.sub_agent_templates && agent.sub_agent_templates.length > 0 && (
+          <span
+            className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-700"
+            title={agent.sub_agent_templates.map((t: { role: string }) => t.role).join(", ")}
+          >
+            {agent.sub_agent_templates.length} sub-agent{agent.sub_agent_templates.length > 1 ? "s" : ""}
+          </span>
+        )}
       </div>
 
       <Handle
