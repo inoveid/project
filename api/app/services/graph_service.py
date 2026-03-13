@@ -272,10 +272,33 @@ async def notify_handoff_node(state: WorkflowState, config: RunnableConfig) -> d
 
 
 async def gate_node(state: WorkflowState, config: RunnableConfig) -> dict:
-    """HITL gate: pause until human decision."""
-    approved: bool = interrupt("Waiting for human approval of handoff")
-    if not approved:
+    """HITL gate: pause until human decision.
+    
+    Resume values:
+    - True → approve handoff
+    - {"refine": "comment"} → send comment back to current agent, re-run
+    """
+    decision = interrupt("Waiting for human approval of handoff")
+
+    # Refine: user sends comment back to current agent
+    if isinstance(decision, dict) and "refine" in decision:
+        cfg = _get_configurable(config)
+        db: AsyncSession = cfg["db"]
+        session_id = uuid.UUID(state["current_session_id"])
+        comment = decision["refine"]
+        # Save user comment as message for context
+        await add_message(db, session_id, "user", comment)
+        return {
+            "gateway_approved": None,
+            "handoff_result": None,
+            "task": comment,
+        }
+
+    # Reject (False) — should not happen in new flow, but keep as safety
+    if not decision:
         return {"gateway_approved": False, "handoff_result": None}
+
+    # Approve
     return {"gateway_approved": True}
 
 
@@ -330,7 +353,11 @@ def route_after_agent(
     return END
 
 
-def route_after_gate(state: WorkflowState) -> Literal["__end__"]:
+def route_after_gate(state: WorkflowState) -> Literal["run_agent", "__end__"]:
+    """After gate: approve → END (worker handles peer handoff), refine → run_agent again."""
+    if state.get("gateway_approved") is None and state.get("handoff_result") is None:
+        # Refine path — gate cleared handoff_result and set new task
+        return "run_agent"
     return END
 
 

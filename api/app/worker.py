@@ -230,7 +230,22 @@ async def _run_session(
                     publisher, db, task_id, session, *result
                 )
 
+            elif cmd_type == "refine" and interrupted:
+                comment = command.get("comment", "")
+                if not comment:
+                    await publish_event(sid, {"type": "error", "error": "Refine requires a comment"})
+                    continue
+                await _try_update_task_status(db, task_id, "in_progress")
+                await publish_event(sid, {"type": "status", "status": "thinking"})
+                result = await _run_graph(
+                    graph, Command(resume={"refine": comment}), graph_config,
+                )
+                interrupted = await _handle_graph_result(
+                    publisher, db, task_id, session, *result
+                )
+
             elif cmd_type == "reject" and interrupted:
+                # Legacy reject — treat as empty refine fallback (stop)
                 await _try_update_task_status(db, task_id, "in_progress")
                 result = await _run_graph(graph, Command(resume=False), graph_config)
                 interrupted = await _handle_graph_result(
@@ -240,7 +255,7 @@ async def _run_session(
             elif cmd_type == "message" and interrupted:
                 await publish_event(sid, {
                     "type": "error",
-                    "error": "Agent is waiting for approval. Send approve or reject first.",
+                    "error": "Agent is waiting for approval. Use approve or refine.",
                 })
 
 

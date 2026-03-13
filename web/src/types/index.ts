@@ -128,7 +128,7 @@ export type WsOutgoing =
   | { type: "message"; content: string }
   | { type: "stop" }
   | { type: "approve" }
-  | { type: "reject" };
+  | { type: "refine"; comment: string };
 
 export interface AuthStatus {
   logged_in: boolean;

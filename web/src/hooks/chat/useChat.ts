@@ -87,12 +87,15 @@ export function useChat(
     send(JSON.stringify({ type: "approve" }));
   }, [send, isOpen]);
 
-  const rejectHandoff = useCallback(() => {
-    if (!isOpen()) return;
+  const refineHandoff = useCallback((comment: string) => {
+    if (!isOpen() || !comment.trim()) return;
     setPendingApproval(null);
-    setItems((prev) => prev.filter((i) => !isHandoffItem(i) || i.itemType !== "approval_required"));
-    setStatus("connected");
-    send(JSON.stringify({ type: "reject" }));
+    setItems((prev) => {
+      const filtered = prev.filter((i) => !isHandoffItem(i) || i.itemType !== "approval_required");
+      return [...filtered, makeLocalMessage("user", comment)];
+    });
+    setStatus("typing");
+    send(JSON.stringify({ type: "refine", comment }));
   }, [send, isOpen]);
 
   // Auto-send first pending message when WebSocket connects
@@ -111,5 +114,5 @@ export function useChat(
 
   const messages = items.filter((i): i is Message => !isHandoffItem(i));
 
-  return { items, messages, status, error, pendingApproval, sendMessage, stopAgent, approveHandoff, rejectHandoff };
+  return { items, messages, status, error, pendingApproval, sendMessage, stopAgent, approveHandoff, refineHandoff };
 }

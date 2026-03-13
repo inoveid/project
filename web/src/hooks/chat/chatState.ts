@@ -12,7 +12,7 @@ export interface UseChatResult {
   sendMessage: (content: string) => void;
   stopAgent: () => void;
   approveHandoff: () => void;
-  rejectHandoff: () => void;
+  refineHandoff: (comment: string) => void;
 }
 
 export interface PendingRefs {

@@ -116,8 +116,8 @@ function ActiveSessionChat({
     void queryClient.invalidateQueries({ queryKey: ['sessions', 'by-task', task.id] });
   }
 
-  function handleReject() {
-    chat.rejectHandoff();
+  function handleRefine(comment: string) {
+    chat.refineHandoff(comment);
     void queryClient.invalidateQueries({ queryKey: ['tasks', 'detail', task.id] });
   }
 
@@ -161,7 +161,7 @@ function ActiveSessionChat({
         <ApprovalCard
           approval={chat.pendingApproval || { fromAgent: 'Агент', toAgent: '...', task: 'Ожидает вашего решения' }}
           onApprove={handleApprove}
-          onReject={handleReject}
+          onRefine={handleRefine}
         />
       )}
 

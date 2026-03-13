@@ -1,26 +1,39 @@
+import { useState } from "react";
 import type { ApprovalRequest } from "../types";
 
 interface ApprovalCardProps {
   approval: ApprovalRequest;
   onApprove: () => void;
-  onReject: () => void;
+  onRefine: (comment: string) => void;
 }
 
-export function ApprovalCard({ approval, onApprove, onReject }: ApprovalCardProps) {
+export function ApprovalCard({ approval, onApprove, onRefine }: ApprovalCardProps) {
   const { fromAgent, toAgent, task, steps = [] } = approval;
+  const [comment, setComment] = useState("");
 
-  // Build ordered progress entries from steps, avoiding duplicate agent rows
-  // Each step is shown once; if toAgent already appeared, mark the last occurrence as current
+  const handleRefine = () => {
+    const text = comment.trim();
+    if (!text) return;
+    setComment("");
+    onRefine(text);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleRefine();
+    }
+  };
+
+  // Build ordered progress entries from steps
   const progressEntries: { agent: string; summary?: string; status: "done" | "current" | "pending" }[] = [];
   for (const s of steps) {
     progressEntries.push({ agent: s.agent, summary: s.summary, status: "done" });
   }
-  // If toAgent is not yet in steps, add as current
   const toAgentInSteps = steps.some((s) => s.agent === toAgent);
   if (!toAgentInSteps) {
     progressEntries.push({ agent: toAgent, status: "current" });
   } else {
-    // Mark the last occurrence of toAgent as current (it's being handed back)
     for (let i = progressEntries.length - 1; i >= 0; i--) {
       if (progressEntries[i]!.agent === toAgent) {
         progressEntries[i]!.status = "current";
@@ -79,8 +92,20 @@ export function ApprovalCard({ approval, onApprove, onReject }: ApprovalCardProp
         </div>
       )}
 
+      {/* Comment input */}
+      <div className="flex gap-2">
+        <textarea
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Комментарий для агента..."
+          rows={2}
+          className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent"
+        />
+      </div>
+
       {/* Actions */}
-      <div className="flex gap-2 pt-1">
+      <div className="flex gap-2">
         <button
           onClick={onApprove}
           className="flex-1 rounded bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 transition-colors"
@@ -88,10 +113,11 @@ export function ApprovalCard({ approval, onApprove, onReject }: ApprovalCardProp
           Одобрить
         </button>
         <button
-          onClick={onReject}
-          className="flex-1 rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          onClick={handleRefine}
+          disabled={!comment.trim()}
+          className="flex-1 rounded border border-amber-400 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          Отклонить
+          Написать
         </button>
       </div>
     </div>

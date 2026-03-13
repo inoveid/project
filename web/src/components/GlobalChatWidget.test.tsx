@@ -19,7 +19,7 @@ vi.mock("../hooks/chat", () => ({
     sendMessage: vi.fn(),
     stopAgent: vi.fn(),
     approveHandoff: vi.fn(),
-    rejectHandoff: vi.fn(),
+    refineHandoff: vi.fn(),
   }),
 }));
 vi.mock("../api/sessions");

@@ -100,7 +100,7 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
     sendMessage,
     stopAgent,
     approveHandoff,
-    rejectHandoff,
+    refineHandoff,
   } = useChat(sessionId, session?.messages ?? [], sessionLoaded);
 
   async function handleStop() {
@@ -174,7 +174,7 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
         <ApprovalCard
           approval={effectiveApproval}
           onApprove={approveHandoff}
-          onReject={rejectHandoff}
+          onRefine={refineHandoff}
         />
       ) : (
         <ChatInput onSend={sendMessage} disabled={!canSend} />
