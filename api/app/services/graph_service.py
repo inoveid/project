@@ -1,10 +1,9 @@
 """
-Workflow graph — runs a SINGLE agent, detects handoff intent, returns result.
+Workflow graph — runs a SINGLE agent, detects handoff/spawn intent, returns result.
 
-Peer handoff (Developer ⟶ Reviewer) is handled by the Worker, not the graph.
-The graph only: runs agent → detects handoff → returns state → END.
-
-Sub-agents (depth > 0) will be added in Stage 2-3 within run_agent_node.
+Peer handoff (Developer → Reviewer) is handled by the Worker, not the graph.
+Sub-agents (spawn_agent) are handled inline within run_agent_node:
+  parent runs → spawn detected → sub-agents run → results fed back → parent continues.
 
 Graph:
     START → run_agent → [route]:
@@ -42,6 +41,12 @@ from app.services.session_service import (
     add_message,
     get_session,
 )
+from app.services.sub_agent_service import (
+    find_template,
+    format_sub_agent_results,
+    parse_spawn_requests,
+    spawn_sub_agent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +64,8 @@ class GraphConfigurable(TypedDict):
     task_id: uuid.UUID | None
 
 
-MAX_DEPTH = 5  # Maximum nested handoff depth (for future sub-agents)
+MAX_DEPTH = 5
+MAX_SPAWN_ROUNDS = 3  # Max spawn→result→continue cycles per run_agent_node
 
 
 # ---------------------------------------------------------------------------
@@ -136,32 +142,97 @@ async def _resolve_handoff(
 # ---------------------------------------------------------------------------
 
 async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
-    """Run the current agent and stream events. Always depth=0 for peer agents."""
+    """
+    Run the current agent and stream events.
+    
+    Handles sub-agent spawning: if agent outputs spawn_agent blocks,
+    runs sub-agents, feeds results back, and continues the parent agent.
+    This loop runs up to MAX_SPAWN_ROUNDS times.
+    """
     cfg = _get_configurable(config)
     ws: EventSender = cfg["websocket"]
     db: AsyncSession = cfg["db"]
     session_id = uuid.UUID(state["current_session_id"])
+    agent_id = uuid.UUID(state["current_agent_id"])
 
+    # Load agent for sub-agent templates
+    from app.models.agent import Agent
+    agent = await db.get(Agent, agent_id)
+    sub_agent_templates = agent.sub_agent_templates if agent else []
+
+    current_task = state["task"]
+    all_tool_uses: list[dict] = []
     full_text = ""
-    tool_uses: list[dict] = []
     agent_error = False
 
-    try:
-        async for event in runtime.send_message(session_id, state["task"]):
-            ev_type = event.get("type", "")
-            if ev_type == "assistant_text":
-                full_text += event.get("content", "")
-            elif ev_type == "tool_use":
-                tool_uses.append({
-                    "tool_name": event.get("tool_name", ""),
-                    "tool_input": event.get("tool_input", {}),
+    for spawn_round in range(MAX_SPAWN_ROUNDS + 1):
+        round_text = ""
+        round_tool_uses: list[dict] = []
+
+        try:
+            async for event in runtime.send_message(session_id, current_task):
+                ev_type = event.get("type", "")
+                if ev_type == "assistant_text":
+                    round_text += event.get("content", "")
+                elif ev_type == "tool_use":
+                    round_tool_uses.append({
+                        "tool_name": event.get("tool_name", ""),
+                        "tool_input": event.get("tool_input", {}),
+                    })
+                await ws.send_json(event)
+        except Exception as exc:
+            agent_error = True
+            logger.error("Agent %s error: %s", state["current_agent_name"], exc)
+            await ws.send_json({"type": "error", "error": str(exc)})
+            break
+
+        full_text += round_text
+        all_tool_uses.extend(round_tool_uses)
+
+        # Check for spawn_agent requests
+        spawn_requests = parse_spawn_requests(round_text) if sub_agent_templates else []
+
+        if not spawn_requests or spawn_round >= MAX_SPAWN_ROUNDS:
+            break  # No spawns or max rounds reached — exit loop
+
+        # Run sub-agents
+        results = []
+        session = await get_session(db, session_id)
+        workdir = state.get("product_workspace") or settings.workspace_path
+
+        for req in spawn_requests:
+            template = find_template(sub_agent_templates, req.role)
+            if not template:
+                await ws.send_json({
+                    "type": "sub_agent_error",
+                    "role": req.role,
+                    "error": f"No template found for role '{req.role}'",
                 })
-            # All events go directly — no sub_agent_* prefixing
-            await ws.send_json(event)
-    except Exception as exc:
-        agent_error = True
-        logger.error("Agent %s error: %s", state["current_agent_name"], exc)
-        await ws.send_json({"type": "error", "error": str(exc)})
+                results.append(type('R', (), {
+                    'role': req.role, 'name': req.role,
+                    'output': '', 'success': False,
+                    'error': f"No template for role '{req.role}'"
+                })())
+                continue
+
+            result = await spawn_sub_agent(
+                db=db,
+                parent_session=session,
+                template=template,
+                task=req.task,
+                workdir=workdir,
+                parent_depth=state["depth"],
+                ws_session_id=state["current_session_id"],
+            )
+            results.append(result)
+
+        # Format results and feed back to parent as next message
+        results_text = format_sub_agent_results(results)
+        if results_text:
+            current_task = results_text
+            # Save sub-agent results as a "user" message for context
+            await add_message(db, session_id, "user", results_text)
+            # Continue loop — parent agent will process results
 
     if agent_error:
         return {
@@ -171,8 +242,8 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
         }
 
     # Save result to DB
-    if full_text or tool_uses:
-        await add_message(db, session_id, "assistant", full_text, tool_uses=tool_uses or None)
+    if full_text or all_tool_uses:
+        await add_message(db, session_id, "assistant", full_text, tool_uses=all_tool_uses or None)
 
     # Save claude_session_id for resume
     claude_sid = runtime.get_claude_session_id(session_id)
@@ -187,7 +258,7 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
     # Parse handoff
     handoff_result = await _resolve_handoff(
         db, full_text, state.get("workflow_id"), state.get("task_id"),
-        uuid.UUID(state["current_agent_id"]),
+        agent_id,
         chain=state.get("chain", []),
         agent_name=state["current_agent_name"],
     )
@@ -196,7 +267,7 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
         "messages": state["messages"] + [{
             "agent": state["current_agent_name"],
             "text": full_text,
-            "tools": tool_uses,
+            "tools": all_tool_uses,
         }],
         "handoff_result": _serialize_handoff_result(handoff_result),
         "gateway_approved": None,
@@ -217,7 +288,7 @@ async def notify_handoff_node(state: WorkflowState, config: RunnableConfig) -> d
 
 
 async def gate_node(state: WorkflowState, config: RunnableConfig) -> dict:
-    """HITL gate: pause until human decision. Returns approved flag, Worker handles the rest."""
+    """HITL gate: pause until human decision."""
     approved: bool = interrupt("Waiting for human approval of handoff")
     if not approved:
         return {"gateway_approved": False, "handoff_result": None}
@@ -225,7 +296,7 @@ async def gate_node(state: WorkflowState, config: RunnableConfig) -> dict:
 
 
 async def auto_handoff_node(state: WorkflowState, config: RunnableConfig) -> dict:
-    """Automatic handoff — no approval needed. Worker handles session creation."""
+    """Automatic handoff — no approval needed."""
     return {"gateway_approved": True}
 
 
@@ -254,7 +325,7 @@ async def blocked_node(state: WorkflowState, config: RunnableConfig) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Routing — handoff always leads to END, Worker handles peer transitions
+# Routing
 # ---------------------------------------------------------------------------
 
 def route_after_agent(
@@ -276,7 +347,6 @@ def route_after_agent(
 
 
 def route_after_gate(state: WorkflowState) -> Literal["__end__"]:
-    """Gate always goes to END. Worker decides what to do based on gateway_approved."""
     return END
 
 
@@ -285,15 +355,6 @@ def route_after_gate(state: WorkflowState) -> Literal["__end__"]:
 # ---------------------------------------------------------------------------
 
 def build_graph(checkpointer: AsyncPostgresSaver):
-    """
-    Graph (single-agent):
-        START → run_agent → route:
-          - notify_handoff → gate → END
-          - auto_handoff → END
-          - complete → END
-          - blocked → END
-          - END
-    """
     graph = StateGraph(WorkflowState)
 
     graph.add_node("run_agent", run_agent_node)
@@ -307,7 +368,6 @@ def build_graph(checkpointer: AsyncPostgresSaver):
     graph.add_conditional_edges("run_agent", route_after_agent)
     graph.add_edge("notify_handoff", "gate")
     graph.add_conditional_edges("gate", route_after_gate)
-    # auto_handoff → END (no more looping back to run_agent)
     graph.add_edge("auto_handoff", END)
     graph.add_edge("complete", END)
     graph.add_edge("blocked", END)
