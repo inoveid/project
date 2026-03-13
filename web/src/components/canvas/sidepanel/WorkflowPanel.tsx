@@ -205,7 +205,6 @@ function WorkflowChainStepper({
                         key={re.edge.id}
                         returnEdge={re}
                         workflowId={workflow.id}
-                        isLocked={isLocked}
                         onUpdateEdge={onUpdateEdge}
                       />
                     ))}
@@ -248,12 +247,10 @@ function EdgeConnector({
 function ReturnEdgeBadge({
   returnEdge,
   workflowId,
-  _isLocked,
   onUpdateEdge,
 }: {
   returnEdge: ReturnEdge;
   workflowId: string;
-  isLocked: boolean;
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
 }) {
   const { edge, toAgent } = returnEdge;
