@@ -59,6 +59,7 @@ async def create_agent(
         system_prompt=data.system_prompt,
         allowed_tools=data.allowed_tools,
         config=data.config,
+        sub_agent_templates=[t.model_dump() for t in data.sub_agent_templates],
     )
     db.add(agent)
     try:

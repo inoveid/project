@@ -31,6 +31,9 @@ class Agent(Base):
     prompts: Mapped[list] = mapped_column(
         JSONB, nullable=False, default=list, server_default="[]"
     )
+    sub_agent_templates: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
     max_cycles: Mapped[int] = mapped_column(
         Integer, nullable=False, default=3, server_default="3"
     )

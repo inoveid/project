@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,6 +26,14 @@ class Session(Base):
         ForeignKey("agents.id", ondelete="CASCADE"),
         nullable=False,
     )
+    parent_session_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sessions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    depth: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="active"
     )
@@ -46,6 +54,7 @@ class Session(Base):
 
     agent = relationship("Agent", back_populates="sessions")
     task = relationship("Task", back_populates="sessions")
+    parent_session = relationship("Session", remote_side="Session.id", foreign_keys=[parent_session_id])
     messages = relationship(
         "Message", back_populates="session", cascade="all, delete-orphan"
     )
