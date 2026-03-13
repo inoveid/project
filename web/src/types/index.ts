@@ -26,6 +26,16 @@ export interface AgentPrompt {
   content: string;
 }
 
+export interface SubAgentTemplate {
+  id: string;
+  role: string;
+  name: string;
+  system_prompt: string;
+  allowed_tools: string[];
+  max_budget_usd: number;
+  description: string;
+}
+
 export interface Agent {
   id: string;
   team_id: string;
@@ -36,6 +46,7 @@ export interface Agent {
   allowed_tools: string[];
   config: Record<string, unknown>;
   prompts: AgentPrompt[];
+  sub_agent_templates: SubAgentTemplate[];
   max_cycles: number;
   can_complete_task: boolean;
   position_x: number | null;
@@ -51,6 +62,7 @@ export interface AgentCreate {
   system_prompt: string;
   allowed_tools?: string[];
   config?: Record<string, unknown>;
+  sub_agent_templates?: SubAgentTemplate[];
   can_complete_task?: boolean;
 }
 
@@ -62,6 +74,7 @@ export interface AgentUpdate {
   allowed_tools?: string[];
   config?: Record<string, unknown>;
   prompts?: AgentPrompt[];
+  sub_agent_templates?: SubAgentTemplate[];
   max_cycles?: number;
   can_complete_task?: boolean;
   position_x?: number | null;
@@ -143,7 +156,13 @@ export type WsIncoming =
   | { type: "handoff_start"; from_agent: string; to_agent: string; task: string }
   | { type: "handoff_cycle_detected"; message: string }
   | { type: "status"; status: string }
-  | { type: "approval_required"; from_agent: string; to_agent: string; task: string; chain?: string[][]; steps?: { agent: string; summary: string }[]; workflow_agents?: string[] };
+  | { type: "approval_required"; from_agent: string; to_agent: string; task: string; chain?: string[][]; steps?: { agent: string; summary: string }[]; workflow_agents?: string[] }
+  | { type: "sub_agent_spawned"; sub_session_id: string; role: string; name: string; task: string }
+  | { type: "sub_agent_assistant_text"; sub_session_id: string; sub_agent_name: string; sub_agent_role: string; content: string }
+  | { type: "sub_agent_tool_use"; sub_session_id: string; sub_agent_name: string; tool_name: string; tool_input: Record<string, unknown> }
+  | { type: "sub_agent_tool_result"; sub_session_id: string; sub_agent_name: string; content: string }
+  | { type: "sub_agent_done"; sub_session_id: string; role: string; name: string; output_preview: string }
+  | { type: "sub_agent_error"; sub_session_id: string; role: string; name: string; error: string };
 
 export interface HandoffItem {
   id: string;
