@@ -108,16 +108,26 @@ async def _run_session(
         agent = session.agent
         system_prompt = agent.system_prompt
 
-        # Add handoff tools from workflow edges
+        # Inject task context into system_prompt
         workflow_id = None
         if session.task_id:
             await db.refresh(session, ["task"])
-            if session.task and session.task.workflow_id:
-                workflow_id = session.task.workflow_id
-                handoff_tools = await generate_handoff_tools(db, agent.id, workflow_id)
-                tools_prompt = format_handoff_tools_prompt(handoff_tools)
-                if tools_prompt:
-                    system_prompt += tools_prompt
+            if session.task:
+                task = session.task
+                if task.title or task.description:
+                    desc = (task.description or "")[:500]
+                    system_prompt += f"
+
+## Current Task
+Title: {task.title or 'N/A'}
+Description: {desc}"
+
+                if task.workflow_id:
+                    workflow_id = task.workflow_id
+                    handoff_tools = await generate_handoff_tools(db, agent.id, workflow_id)
+                    tools_prompt = format_handoff_tools_prompt(handoff_tools)
+                    if tools_prompt:
+                        system_prompt += tools_prompt
 
         # Add sub-agent capabilities (templates + spawn_custom)
         # Always inject if agent has templates; spawn_custom is always available

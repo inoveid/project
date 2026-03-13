@@ -2,7 +2,7 @@ import { useRef, useCallback } from "react";
 
 export interface PromptVariable {
   label: string;
-  value: string; // e.g. "{{task_title}}"
+  value: string; // e.g. "{{comment}}"
 }
 
 interface PromptEditorProps {
@@ -15,16 +15,11 @@ interface PromptEditorProps {
   disabled?: boolean;
 }
 
-const DEFAULT_VARIABLES: PromptVariable[] = [
-  { label: "Название задачи", value: "{{task_title}}" },
-  { label: "Описание задачи", value: "{{task_description}}" },
-];
-
 export function PromptEditor({
   value,
   onChange,
   onBlur,
-  variables = DEFAULT_VARIABLES,
+  variables,
   placeholder = "Введите промпт...",
   rows = 3,
   disabled = false,
@@ -56,7 +51,7 @@ export function PromptEditor({
   return (
     <div className="space-y-1.5">
       {/* Variable chips */}
-      {variables.length > 0 && (
+      {variables && variables.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {variables.map((v) => (
             <button

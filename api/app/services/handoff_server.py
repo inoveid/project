@@ -221,11 +221,10 @@ async def count_agent_visits(
     return result.scalar() or 0
 
 
-def render_prompt(template: str, task: Task) -> str:
+def render_prompt(template: str, task: Task | None = None, comment: str = "") -> str:
     """Substitute variables in a prompt template."""
     result = template
-    result = result.replace("{{task_title}}", task.title or "")
-    result = result.replace("{{task_description}}", task.description or "")
+    result = result.replace("{{comment}}", comment)
     return result
 
 
@@ -242,19 +241,13 @@ async def resolve_handoff_prompt(
     1. edge.prompt_template with variable substitution
     3. Fallback: comment/notes from tool call args
     """
-    if tool.prompt_template and task:
-        return render_prompt(tool.prompt_template, task)
+    comment = tool_args.get("comment") or tool_args.get("notes") or tool_args.get("summary") or ""
 
     if tool.prompt_template:
-        return tool.prompt_template
+        return render_prompt(tool.prompt_template, task, comment=comment)
 
-    # Fallback: use comment/notes/summary from tool args
-    return (
-        tool_args.get("comment")
-        or tool_args.get("notes")
-        or tool_args.get("summary")
-        or ""
-    )
+    # Fallback: use comment directly
+    return comment
 
 
 async def handle_handoff_tool_call(

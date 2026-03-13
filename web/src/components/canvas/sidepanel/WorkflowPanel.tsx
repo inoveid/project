@@ -22,14 +22,8 @@ interface ReturnEdge {
   toAgent: Agent;
 }
 
-const STARTING_VARIABLES: PromptVariable[] = [
-  { label: "Название задачи", value: "{{task_title}}" },
-  { label: "Описание задачи", value: "{{task_description}}" },
-];
-
 const EDGE_VARIABLES: PromptVariable[] = [
-  { label: "Название задачи", value: "{{task_title}}" },
-  { label: "Описание задачи", value: "{{task_description}}" },
+  { label: "Комментарий агента", value: "{{comment}}" },
 ];
 
 function buildChain(
@@ -187,7 +181,7 @@ function WorkflowPromptEditor({
           value={startingPrompt}
           onChange={setStartingPrompt}
           onBlur={handleStartingPromptBlur}
-          variables={STARTING_VARIABLES}
+          variables={[]}
           placeholder="Промпт для первого агента..."
           rows={3}
         />

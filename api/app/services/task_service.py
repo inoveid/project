@@ -213,15 +213,7 @@ async def update_task_status(
         try:
             workflow = await db.get(Workflow, task.workflow_id)
             if workflow:
-                # Resolve starting prompt with task variables
-                prompt = workflow.starting_prompt
-                prompt = prompt.replace("{{task_title}}", task.title or "")
-                prompt = prompt.replace("{{task_description}}", task.description or "")
-
-                # Auto-append task description if not already in prompt
-                has_task_context = task.description and task.description in prompt
-                if not has_task_context and task.description:
-                    prompt += f"\n\n{task.description}" 
+                prompt = workflow.starting_prompt or ""
 
                 session = Session(
                     agent_id=workflow.starting_agent_id,
