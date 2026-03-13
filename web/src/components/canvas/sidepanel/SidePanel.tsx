@@ -197,6 +197,14 @@ function AgentsPanel({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [activeTab, setActiveTab] = useState<AgentTab>("general");
 
+  useEffect(() => {
+    if (initialAgentId && initialAgentId !== selectedAgentId) {
+      setSelectedAgentId(initialAgentId);
+      setShowCreateForm(false);
+      setShowDeleteConfirm(false);
+    }
+  }, [initialAgentId]);
+
   const selectedAgent = teamAgents.find((a) => a.id === selectedAgentId);
   const outgoingEdges = selectedAgent
     ? workflowEdges.filter((e) => e.from_agent_id === selectedAgent.id)
