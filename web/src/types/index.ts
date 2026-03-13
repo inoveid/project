@@ -45,7 +45,6 @@ export interface Agent {
   system_prompt: string;
   allowed_tools: string[];
   config: Record<string, unknown>;
-  prompts: AgentPrompt[];
   sub_agent_templates: SubAgentTemplate[];
   max_cycles: number;
   can_complete_task: boolean;
@@ -73,7 +72,6 @@ export interface AgentUpdate {
   system_prompt?: string;
   allowed_tools?: string[];
   config?: Record<string, unknown>;
-  prompts?: AgentPrompt[];
   sub_agent_templates?: SubAgentTemplate[];
   max_cycles?: number;
   can_complete_task?: boolean;
@@ -328,6 +326,7 @@ export interface Task {
   workflow_id: string | null;
   spec_id: string | null;
   status: TaskStatus;
+  error_message: string | null;
   created_at: string;
 }
 
@@ -412,7 +411,6 @@ export interface WorkflowEdge {
   to_agent_id: string;
   condition: string | null;
   prompt_template: string | null;
-  prompt_id: string | null;
   order: number;
   requires_approval: boolean;
   max_rounds: number;
@@ -424,7 +422,6 @@ export interface WorkflowEdgeCreate {
   to_agent_id: string;
   condition?: string | null;
   prompt_template?: string | null;
-  prompt_id?: string | null;
   order?: number;
   requires_approval?: boolean;
   max_rounds?: number;
@@ -433,7 +430,6 @@ export interface WorkflowEdgeCreate {
 export interface WorkflowEdgeUpdate {
   condition?: string | null;
   prompt_template?: string | null;
-  prompt_id?: string | null;
   order?: number;
   requires_approval?: boolean;
   max_rounds?: number;

@@ -1,15 +1,14 @@
 import { useState } from "react";
-import type { WorkflowEdge, WorkflowEdgeUpdate, AgentPrompt } from "../../../types";
+import type { WorkflowEdge, WorkflowEdgeUpdate } from "../../../types";
 
 interface EdgePanelProps {
   edge: WorkflowEdge;
-  toAgentPrompts: AgentPrompt[];
   onSave: (data: WorkflowEdgeUpdate) => void;
   onDelete: () => void;
   readOnly?: boolean;
 }
 
-export function EdgePanel({ edge, toAgentPrompts, onSave, onDelete, readOnly }: EdgePanelProps) {
+export function EdgePanel({ edge, onSave, onDelete, readOnly }: EdgePanelProps) {
   const [condition, setCondition] = useState(edge.condition ?? "");
   const [promptTemplate, setPromptTemplate] = useState(edge.prompt_template ?? "");
   const [requiresApproval, setRequiresApproval] = useState(edge.requires_approval);
@@ -57,27 +56,7 @@ export function EdgePanel({ edge, toAgentPrompts, onSave, onDelete, readOnly }: 
         />
       </label>
 
-      {toAgentPrompts.length > 0 && (
-        <label className={`flex flex-col gap-1 ${disabledClass}`}>
-          <span className="text-xs font-medium text-gray-600">Prompt (from target agent)</span>
-          <select
-            className="border border-gray-200 rounded px-2 py-1.5 text-sm"
-            value={edge.prompt_id ?? ""}
-            onChange={(e) => {
-              const val = e.target.value || null;
-              onSave({ prompt_id: val });
-            }}
-            disabled={readOnly}
-          >
-            <option value="">None</option>
-            {toAgentPrompts.map((p, idx) => (
-              <option key={`${p.name}-${idx}`} value={p.name}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
+
 
       <label className={`flex items-center gap-2 ${disabledClass}`}>
         <input

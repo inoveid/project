@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import type { Agent, Workflow, WorkflowEdge, AgentUpdate, WorkflowEdgeUpdate } from "../../../types";
 import { AgentGeneralTab } from "./AgentGeneralTab";
-import { AgentPromptsTab } from "./AgentPromptsTab";
 import { AgentHandoffTab } from "./AgentHandoffTab";
 import { AgentSubAgentsTab } from "./AgentSubAgentsTab";
 import { EdgePanel } from "./EdgePanel";
@@ -26,7 +25,7 @@ interface SidePanelProps {
   onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string) => void;
 }
 
-type AgentTab = "general" | "prompts" | "handoff" | "sub-agents";
+type AgentTab = "general" | "handoff" | "sub-agents";
 
 export function SidePanel({
   selection,
@@ -69,13 +68,6 @@ export function SidePanel({
               agent={agent}
               onSave={(data) => onUpdateAgent(agent.id, agent.team_id, data)}
               onDelete={() => onDeleteAgent(agent.id, agent.team_id)}
-            />
-          )}
-          {activeTab === "prompts" && (
-            <AgentPromptsTab
-              key={agent.id}
-              agent={agent}
-              onSave={(data) => onUpdateAgent(agent.id, agent.team_id, data)}
             />
           )}
           {activeTab === "handoff" && (
@@ -125,7 +117,6 @@ export function SidePanel({
   if (!edge) return null;
 
   const toAgent = agents.find((a) => a.id === edge.to_agent_id);
-  const toAgentPrompts = toAgent?.prompts ?? [];
 
   const isEdgeLocked = lockedWorkflowIds.has(edge.workflow_id);
 
@@ -135,7 +126,6 @@ export function SidePanel({
         <EdgePanel
           key={edge.id}
           edge={edge}
-          toAgentPrompts={toAgentPrompts}
           onSave={(data) => onUpdateEdge(edge.id, edge.workflow_id, data)}
           onDelete={() => onDeleteEdge(edge.id)}
           readOnly={isEdgeLocked}
@@ -147,7 +137,6 @@ export function SidePanel({
 
 const AGENT_TABS: Array<{ id: AgentTab; label: string }> = [
   { id: "general", label: "General" },
-  { id: "prompts", label: "Prompts" },
   { id: "handoff", label: "Handoff" },
   { id: "sub-agents", label: "Sub-agents" },
 ];
