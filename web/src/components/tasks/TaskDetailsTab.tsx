@@ -112,11 +112,13 @@ export function TaskDetailsTab({ task, onDelete, onStarted }: TaskDetailsTabProp
         <label className="block text-xs font-medium text-gray-500 mb-1">Описание</label>
         <textarea
           value={description}
-          onChange={(e) => setDescription(e.target.value)}
+          onChange={(e) => setDescription(e.target.value.slice(0, 500))}
           onBlur={handleDescriptionBlur}
+          maxLength={500}
           rows={4}
           className={`w-full rounded border px-3 py-2 text-sm focus:outline-none resize-y ${missingFields.has('description') ? 'border-red-400 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'}`}
         />
+        <p className="text-xs text-gray-400 text-right mt-0.5">{description.length}/500</p>
       </div>
 
 

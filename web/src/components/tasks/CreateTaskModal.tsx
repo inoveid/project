@@ -84,11 +84,13 @@ export function CreateTaskModal({ productId, teams, defaultTeamId, onSubmit, onC
           </label>
           <textarea
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e) => setDescription(e.target.value.slice(0, 500))}
+            maxLength={500}
             className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
             placeholder="Опишите задачу для агента (необязательно)"
             rows={3}
           />
+          <p className="text-xs text-gray-400 text-right mt-0.5">{description.length}/500</p>
 
           <label className="block text-sm font-medium text-gray-700 mb-1 mt-3">
             Команда
