@@ -54,39 +54,6 @@ export function HandoffBlock({ item }: HandoffBlockProps) {
     );
   }
 
-  return (
-    <div className="my-2">
-      <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 border-b border-gray-200">
-          <span className="w-5 h-5 rounded-full bg-purple-100 text-purple-700 text-xs flex items-center justify-center font-medium">
-            {item.agentName.charAt(0).toUpperCase()}
-          </span>
-          <span className="text-xs font-medium text-gray-600">{item.agentName}</span>
-          {item.itemType === "sub_agent_turn" && (
-            <span className="ml-auto text-xs text-blue-500 animate-pulse">typing...</span>
-          )}
-        </div>
-
-        <div className="px-3 py-2 text-sm text-gray-700 whitespace-pre-wrap">
-          {item.content}
-        </div>
-
-        {item.toolUses && item.toolUses.length > 0 && (
-          <div className="px-3 pb-2 space-y-1">
-            {item.toolUses.map((tu, i) => (
-              <ToolUseBlock key={i} toolUse={tu} />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {item.itemType === "handoff_done" && (
-        <div className="flex items-center gap-2 mt-2 text-xs text-gray-400 uppercase tracking-wide">
-          <div className="flex-1 h-px bg-gray-200" />
-          <span>✓ {item.agentName} done</span>
-          <div className="flex-1 h-px bg-gray-200" />
-        </div>
-      )}
-    </div>
-  );
+  // Fallback for any other item type
+  return null;
 }
