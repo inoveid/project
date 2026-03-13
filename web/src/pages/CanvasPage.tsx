@@ -234,6 +234,7 @@ export function CanvasPage() {
             onConnect={handleConnect}
             onEdgesDelete={handleEdgesDelete}
             deleteKeyCode="Delete"
+            proOptions={{ hideAttribution: true }}
           >
             <MiniMap
               nodeColor={(node) => {
