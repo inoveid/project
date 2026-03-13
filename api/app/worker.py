@@ -5,7 +5,7 @@ Architecture (v2 — Peer Handoff):
 - Graph handles ONE agent at a time, returns when done or handoff detected
 - Worker manages peer transitions: graph ends with handoff → Worker creates/reuses
   session for next agent → starts new handle_session task
-- Sub-agents (depth > 0) will be added in Stage 2-3 within run_agent_node
+- Sub-agents (depth > 0) are spawned by run_agent_node when agent outputs spawn_agent blocks
 
 Lifecycle:
 1. WS handler publishes "start" to worker:sessions
@@ -55,6 +55,7 @@ from app.services.handoff_server import (
     format_handoff_tools_prompt,
     generate_handoff_tools,
 )
+from app.services.sub_agent_service import format_spawn_tools_prompt
 from app.services.task_service import update_task_status
 
 logger = logging.getLogger(__name__)
@@ -117,6 +118,12 @@ async def _run_session(
                 tools_prompt = format_handoff_tools_prompt(handoff_tools)
                 if tools_prompt:
                     system_prompt += tools_prompt
+
+        # Add sub-agent tools from templates
+        if agent.sub_agent_templates:
+            spawn_prompt = format_spawn_tools_prompt(agent.sub_agent_templates)
+            if spawn_prompt:
+                system_prompt += spawn_prompt
 
         # Resolve workdir
         workdir = ""
