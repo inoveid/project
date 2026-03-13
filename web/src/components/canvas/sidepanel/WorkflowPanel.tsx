@@ -11,6 +11,7 @@ interface WorkflowPanelProps {
   onUpdateWorkflow: (workflowId: string, data: WorkflowUpdate) => void;
   onCreateWorkflow: (teamId: string, data: { name: string; starting_agent_id: string; starting_prompt: string }) => void;
   onDeleteWorkflow: (id: string) => void;
+  onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string) => void;
 }
 
 interface ChainStep {
@@ -88,6 +89,7 @@ export function WorkflowPanel({
   onUpdateWorkflow,
   onCreateWorkflow,
   onDeleteWorkflow,
+  onCreateEdge,
 }: WorkflowPanelProps) {
   const teamWorkflows = workflows.filter((w) => w.team_id === teamId);
   const teamAgents = agents.filter((a) => a.team_id === teamId);
@@ -187,6 +189,7 @@ export function WorkflowPanel({
               agents={agents}
               onUpdateEdge={onUpdateEdge}
               onUpdateWorkflow={onUpdateWorkflow}
+              onCreateEdge={onCreateEdge}
             />
           )}
         </>
@@ -207,21 +210,44 @@ function WorkflowPromptEditor({
   agents,
   onUpdateEdge,
   onUpdateWorkflow,
+  onCreateEdge,
 }: {
   workflow: Workflow;
   edges: WorkflowEdge[];
   agents: Agent[];
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
   onUpdateWorkflow: (workflowId: string, data: WorkflowUpdate) => void;
+  onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string) => void;
 }) {
+  const teamAgents = agents.filter(a => a.team_id === workflow.team_id);
   const { steps, returnEdges } = buildChain(workflow, edges, agents);
   const [startingPrompt, setStartingPrompt] = useState(workflow.starting_prompt);
+  const [workflowName, setWorkflowName] = useState(workflow.name);
+  const [showAddEdge, setShowAddEdge] = useState(false);
+  const [newEdgeFrom, setNewEdgeFrom] = useState("");
+  const [newEdgeTo, setNewEdgeTo] = useState("");
 
   const handleStartingPromptBlur = useCallback(() => {
     if (startingPrompt !== workflow.starting_prompt) {
       onUpdateWorkflow(workflow.id, { starting_prompt: startingPrompt });
     }
   }, [startingPrompt, workflow, onUpdateWorkflow]);
+
+  const handleNameBlur = useCallback(() => {
+    const trimmed = workflowName.trim();
+    if (trimmed && trimmed !== workflow.name) {
+      onUpdateWorkflow(workflow.id, { name: trimmed });
+    }
+  }, [workflowName, workflow, onUpdateWorkflow]);
+
+  const handleAddEdge = () => {
+    if (newEdgeFrom && newEdgeTo && newEdgeFrom !== newEdgeTo) {
+      onCreateEdge(workflow.id, newEdgeFrom, newEdgeTo);
+      setShowAddEdge(false);
+      setNewEdgeFrom("");
+      setNewEdgeTo("");
+    }
+  };
 
   if (steps.length === 0) {
     return <p className="text-xs text-gray-400">Цепочка пуста</p>;
@@ -237,6 +263,20 @@ function WorkflowPromptEditor({
 
   return (
     <div className="space-y-4">
+      {/* Workflow name */}
+      <div>
+        <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-2">
+          Название
+        </p>
+        <input
+          type="text"
+          value={workflowName}
+          onChange={(e) => setWorkflowName(e.target.value)}
+          onBlur={handleNameBlur}
+          className="w-full border border-gray-300 rounded px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+        />
+      </div>
+
       {/* Starting prompt */}
       <div>
         <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-2">
@@ -312,6 +352,62 @@ function WorkflowPromptEditor({
               </div>
             );
           })}
+        </div>
+
+        {/* Add edge button */}
+        <div className="pt-2">
+          {!showAddEdge ? (
+            <button
+              type="button"
+              onClick={() => setShowAddEdge(true)}
+              className="text-xs text-blue-600 hover:text-blue-700"
+            >
+              + Добавить переход
+            </button>
+          ) : (
+            <div className="p-3 border border-blue-200 rounded bg-blue-50/50 space-y-2">
+              <div className="flex gap-2">
+                <select
+                  value={newEdgeFrom}
+                  onChange={(e) => setNewEdgeFrom(e.target.value)}
+                  className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs"
+                >
+                  <option value="">От...</option>
+                  {teamAgents.map(a => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+                <span className="text-xs text-gray-400 self-center">→</span>
+                <select
+                  value={newEdgeTo}
+                  onChange={(e) => setNewEdgeTo(e.target.value)}
+                  className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs"
+                >
+                  <option value="">К...</option>
+                  {teamAgents.filter(a => a.id !== newEdgeFrom).map(a => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleAddEdge}
+                  disabled={!newEdgeFrom || !newEdgeTo || newEdgeFrom === newEdgeTo}
+                  className="text-xs bg-blue-600 text-white rounded px-2.5 py-1 hover:bg-blue-700 disabled:opacity-50"
+                >
+                  Добавить
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowAddEdge(false); setNewEdgeFrom(""); setNewEdgeTo(""); }}
+                  className="text-xs text-gray-500 hover:text-gray-700"
+                >
+                  Отмена
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

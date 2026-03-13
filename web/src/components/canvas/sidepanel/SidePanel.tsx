@@ -90,6 +90,7 @@ export function SidePanel({
             onUpdateWorkflow={onUpdateWorkflow}
             onCreateWorkflow={onCreateWorkflow}
             onDeleteWorkflow={onDeleteWorkflow}
+            onCreateEdge={onCreateEdge}
           />
         </div>
       </PanelShell>
