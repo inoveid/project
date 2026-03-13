@@ -1,3 +1,4 @@
+import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -16,12 +17,17 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 
+def _prep_password(password: str) -> str:
+    """Pre-hash with SHA-256 to avoid bcrypt 72-byte limit."""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return pwd_context.hash(_prep_password(password))
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    return pwd_context.verify(_prep_password(plain), hashed)
 
 
 def create_access_token(user_id: uuid.UUID, email: str) -> str:
