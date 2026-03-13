@@ -216,14 +216,14 @@ export function CanvasPage() {
         </div>
       </div>
 
-      <div className="relative flex flex-1 border rounded-lg overflow-hidden bg-gray-50">
+      <div className="relative flex flex-1 border rounded-lg overflow-clip bg-gray-50">
         <div className="flex-1">
           <ReactFlow
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
-            fitView
+            onInit={(instance) => instance.fitView()}
             minZoom={0.3}
             maxZoom={2}
             nodesDraggable

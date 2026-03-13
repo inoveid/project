@@ -75,9 +75,9 @@ export function buildCanvasLayout(
     // Grid columns = ceil(sqrt(N)) gives a roughly square layout (e.g. 4 agents → 2x2, 9 → 3x3)
     const columns = Math.max(Math.ceil(Math.sqrt(agents.length)), 1);
 
-    const groupWidth = columns * (NODE_WIDTH + NODE_GAP_X) + GROUP_PADDING * 2 - NODE_GAP_X;
+    const groupWidth = Math.max(columns * (NODE_WIDTH + NODE_GAP_X) + GROUP_PADDING * 2 - NODE_GAP_X, 300);
     const rows = Math.ceil(agents.length / columns);
-    const groupHeight = rows * (NODE_HEIGHT + NODE_GAP_Y) + GROUP_HEADER_HEIGHT + GROUP_PADDING * 2 - NODE_GAP_Y;
+    const groupHeight = Math.max(rows * (NODE_HEIGHT + NODE_GAP_Y) + GROUP_HEADER_HEIGHT + GROUP_PADDING * 2 - NODE_GAP_Y, 100);
 
     const groupId = `team-${team.id}`;
     const teamWorkflows = workflows.filter((w) => w.team_id === team.id);

@@ -273,7 +273,7 @@ function AgentsPanel({
             <>
               <select
                 value={selectedAgentId}
-                onChange={(e) => { setSelectedAgentId(e.target.value); setShowDeleteConfirm(false); setActiveTab("general"); }}
+                onChange={(e) => { setSelectedAgentId(e.target.value); setShowDeleteConfirm(false); }}
                 className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
               >
                 {teamAgents.map((a) => (
