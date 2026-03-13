@@ -40,13 +40,13 @@ export function TeamGroupNode({ data }: NodeProps) {
             className="text-xs text-blue-600 border border-blue-200 rounded px-2 py-0.5 hover:bg-blue-100 nopan nodrag"
             onClick={(e) => { e.stopPropagation(); onAddAgent?.(team.id); }}
           >
-            + Agent
+            Agents
           </button>
           <button
             className="text-xs text-blue-600 border border-blue-200 rounded px-2 py-0.5 hover:bg-blue-100 nopan nodrag"
             onClick={(e) => { e.stopPropagation(); onAddWorkflow?.(team.id); }}
           >
-            + Workflow
+            Workflows
           </button>
         </div>
       </div>

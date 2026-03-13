@@ -82,11 +82,11 @@ export function CanvasPage() {
 
   // Callbacks for group node buttons
   const handleAddAgent = useCallback((teamId: string) => {
-    setPanelSelection({ type: "agent-create", teamId });
+    setPanelSelection({ type: "agents", teamId });
   }, []);
 
   const handleAddWorkflow = useCallback((teamId: string) => {
-    setPanelSelection({ type: "team", teamId });
+    setPanelSelection({ type: "workflows", teamId });
   }, []);
 
   // Build layout
@@ -117,14 +117,15 @@ export function CanvasPage() {
 
   // Node click → side panel
   const handleNodeClick = useCallback(
-    (_event: React.MouseEvent, node: { id: string; type?: string }) => {
+    (_event: React.MouseEvent, node: { id: string; type?: string; data?: Record<string, unknown> }) => {
       if (node.type === "agentNode") {
-        setPanelSelection({ type: "agent", agentId: stripNodePrefix(node.id, "agent-") });
-      } else if (node.type === "teamGroup") {
-        const teamId = node.id.replace(/^team-/, "");
-        setPanelSelection({ type: "team", teamId });
+        const agentId = stripNodePrefix(node.id, "agent-");
+        const agent = allAgents?.find((a) => a.id === agentId);
+        if (agent) {
+          setPanelSelection({ type: "agents", teamId: agent.team_id, selectedAgentId: agentId });
+        }
       }
-    }, [],
+    }, [allAgents],
   );
 
   // Edge click → side panel
@@ -215,7 +216,7 @@ export function CanvasPage() {
         </div>
       </div>
 
-      <div className="flex flex-1 border rounded-lg overflow-hidden bg-gray-50">
+      <div className="relative flex flex-1 border rounded-lg overflow-hidden bg-gray-50">
         <div className="flex-1">
           <ReactFlow
             nodes={nodes}

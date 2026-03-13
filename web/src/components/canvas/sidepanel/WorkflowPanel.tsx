@@ -94,7 +94,7 @@ export function WorkflowPanel({
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(
     teamWorkflows[0]?.id ?? "",
   );
-  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showCreateForm, setShowCreateForm] = useState(teamWorkflows.length === 0);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const selectedWorkflow = teamWorkflows.find((w) => w.id === selectedWorkflowId);
@@ -102,29 +102,54 @@ export function WorkflowPanel({
 
   return (
     <div className="p-4 space-y-4">
-      {/* Workflow selector + create button */}
-      <div className="flex items-center gap-2">
-        {teamWorkflows.length > 0 ? (
-          <select
-            value={selectedWorkflowId}
-            onChange={(e) => setSelectedWorkflowId(e.target.value)}
-            className="flex-1 border border-gray-300 rounded px-3 py-1.5 text-sm"
-          >
-            {teamWorkflows.map((w) => (
-              <option key={w.id} value={w.id}>{w.name}</option>
-            ))}
-          </select>
-        ) : (
-          <span className="flex-1 text-sm text-gray-400">Нет workflow</span>
-        )}
+      {/* Header buttons */}
+      <div className="flex items-center gap-1">
         <button
           type="button"
-          onClick={() => setShowCreateForm(!showCreateForm)}
-          className="text-xs text-blue-600 border border-blue-200 rounded px-2 py-1 hover:bg-blue-50 whitespace-nowrap"
+          onClick={() => { setShowCreateForm(!showCreateForm); setShowDeleteConfirm(false); }}
+          className="text-[11px] text-blue-600 border border-blue-200 rounded px-2 py-0.5 hover:bg-blue-50"
         >
-          {showCreateForm ? "Отмена" : "+ Workflow"}
+          {showCreateForm ? "Отмена" : "Добавить"}
         </button>
+        {selectedWorkflow && !showCreateForm && (
+          <button
+            type="button"
+            onClick={() => setShowDeleteConfirm(!showDeleteConfirm)}
+            className="text-[11px] text-red-500 border border-red-200 rounded px-2 py-0.5 hover:bg-red-50"
+          >
+            Удалить
+          </button>
+        )}
       </div>
+
+      {/* Delete confirm */}
+      {showDeleteConfirm && selectedWorkflow && (
+        <div className="p-3 border border-red-200 rounded bg-red-50 space-y-2">
+          <p className="text-sm text-red-700">
+            Удалить <b>{selectedWorkflow.name}</b>? Все связи будут удалены.
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="text-sm bg-red-600 text-white rounded px-3 py-1 hover:bg-red-700"
+              onClick={() => {
+                onDeleteWorkflow(selectedWorkflow.id);
+                setShowDeleteConfirm(false);
+                setSelectedWorkflowId(teamWorkflows.find(w => w.id !== selectedWorkflow.id)?.id ?? "");
+              }}
+            >
+              Да, удалить
+            </button>
+            <button
+              type="button"
+              className="text-sm text-gray-500 hover:text-gray-700"
+              onClick={() => setShowDeleteConfirm(false)}
+            >
+              Отмена
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Inline create form */}
       {showCreateForm && (
@@ -139,57 +164,34 @@ export function WorkflowPanel({
         />
       )}
 
-      {/* Selected workflow editor */}
-      {selectedWorkflow && !showCreateForm && (
+      {/* Workflow selector */}
+      {!showCreateForm && teamWorkflows.length > 0 && (
         <>
-          <WorkflowPromptEditor
-            key={selectedWorkflow.id}
-            workflow={selectedWorkflow}
-            edges={wfEdges}
-            agents={agents}
-            onUpdateEdge={onUpdateEdge}
-            onUpdateWorkflow={onUpdateWorkflow}
-          />
+          <select
+            value={selectedWorkflowId}
+            onChange={(e) => { setSelectedWorkflowId(e.target.value); setShowDeleteConfirm(false); }}
+            className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+          >
+            {teamWorkflows.map((w) => (
+              <option key={w.id} value={w.id}>{w.name}</option>
+            ))}
+          </select>
 
-          {/* Delete workflow */}
-          <div className="pt-4 border-t border-gray-100">
-            {!showDeleteConfirm ? (
-              <button
-                type="button"
-                className="text-sm text-red-500 hover:text-red-700"
-                onClick={() => setShowDeleteConfirm(true)}
-              >
-                Удалить workflow
-              </button>
-            ) : (
-              <div className="p-3 border border-red-200 rounded bg-red-50 space-y-2">
-                <p className="text-sm text-red-700">
-                  Удалить <b>{selectedWorkflow.name}</b>? Все связи этого workflow будут удалены.
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    className="text-sm bg-red-600 text-white rounded px-3 py-1 hover:bg-red-700"
-                    onClick={() => {
-                      onDeleteWorkflow(selectedWorkflow.id);
-                      setShowDeleteConfirm(false);
-                      setSelectedWorkflowId(teamWorkflows.find(w => w.id !== selectedWorkflow.id)?.id ?? "");
-                    }}
-                  >
-                    Да, удалить
-                  </button>
-                  <button
-                    type="button"
-                    className="text-sm text-gray-500 hover:text-gray-700"
-                    onClick={() => setShowDeleteConfirm(false)}
-                  >
-                    Отмена
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+          {selectedWorkflow && (
+            <WorkflowPromptEditor
+              key={selectedWorkflow.id}
+              workflow={selectedWorkflow}
+              edges={wfEdges}
+              agents={agents}
+              onUpdateEdge={onUpdateEdge}
+              onUpdateWorkflow={onUpdateWorkflow}
+            />
+          )}
         </>
+      )}
+
+      {!showCreateForm && teamWorkflows.length === 0 && (
+        <p className="text-sm text-gray-400">Нет workflow в этой команде</p>
       )}
     </div>
   );

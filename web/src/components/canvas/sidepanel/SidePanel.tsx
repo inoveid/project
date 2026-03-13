@@ -8,9 +8,9 @@ import { WorkflowPanel } from "./WorkflowPanel";
 
 export type SidePanelSelection =
   | { type: "agent"; agentId: string }
-  | { type: "agent-create"; teamId: string }
-  | { type: "edge"; edgeId: string }
-  | { type: "team"; teamId: string };
+  | { type: "agents"; teamId: string; selectedAgentId?: string }
+  | { type: "workflows"; teamId: string }
+  | { type: "edge"; edgeId: string };
 
 interface SidePanelProps {
   selection: SidePanelSelection;
@@ -57,6 +57,46 @@ export function SidePanel({
     }
   }, [selection]);
 
+  // ── Agents panel (list + CRUD) ──
+  if (selection.type === "agents") {
+    return (
+      <AgentsPanel
+        teamId={selection.teamId}
+        initialAgentId={selection.selectedAgentId}
+        agents={agents}
+        workflows={workflows}
+        workflowEdges={workflowEdges}
+        onClose={onClose}
+        onUpdateAgent={onUpdateAgent}
+        onDeleteAgent={onDeleteAgent}
+        onCreateAgent={onCreateAgent}
+        onUpdateEdge={onUpdateEdge}
+        onCreateEdge={onCreateEdge}
+      />
+    );
+  }
+
+  // ── Workflows panel ──
+  if (selection.type === "workflows") {
+    return (
+      <PanelShell title="Workflows" onClose={onClose}>
+        <div className="flex-1 overflow-y-auto">
+          <WorkflowPanel
+            teamId={selection.teamId}
+            workflows={workflows}
+            workflowEdges={workflowEdges}
+            agents={agents}
+            onUpdateEdge={onUpdateEdge}
+            onUpdateWorkflow={onUpdateWorkflow}
+            onCreateWorkflow={onCreateWorkflow}
+            onDeleteWorkflow={onDeleteWorkflow}
+          />
+        </div>
+      </PanelShell>
+    );
+  }
+
+  // ── Single agent (legacy, kept for compatibility) ──
   if (selection.type === "agent") {
     const agent = agents.find((a) => a.id === selection.agentId);
     if (!agent) return null;
@@ -65,11 +105,7 @@ export function SidePanel({
 
     return (
       <PanelShell title={agent.name} onClose={onClose}>
-        <TabBar
-          tabs={AGENT_TABS}
-          active={activeTab}
-          onChange={setActiveTab}
-        />
+        <TabBar tabs={AGENT_TABS} active={activeTab} onChange={setActiveTab} />
         <div className="flex-1 overflow-y-auto p-4">
           {activeTab === "general" && (
             <AgentGeneralTab
@@ -104,46 +140,10 @@ export function SidePanel({
     );
   }
 
-  if (selection.type === "agent-create") {
-    return (
-      <PanelShell title="Новый агент" onClose={onClose}>
-        <div className="flex-1 overflow-y-auto p-4">
-          <AgentCreateForm
-            onSubmit={(data) => {
-              onCreateAgent(selection.teamId, data);
-              onClose();
-            }}
-          />
-        </div>
-      </PanelShell>
-    );
-  }
-
-  if (selection.type === "team") {
-    return (
-      <PanelShell title="Workflow" onClose={onClose}>
-        <div className="flex-1 overflow-y-auto">
-          <WorkflowPanel
-            teamId={selection.teamId}
-            workflows={workflows}
-            workflowEdges={workflowEdges}
-            agents={agents}
-            onUpdateEdge={onUpdateEdge}
-            onUpdateWorkflow={onUpdateWorkflow}
-            onCreateWorkflow={onCreateWorkflow}
-            onDeleteWorkflow={onDeleteWorkflow}
-          />
-        </div>
-      </PanelShell>
-    );
-  }
-
-  // Edge selection
+  // ── Edge selection ──
   const rawEdgeId = selection.edgeId.replace(/^edge-/, "");
   const edge = workflowEdges.find((e) => e.id === rawEdgeId);
   if (!edge) return null;
-
-  const toAgent = agents.find((a) => a.id === edge.to_agent_id);
 
   const isEdgeLocked = lockedWorkflowIds.has(edge.workflow_id);
 
@@ -162,6 +162,234 @@ export function SidePanel({
   );
 }
 
+// ── Agents panel with selector ──────────────────────────────────────────────
+
+function AgentsPanel({
+  teamId,
+  initialAgentId,
+  agents,
+  workflows,
+  workflowEdges,
+  onClose,
+  onUpdateAgent,
+  onDeleteAgent,
+  onCreateAgent,
+  onUpdateEdge,
+  onCreateEdge,
+}: {
+  teamId: string;
+  initialAgentId?: string;
+  agents: Agent[];
+  workflows: Workflow[];
+  workflowEdges: WorkflowEdge[];
+  onClose: () => void;
+  onUpdateAgent: (id: string, teamId: string, data: AgentUpdate) => void;
+  onDeleteAgent: (id: string, teamId: string) => void;
+  onCreateAgent: (teamId: string, data: { name: string; system_prompt: string; role: string }) => void;
+  onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
+  onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string) => void;
+}) {
+  const teamAgents = agents.filter((a) => a.team_id === teamId);
+  const [selectedAgentId, setSelectedAgentId] = useState<string>(
+    initialAgentId ?? teamAgents[0]?.id ?? "",
+  );
+  const [showCreateForm, setShowCreateForm] = useState(teamAgents.length === 0);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [activeTab, setActiveTab] = useState<AgentTab>("general");
+
+  const selectedAgent = teamAgents.find((a) => a.id === selectedAgentId);
+  const outgoingEdges = selectedAgent
+    ? workflowEdges.filter((e) => e.from_agent_id === selectedAgent.id)
+    : [];
+
+  return (
+    <PanelShell
+      title="Agents"
+      onClose={onClose}
+      headerButtons={
+        <>
+          <button
+            type="button"
+            onClick={() => { setShowCreateForm(!showCreateForm); setShowDeleteConfirm(false); }}
+            className="text-[11px] text-blue-600 border border-blue-200 rounded px-2 py-0.5 hover:bg-blue-50"
+          >
+            {showCreateForm ? "Отмена" : "Добавить"}
+          </button>
+          {selectedAgent && !showCreateForm && (
+            <button
+              type="button"
+              onClick={() => { setShowDeleteConfirm(!showDeleteConfirm); }}
+              className="text-[11px] text-red-500 border border-red-200 rounded px-2 py-0.5 hover:bg-red-50"
+            >
+              Удалить
+            </button>
+          )}
+        </>
+      }
+    >
+      <div className="flex-1 overflow-y-auto">
+        <div className="p-4 space-y-4">
+          {/* Create form */}
+          {showCreateForm && (
+            <AgentCreateForm
+              onSubmit={(data) => {
+                onCreateAgent(teamId, data);
+                setShowCreateForm(false);
+              }}
+            />
+          )}
+
+          {/* Delete confirm */}
+          {showDeleteConfirm && selectedAgent && (
+            <div className="p-3 border border-red-200 rounded bg-red-50 space-y-2">
+              <p className="text-sm text-red-700">
+                Удалить <b>{selectedAgent.name}</b>?
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="text-sm bg-red-600 text-white rounded px-3 py-1 hover:bg-red-700"
+                  onClick={() => {
+                    onDeleteAgent(selectedAgent.id, teamId);
+                    setShowDeleteConfirm(false);
+                    setSelectedAgentId(teamAgents.find(a => a.id !== selectedAgent.id)?.id ?? "");
+                  }}
+                >
+                  Да, удалить
+                </button>
+                <button
+                  type="button"
+                  className="text-sm text-gray-500 hover:text-gray-700"
+                  onClick={() => setShowDeleteConfirm(false)}
+                >
+                  Отмена
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Agent selector */}
+          {!showCreateForm && teamAgents.length > 0 && (
+            <>
+              <select
+                value={selectedAgentId}
+                onChange={(e) => { setSelectedAgentId(e.target.value); setShowDeleteConfirm(false); setActiveTab("general"); }}
+                className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+              >
+                {teamAgents.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
+
+              {/* Agent tabs + content */}
+              {selectedAgent && (
+                <>
+                  <TabBar tabs={AGENT_TABS} active={activeTab} onChange={setActiveTab} />
+                  <div className="pt-2">
+                    {activeTab === "general" && (
+                      <AgentGeneralTab
+                        key={selectedAgent.id}
+                        agent={selectedAgent}
+                        onSave={(data) => onUpdateAgent(selectedAgent.id, teamId, data)}
+                        onDelete={() => {
+                          onDeleteAgent(selectedAgent.id, teamId);
+                          setSelectedAgentId(teamAgents.find(a => a.id !== selectedAgent.id)?.id ?? "");
+                        }}
+                      />
+                    )}
+                    {activeTab === "handoff" && (
+                      <AgentHandoffTab
+                        key={selectedAgent.id}
+                        agent={selectedAgent}
+                        outgoingEdges={outgoingEdges}
+                        workflows={workflows}
+                        allAgents={agents}
+                        onUpdateEdge={onUpdateEdge}
+                        onCreateEdge={(workflowId, toAgentId) =>
+                          onCreateEdge(workflowId, selectedAgent.id, toAgentId)
+                        }
+                      />
+                    )}
+                    {activeTab === "sub-agents" && (
+                      <AgentSubAgentsTab
+                        key={selectedAgent.id}
+                        agent={selectedAgent}
+                        onSave={(data) => onUpdateAgent(selectedAgent.id, teamId, data)}
+                      />
+                    )}
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
+          {!showCreateForm && teamAgents.length === 0 && (
+            <p className="text-sm text-gray-400">Нет агентов в этой команде</p>
+          )}
+        </div>
+      </div>
+    </PanelShell>
+  );
+}
+
+// ── Agent create form ───────────────────────────────────────────────────────
+
+function AgentCreateForm({
+  onSubmit,
+}: {
+  onSubmit: (data: { name: string; system_prompt: string; role: string }) => void;
+}) {
+  const [name, setName] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
+
+  const canSubmit = name.trim().length > 0 && systemPrompt.trim().length > 0;
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canSubmit) return;
+    onSubmit({ name: name.trim(), system_prompt: systemPrompt.trim(), role: "agent" });
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3 p-3 border border-blue-200 rounded bg-blue-50/50">
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">
+          Имя <span className="text-red-400">*</span>
+        </label>
+        <input
+          type="text"
+          className="w-full border border-gray-300 rounded px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Например: Developer"
+          autoFocus
+          maxLength={100}
+        />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">
+          Системный промпт <span className="text-red-400">*</span>
+        </label>
+        <textarea
+          className="w-full border border-gray-300 rounded px-2.5 py-1.5 text-sm font-mono text-xs resize-y min-h-[120px] focus:outline-none focus:ring-2 focus:ring-blue-400"
+          value={systemPrompt}
+          onChange={(e) => setSystemPrompt(e.target.value)}
+          placeholder="Инструкции для агента..."
+        />
+      </div>
+      <button
+        type="submit"
+        disabled={!canSubmit}
+        className="text-sm bg-blue-600 text-white rounded px-3 py-1.5 hover:bg-blue-700 disabled:opacity-50"
+      >
+        Создать
+      </button>
+    </form>
+  );
+}
+
+// ── Shared components ───────────────────────────────────────────────────────
+
 const AGENT_TABS: Array<{ id: AgentTab; label: string }> = [
   { id: "general", label: "General" },
   { id: "handoff", label: "Handoff" },
@@ -172,21 +400,28 @@ function PanelShell({
   title,
   onClose,
   children,
+  headerButtons,
 }: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
+  headerButtons?: React.ReactNode;
 }) {
   return (
     <div
-      className="w-[400px] bg-white border-l border-gray-200 flex flex-col h-full animate-slide-in"
+      className="absolute right-0 top-0 w-[400px] bg-white border-l border-gray-200 flex flex-col h-full animate-slide-in z-10 shadow-lg"
       data-testid="side-panel"
     >
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200">
         <h2 className="text-sm font-semibold text-gray-900 truncate">{title}</h2>
+        {headerButtons && (
+          <div className="flex items-center gap-1 ml-auto">
+            {headerButtons}
+          </div>
+        )}
         <button
           type="button"
-          className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+          className={`text-gray-400 hover:text-gray-600 text-lg leading-none ${headerButtons ? "" : "ml-auto"}`}
           onClick={onClose}
           aria-label="Close panel"
         >
@@ -224,58 +459,5 @@ function TabBar<T extends string>({
         </button>
       ))}
     </div>
-  );
-}
-
-
-function AgentCreateForm({
-  onSubmit,
-}: {
-  onSubmit: (data: { name: string; system_prompt: string; role: string }) => void;
-}) {
-  const [name, setName] = useState("");
-  const [systemPrompt, setSystemPrompt] = useState("");
-
-  const canSubmit = name.trim().length > 0 && systemPrompt.trim().length > 0;
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!canSubmit) return;
-    onSubmit({ name: name.trim(), system_prompt: systemPrompt.trim(), role: "agent" });
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-      <label className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-gray-600">Имя <span className="text-red-400">*</span></span>
-        <input
-          type="text"
-          className="border border-gray-200 rounded px-2 py-1.5 text-sm"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Например: Developer"
-          autoFocus
-          maxLength={100}
-        />
-      </label>
-
-      <label className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-gray-600">Системный промпт <span className="text-red-400">*</span></span>
-        <textarea
-          className="border border-gray-200 rounded px-2 py-1.5 text-sm resize-y min-h-[120px] font-mono text-xs"
-          value={systemPrompt}
-          onChange={(e) => setSystemPrompt(e.target.value)}
-          placeholder="Инструкции для агента..."
-        />
-      </label>
-
-      <button
-        type="submit"
-        disabled={!canSubmit}
-        className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50 self-start"
-      >
-        Создать
-      </button>
-    </form>
   );
 }
