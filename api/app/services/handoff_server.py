@@ -240,7 +240,6 @@ async def resolve_handoff_prompt(
 
     Priority:
     1. edge.prompt_template with variable substitution
-    2. to_agent.prompts[prompt_id].content
     3. Fallback: comment/notes from tool call args
     """
     if tool.prompt_template and task:

@@ -40,7 +40,6 @@ async def create_edge(
         to_agent_id=data.to_agent_id,
         condition=data.condition,
         prompt_template=data.prompt_template,
-        prompt_id=data.prompt_id,
         order=data.order,
         requires_approval=data.requires_approval,
     )
