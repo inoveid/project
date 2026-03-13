@@ -119,7 +119,7 @@ export function WorkflowPanel({
           </select>
         </div>
       ) : (
-        <div className="text-sm font-medium text-gray-800">{teamWorkflows[0].name}</div>
+        <div className="text-sm font-medium text-gray-800">{teamWorkflows[0]!.name}</div>
       )}
 
       {selectedWorkflow && (
@@ -176,12 +176,7 @@ function WorkflowChainStepper({
           <div key={step.agent.id}>
             {/* Forward edge info */}
             {step.forwardEdge && (
-              <EdgeConnector
-                edge={step.forwardEdge}
-                workflowId={workflow.id}
-                isLocked={isLocked}
-                onUpdateEdge={onUpdateEdge}
-              />
+              <EdgeConnector edge={step.forwardEdge} />
             )}
 
             {/* Agent node */}
@@ -229,14 +224,8 @@ function WorkflowChainStepper({
 
 function EdgeConnector({
   edge,
-  workflowId,
-  isLocked,
-  onUpdateEdge,
 }: {
   edge: WorkflowEdge;
-  workflowId: string;
-  isLocked: boolean;
-  onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
 }) {
   return (
     <div className="flex items-center gap-3 py-0.5">
@@ -259,7 +248,7 @@ function EdgeConnector({
 function ReturnEdgeBadge({
   returnEdge,
   workflowId,
-  isLocked,
+  _isLocked,
   onUpdateEdge,
 }: {
   returnEdge: ReturnEdge;

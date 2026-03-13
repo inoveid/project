@@ -7,7 +7,7 @@ interface ApprovalCardProps {
 }
 
 export function ApprovalCard({ approval, onApprove, onReject }: ApprovalCardProps) {
-  const { fromAgent, toAgent, task, chain = [], steps = [], workflowAgents = [] } = approval;
+  const { fromAgent, toAgent, task, steps = [] } = approval;
 
   // Build ordered progress entries from steps, avoiding duplicate agent rows
   // Each step is shown once; if toAgent already appeared, mark the last occurrence as current
@@ -22,8 +22,8 @@ export function ApprovalCard({ approval, onApprove, onReject }: ApprovalCardProp
   } else {
     // Mark the last occurrence of toAgent as current (it's being handed back)
     for (let i = progressEntries.length - 1; i >= 0; i--) {
-      if (progressEntries[i].agent === toAgent) {
-        progressEntries[i].status = "current";
+      if (progressEntries[i]!.agent === toAgent) {
+        progressEntries[i]!.status = "current";
         break;
       }
     }
