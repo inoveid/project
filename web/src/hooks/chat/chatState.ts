@@ -20,7 +20,7 @@ export interface PendingRefs {
   toolsRef: MutableRefObject<ToolUse[]>;
 }
 
-export function makeLocalMessage(role: "user" | "assistant", content: string): Message {
+export function makeLocalMessage(role: "user" | "assistant" | "system", content: string): Message {
   return {
     id: crypto.randomUUID(),
     session_id: "",

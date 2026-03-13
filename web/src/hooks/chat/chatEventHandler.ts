@@ -308,6 +308,22 @@ export function handleEvent(
       break;
     }
 
+
+    case "budget_warning": {
+      const warn = event as any;
+      const msg = `Использовано ${warn.usage_percent ?? 80}% бюджета сессии ($${warn.spent_usd ?? "?"}/$${warn.limit_usd ?? "?"})`;
+      setItems((prev) => [...prev, makeLocalMessage("system", msg)]);
+      break;
+    }
+
+    case "budget_exceeded": {
+      const exc = event as any;
+      const msg = `Бюджет сессии исчерпан ($${exc.spent_usd ?? "?"}/$${exc.limit_usd ?? "?"}). Агент остановлен.`;
+      setItems((prev) => [...prev, makeLocalMessage("system", msg)]);
+      setStatus("connected");
+      break;
+    }
+
     default:
       console.warn("[chat] Unknown WS event type:", (event as Record<string, unknown>).type);
       break;
