@@ -106,7 +106,7 @@ export function useChat(
     if (status !== "connected" || autoSentRef.current) return;
     const msgs = initialMessagesRef.current;
     if (msgs.length === 0) return;
-    const lastMsg = msgs[msgs.length - 1];
+    const lastMsg = msgs[msgs.length - 1]!;
     if (lastMsg.role === "user") {
       autoSentRef.current = true;
       send(JSON.stringify({ type: "message", content: lastMsg.content, saved: true }));
