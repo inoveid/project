@@ -1,10 +1,12 @@
 """
 Event Bus — Redis-based pub/sub for session events and commands.
 
-Channels:
-  session:{session_id}:events  — Worker publishes graph events (pub/sub, real-time)
-  session:{session_id}:commands — WS handler publishes commands (pub/sub)
-  notifications                — broadcast notifications (pub/sub)
+Channels (pub/sub):
+  session:{session_id}:events  — Worker publishes graph events (real-time)
+  notifications                — broadcast notifications
+
+Lists (RPUSH/BLPOP — buffered, no message loss):
+  session:{session_id}:commands — WS handler publishes commands for Worker
 
 Buffers:
   session:{session_id}:buffer  — Recent events stored in Redis list for WS reconnection replay.
@@ -14,6 +16,7 @@ All messages are JSON-encoded dicts with a "type" field.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -26,6 +29,7 @@ logger = logging.getLogger(__name__)
 # Buffer settings
 EVENT_BUFFER_SIZE = 500     # max events to keep per session
 EVENT_BUFFER_TTL = 3600     # buffer expires after 1 hour of inactivity
+COMMANDS_TTL = 3600         # commands list TTL
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +40,7 @@ def _events_channel(session_id: str) -> str:
     return f"session:{session_id}:events"
 
 
-def _commands_channel(session_id: str) -> str:
+def _commands_key(session_id: str) -> str:
     return f"session:{session_id}:commands"
 
 
@@ -72,9 +76,15 @@ async def publish_event(session_id: str, event: dict[str, Any]) -> None:
 
 
 async def publish_command(session_id: str, command: dict[str, Any]) -> None:
-    """Publish a command from WS handler → Worker."""
+    """Publish a command from WS handler → Worker.
+    
+    Uses Redis LIST (RPUSH) instead of pub/sub to prevent message loss
+    when Worker hasn't subscribed yet (race condition on session start).
+    """
     r = get_redis()
-    await r.publish(_commands_channel(session_id), json.dumps(command))
+    key = _commands_key(session_id)
+    await r.rpush(key, json.dumps(command))
+    await r.expire(key, COMMANDS_TTL)
 
 
 async def publish_notification(event_type: str, data: dict[str, Any]) -> None:
@@ -114,9 +124,9 @@ async def get_buffer_length(session_id: str) -> int:
 
 
 async def clear_buffer(session_id: str) -> None:
-    """Clear the event buffer for a session (on session end)."""
+    """Clear the event buffer and commands list for a session (on session end)."""
     r = get_redis()
-    await r.delete(_buffer_key(session_id))
+    await r.delete(_buffer_key(session_id), _commands_key(session_id))
 
 
 # ---------------------------------------------------------------------------
@@ -144,23 +154,27 @@ async def subscribe_events(session_id: str) -> AsyncIterator[dict[str, Any]]:
 
 
 async def subscribe_commands(session_id: str) -> AsyncIterator[dict[str, Any]]:
-    """Subscribe to session commands. Used by Worker."""
+    """Subscribe to session commands. Used by Worker.
+    
+    Uses Redis LIST (BLPOP) instead of pub/sub. Messages are buffered
+    in the list, so no messages are lost even if the Worker subscribes
+    after the WS handler has already published commands.
+    """
     r = get_redis()
-    pubsub = r.pubsub()
-    channel = _commands_channel(session_id)
-    await pubsub.subscribe(channel)
+    key = _commands_key(session_id)
     try:
-        async for raw_message in pubsub.listen():
-            if raw_message["type"] != "message":
+        while True:
+            # BLPOP blocks until a message arrives, timeout=1s for cancellation check
+            result = await r.blpop(key, timeout=1)
+            if result is None:
                 continue
+            _, raw = result
             try:
-                command = json.loads(raw_message["data"])
-                yield command
+                yield json.loads(raw)
             except (json.JSONDecodeError, TypeError):
-                logger.warning("Invalid command JSON on %s", channel)
-    finally:
-        await pubsub.unsubscribe(channel)
-        await pubsub.aclose()
+                logger.warning("Invalid command JSON on %s", key)
+    except asyncio.CancelledError:
+        pass
 
 
 async def subscribe_notifications() -> AsyncIterator[dict[str, Any]]:
