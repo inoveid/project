@@ -1,13 +1,18 @@
 """
 Task Worker — runs LangGraph graph in a separate process, decoupled from WebSocket.
 
-Lifecycle:
-1. API receives command (message/approve/reject/stop) via WS
-2. API publishes command to Redis channel session:{id}:commands
-3. Worker subscribes to commands, runs graph, publishes events to session:{id}:events
-4. WS handler subscribes to events and forwards to client
+Architecture (v2 — Peer Handoff):
+- Graph handles ONE agent at a time, returns when done or handoff detected
+- Worker manages peer transitions: graph ends with handoff → Worker creates/reuses
+  session for next agent → starts new handle_session task
+- Sub-agents (depth > 0) will be added in Stage 2-3 within run_agent_node
 
-The Worker uses an EventPublisher instead of WebSocket to emit events.
+Lifecycle:
+1. WS handler publishes "start" to worker:sessions
+2. Worker starts handle_session task for that session
+3. Graph runs single agent, returns with handoff_result or done
+4. If handoff: Worker creates next session, publishes new "start"
+5. If done: Worker cleans up
 """
 from __future__ import annotations
 
@@ -20,22 +25,29 @@ from typing import Any
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.types import Command
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import async_session
+from app.models.agent import Agent
+from app.models.session import Session as SessionModel
+from app.schemas.session import SessionCreate
 from app.services.event_bus import (
     clear_buffer,
+    publish_command,
     publish_event,
     publish_notification,
     subscribe_commands,
 )
-from app.services.redis_service import init_redis, close_redis
+from app.services.redis_service import init_redis, close_redis, get_redis
 import app.services.graph_service as graph_svc
 from app.services.graph_service import GraphConfigurable
 from app.services.runtime import runtime
 from app.services.session_service import (
     SessionNotFoundError,
     add_message,
+    create_session,
     get_session,
     stop_session,
 )
@@ -49,21 +61,14 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# EventPublisher — drop-in replacement for WebSocket in graph nodes
+# EventPublisher — drop-in for WebSocket in graph nodes
 # ---------------------------------------------------------------------------
 
 class EventPublisher:
-    """
-    Mimics WebSocket.send_json() interface but publishes to Redis.
-    Graph nodes call `await ws.send_json(event)` — this makes it work
-    without any changes to node signatures.
-    """
-
     def __init__(self, session_id: str) -> None:
         self.session_id = session_id
 
     async def send_json(self, data: dict[str, Any]) -> None:
-        """Publish event to Redis (implements EventSender protocol from graph_service)."""
         await publish_event(self.session_id, data)
 
 
@@ -72,10 +77,6 @@ class EventPublisher:
 # ---------------------------------------------------------------------------
 
 async def handle_session(session_id: uuid.UUID) -> None:
-    """
-    Handle a single session: subscribe to commands, run graph, publish events.
-    Called when a new session command arrives.
-    """
     sid = str(session_id)
     publisher = EventPublisher(sid)
 
@@ -88,15 +89,6 @@ async def handle_session(session_id: uuid.UUID) -> None:
         except Exception:
             pass
     finally:
-        # Cleanup — always runs, even on crash
-        for child_id in runtime.get_children(session_id):
-            try:
-                async with async_session() as cleanup_db:
-                    await stop_session(cleanup_db, child_id)
-            except SessionNotFoundError:
-                pass
-            except Exception as exc:
-                logger.warning("Failed to stop child %s: %s", child_id, exc)
         await runtime.stop_session(session_id)
         await clear_buffer(sid)
         logger.info("Session %s cleanup complete", sid)
@@ -105,9 +97,6 @@ async def handle_session(session_id: uuid.UUID) -> None:
 async def _run_session(
     session_id: uuid.UUID, sid: str, publisher: EventPublisher,
 ) -> None:
-    """Core session logic — separated for try/finally in handle_session."""
-    # NOTE: single async_session for entire session lifetime — stale reads possible
-    # for long-running sessions. Use db.refresh() if fresh data needed.
     async with async_session() as db:
         try:
             session = await get_session(db, session_id)
@@ -129,7 +118,7 @@ async def _run_session(
                 if tools_prompt:
                     system_prompt += tools_prompt
 
-        # Resolve workdir from product (primary) or agent config (fallback)
+        # Resolve workdir
         workdir = ""
         product_workspace = None
         if session.task_id:
@@ -141,34 +130,27 @@ async def _run_session(
         if not workdir:
             workdir = agent.config.get("workdir", "") if agent.config else ""
 
-        # Ensure workspace directory exists
         effective_workdir = workdir or settings.workspace_path
         if not os.path.isdir(effective_workdir):
             os.makedirs(effective_workdir, exist_ok=True)
-            logger.info("Created workspace directory: %s", effective_workdir)
 
-        # Auto-init git if not present (agents need git for tracking changes)
+        # Auto-init git
         git_dir = os.path.join(effective_workdir, ".git")
         if not os.path.exists(git_dir):
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    "git", "init",
-                    cwd=effective_workdir,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
+                    "git", "init", cwd=effective_workdir,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 )
                 await proc.communicate()
-                if proc.returncode == 0:
-                    logger.info("Initialized git in %s", effective_workdir)
-            except Exception as exc:
-                logger.warning("Failed to init git in %s: %s", effective_workdir, exc)
+            except Exception:
+                pass
 
         # Start runtime
         if not runtime.is_running(session_id):
             try:
                 await runtime.start_session(
-                    session_id=session_id,
-                    workdir=workdir,
+                    session_id=session_id, workdir=workdir,
                     system_prompt=system_prompt,
                     claude_session_id=session.claude_session_id,
                     allowed_tools=agent.allowed_tools or [],
@@ -177,17 +159,14 @@ async def _run_session(
                 await publish_event(sid, {"type": "error", "error": str(exc)})
                 return
 
-        # LangGraph config — EventPublisher instead of WebSocket
+        # LangGraph config
         configurable: GraphConfigurable = {
             "thread_id": sid,
-            "websocket": publisher,  # EventPublisher implements EventSender
+            "websocket": publisher,
             "db": db,
             "task_id": session.task_id,
         }
-        graph_config = {
-            "configurable": configurable,
-            "recursion_limit": 20,
-        }
+        graph_config = {"configurable": configurable, "recursion_limit": 20}
         graph = graph_svc.get_graph()
         task_id = session.task_id
 
@@ -196,7 +175,7 @@ async def _run_session(
             graph, graph_config, publisher, sid, task_id
         )
 
-        # Listen for commands
+        # Command loop
         async for command in subscribe_commands(sid):
             cmd_type = command.get("type")
 
@@ -233,7 +212,7 @@ async def _run_session(
 
                 result = await _run_graph(graph, initial_state, graph_config)
                 interrupted = await _handle_graph_result(
-                    publisher, db, task_id, *result
+                    publisher, db, task_id, session, *result
                 )
 
             elif cmd_type == "approve" and interrupted:
@@ -241,14 +220,14 @@ async def _run_session(
                 await publish_event(sid, {"type": "status", "status": "thinking"})
                 result = await _run_graph(graph, Command(resume=True), graph_config)
                 interrupted = await _handle_graph_result(
-                    publisher, db, task_id, *result
+                    publisher, db, task_id, session, *result
                 )
 
             elif cmd_type == "reject" and interrupted:
                 await _try_update_task_status(db, task_id, "in_progress")
                 result = await _run_graph(graph, Command(resume=False), graph_config)
                 interrupted = await _handle_graph_result(
-                    publisher, db, task_id, *result
+                    publisher, db, task_id, session, *result
                 )
 
             elif cmd_type == "message" and interrupted:
@@ -259,14 +238,89 @@ async def _run_session(
 
 
 # ---------------------------------------------------------------------------
-# Graph execution helpers (moved from ws.py, adapted for EventPublisher)
+# Peer handoff — Worker creates next session
+# ---------------------------------------------------------------------------
+
+async def _handle_peer_handoff(
+    db: AsyncSession,
+    current_session: SessionModel,
+    handoff_result: dict,
+    chain: list,
+    workflow_id: str | None,
+    product_workspace: str | None,
+) -> None:
+    """Create/reuse peer session and tell Worker to start it."""
+    target_id = uuid.UUID(handoff_result["to_agent_id"])
+    target = await db.get(Agent, target_id)
+    if not target:
+        logger.warning("Handoff target agent %s not found", target_id)
+        return
+
+    prompt = handoff_result.get("prompt", "") or handoff_result.get("tool_args", {}).get("comment", "")
+    task_id = current_session.task_id
+    current_sid = str(current_session.id)
+
+    # Emit handoff_start on current session
+    await publish_event(current_sid, {
+        "type": "handoff_start",
+        "from_agent": current_session.agent.name,
+        "to_agent": target.name,
+        "task": prompt,
+    })
+
+    # Try to reuse existing session for this agent + task
+    existing_session = None
+    if task_id:
+        stmt = (
+            select(SessionModel)
+            .where(
+                SessionModel.agent_id == target_id,
+                SessionModel.task_id == task_id,
+                SessionModel.status == "active",
+            )
+            .order_by(SessionModel.created_at.asc())
+            .limit(1)
+        )
+        result = await db.execute(stmt)
+        existing_session = result.scalar_one_or_none()
+
+    if existing_session:
+        peer_session = existing_session
+        logger.info("Reusing session %s for agent %s", peer_session.id, target.name)
+    else:
+        peer_session = await create_session(db, SessionCreate(agent_id=target.id))
+        if task_id:
+            peer_session.task_id = task_id
+            await db.commit()
+            await db.refresh(peer_session)
+
+    # Add handoff prompt as user message
+    await add_message(db, peer_session.id, "user", prompt)
+
+    # Emit done on current session (this agent's work is finished)
+    await publish_event(current_sid, {"type": "done"})
+
+    # Notify worker to start the peer session
+    r = get_redis()
+    await r.publish("worker:sessions", json.dumps({
+        "action": "start",
+        "session_id": str(peer_session.id),
+    }))
+
+    logger.info(
+        "Peer handoff: %s → %s (session %s)",
+        current_session.agent.name, target.name, peer_session.id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Graph execution helpers
 # ---------------------------------------------------------------------------
 
 async def _restore_interrupt_state(
     graph, graph_config: dict, publisher: EventPublisher,
     session_id: str, task_id: uuid.UUID | None,
 ) -> bool:
-    """Check LangGraph checkpoint for pending interrupts."""
     try:
         graph_state = await graph.aget_state(graph_config)
         if graph_state and graph_state.next:
@@ -296,14 +350,7 @@ async def _restore_interrupt_state(
     return False
 
 
-async def _try_update_task_status(
-    db, task_id: uuid.UUID | None, new_status: str,
-) -> None:
-    """Update task status, suppressing errors (auto-update should not crash session).
-
-    Called on: interrupt → awaiting_user, approve → in_progress, error → error, done → done.
-    Uses VALID_TRANSITIONS from task_service — invalid transitions log error, not raise.
-    """
+async def _try_update_task_status(db, task_id, new_status):
     if not task_id:
         return
     try:
@@ -314,18 +361,15 @@ async def _try_update_task_status(
 
 async def _handle_graph_result(
     publisher: EventPublisher,
-    db,
+    db: AsyncSession,
     task_id: uuid.UUID | None,
+    session: SessionModel,
     interrupted: bool,
     completed: bool,
     errored: bool,
     last_state: dict | None = None,
 ) -> bool:
-    """Dispatch graph result: send appropriate events and update task status.
-
-    Returns True if graph is interrupted (waiting for approve/reject), False otherwise.
-    Priority: errored → interrupted (approval_required) → completed (done) → done.
-    """
+    """Handle graph result. Now includes peer handoff logic."""
     if errored:
         await publisher.send_json({"type": "done"})
         return False
@@ -352,6 +396,20 @@ async def _handle_graph_result(
             })
         return True
 
+    # Check for peer handoff (gateway_approved=True + handoff_result)
+    if last_state:
+        gateway_approved = last_state.get("gateway_approved")
+        hr = last_state.get("handoff_result")
+        if gateway_approved and hr and hr.get("to_agent_id"):
+            # Peer handoff — create next session, Worker starts it
+            await _handle_peer_handoff(
+                db, session, hr,
+                chain=last_state.get("chain", []),
+                workflow_id=last_state.get("workflow_id"),
+                product_workspace=last_state.get("product_workspace"),
+            )
+            return False  # This session is done
+
     if completed:
         await _try_update_task_status(db, task_id, "done")
 
@@ -360,7 +418,6 @@ async def _handle_graph_result(
 
 
 async def _run_graph(graph, input, config: dict) -> tuple[bool, bool, bool, dict | None]:
-    """Stream graph — same logic as ws.py but uses EventPublisher."""
     publisher: EventPublisher = config["configurable"]["websocket"]
     db = config["configurable"]["db"]
     task_id = config["configurable"]["task_id"]
@@ -376,7 +433,8 @@ async def _run_graph(graph, input, config: dict) -> tuple[bool, bool, bool, dict
             if isinstance(hr, dict) and hr.get("result_type") == "completed":
                 completed = True
     except Exception as exc:
-        logger.error("Graph execution error for session %s: %s", config["configurable"]["thread_id"], exc, exc_info=True)
+        logger.error("Graph error for session %s: %s",
+                     config["configurable"]["thread_id"], exc, exc_info=True)
         await publisher.send_json({"type": "error", "error": str(exc)})
         await _try_update_task_status(db, task_id, "error")
         await publish_notification("task_error", {
@@ -385,15 +443,15 @@ async def _run_graph(graph, input, config: dict) -> tuple[bool, bool, bool, dict
         })
         return False, False, True, None
 
-    # Fallback: check for pending interrupts
+    # Check for pending interrupts
     try:
         graph_state = await graph.aget_state(config)
         if graph_state and graph_state.next:
             return True, False, False, graph_state.values or {}
     except Exception as exc:
-        logger.warning("Failed to check graph state after stream for %s: %s", config["configurable"]["thread_id"], exc)
+        logger.warning("Failed to check graph state: %s", exc)
 
-    return False, completed, False, None
+    return False, completed, False, last_state
 
 
 # ---------------------------------------------------------------------------
@@ -401,12 +459,6 @@ async def _run_graph(graph, input, config: dict) -> tuple[bool, bool, bool, dict
 # ---------------------------------------------------------------------------
 
 async def run_worker() -> None:
-    """
-    Main worker loop. Initializes Redis + LangGraph, then listens for
-    session start commands on the 'worker:sessions' Redis channel.
-
-    Each session is handled in its own asyncio task.
-    """
     await init_redis()
 
     postgres_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
@@ -414,12 +466,9 @@ async def run_worker() -> None:
         await checkpointer.setup()
         graph_svc._compiled_graph = graph_svc.build_graph(checkpointer)
 
-        from app.services.redis_service import get_redis
         r = get_redis()
-
         logger.info("Worker started, listening for session commands...")
 
-        # Subscribe to worker control channel
         pubsub = r.pubsub()
         await pubsub.subscribe("worker:sessions")
 
@@ -450,14 +499,9 @@ async def run_worker() -> None:
                     active_tasks[sid] = task
                     task.add_done_callback(lambda t, s=sid: active_tasks.pop(s, None))
 
-                # NOTE: No "stop" action here — Worker only stops via
-                # session commands channel (explicit user "stop" command).
-                # WS disconnect does NOT stop the Worker.
-
         finally:
             await pubsub.unsubscribe("worker:sessions")
             await pubsub.aclose()
-            # Cancel all active tasks
             for task in active_tasks.values():
                 task.cancel()
             if active_tasks:
@@ -467,7 +511,6 @@ async def run_worker() -> None:
 
 
 def main() -> None:
-    """CLI entry point for running the worker process."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     asyncio.run(run_worker())
 
