@@ -12,14 +12,23 @@ export function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [registrationOpen, setRegistrationOpen] = useState<boolean | null>(null);
+  const [checking, setChecking] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     fetchApi<{ open: boolean }>('/auth/registration-open')
       .then((res) => {
+        if (cancelled) return;
         setRegistrationOpen(res.open);
         if (res.open) setMode('register');
       })
-      .catch(() => setRegistrationOpen(false));
+      .catch(() => {
+        if (!cancelled) setRegistrationOpen(false);
+      })
+      .finally(() => {
+        if (!cancelled) setChecking(false);
+      });
+    return () => { cancelled = true; };
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -44,6 +53,14 @@ export function LoginPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (checking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <p className="text-gray-400 text-sm">Загрузка...</p>
+      </div>
+    );
   }
 
   const showRegisterTab = registrationOpen === true;
