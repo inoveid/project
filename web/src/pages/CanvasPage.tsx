@@ -25,6 +25,7 @@ import { WorkflowEdgeComponent } from "../components/canvas/WorkflowEdge";
 import { WorkflowFilter } from "../components/canvas/WorkflowFilter";
 import { CreateTeamForm } from "../components/canvas/CreateTeamForm";
 import { CreateWorkflowForm } from "../components/canvas/CreateWorkflowForm";
+import { CreateAgentModal } from "../components/canvas/CreateAgentModal";
 import { ConnectEdgeDialog } from "../components/canvas/ConnectEdgeDialog";
 import { SidePanel, type SidePanelSelection } from "../components/canvas/sidepanel/SidePanel";
 import {
@@ -53,6 +54,7 @@ export function CanvasPage() {
   const [panelSelection, setPanelSelection] = useState<SidePanelSelection | null>(null);
   const [showCreateTeam, setShowCreateTeam] = useState(false);
   const [createWorkflowTeamId, setCreateWorkflowTeamId] = useState<string | null>(null);
+  const [createAgentTeamId, setCreateAgentTeamId] = useState<string | null>(null);
   const [pendingConnection, setPendingConnection] = useState<{
     fromId: string;
     toId: string;
@@ -84,13 +86,8 @@ export function CanvasPage() {
 
   // Callbacks for group node buttons
   const handleAddAgent = useCallback((teamId: string) => {
-    const count = allAgents?.filter((a) => a.team_id === teamId).length ?? 0;
-    void mutations.handleCreateAgent(teamId, {
-      name: `Agent ${count + 1}`,
-      role: "agent",
-      system_prompt: "You are a helpful assistant.",
-    });
-  }, [allAgents, mutations]);
+    setCreateAgentTeamId(teamId);
+  }, []);
 
   const handleAddWorkflow = useCallback((teamId: string) => {
     setCreateWorkflowTeamId(teamId);
@@ -302,6 +299,20 @@ export function CanvasPage() {
           />
         )}
       </div>
+
+      {createAgentTeamId && (
+        <CreateAgentModal
+          defaultName={`Agent ${(allAgents?.filter((a) => a.team_id === createAgentTeamId).length ?? 0) + 1}`}
+          onSubmit={(data) => {
+            void mutations.handleCreateAgent(createAgentTeamId, {
+              ...data,
+              role: "agent",
+            });
+            setCreateAgentTeamId(null);
+          }}
+          onClose={() => setCreateAgentTeamId(null)}
+        />
+      )}
 
       {pendingConnection && (
         <ConnectEdgeDialog
