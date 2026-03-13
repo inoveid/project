@@ -123,20 +123,28 @@ class BudgetTracker:
         self._sessions: dict[str, SessionBudget] = {}
 
     def start_session(
-        self, session_id: str, limit_usd: Optional[float] = None
+        self, session_id: str, limit_usd: Optional[float] = None,
+        max_tokens: int = 0,
     ) -> None:
         self._sessions[session_id] = SessionBudget(
             limit_usd=limit_usd if limit_usd is not None else self._default_limit,
+            max_tokens=max_tokens,
         )
 
     def get_budget(self, session_id: str) -> Optional[SessionBudget]:
         return self._sessions.get(session_id)
 
     def check_budget(self, session_id: str) -> None:
-        """Pre-flight check: raise if budget exhausted."""
+        """Pre-flight check: raise if budget or token limit exhausted."""
         budget = self._sessions.get(session_id)
         if not budget:
             return
+        if budget.max_tokens > 0:
+            total = budget.total_input_tokens + budget.total_output_tokens
+            if total >= budget.max_tokens:
+                raise BudgetExceededError(
+                    f"Token limit reached: {total}/{budget.max_tokens} tokens"
+                )
         if budget.level == BudgetLevel.CRITICAL:
             raise BudgetExceededError(budget.spent_usd, budget.limit_usd)
 
@@ -183,6 +191,8 @@ class BudgetTracker:
                 "spent_usd": round(budget.spent_usd, 4),
                 "limit_usd": round(budget.limit_usd, 4),
                 "call_count": budget.call_count,
+                "total_tokens": budget.total_input_tokens + budget.total_output_tokens,
+                "max_tokens": budget.max_tokens,
             }
 
         if level == BudgetLevel.WARNING and not budget._warned:
@@ -200,6 +210,8 @@ class BudgetTracker:
                 "spent_usd": round(budget.spent_usd, 4),
                 "limit_usd": round(budget.limit_usd, 4),
                 "usage_percent": round(budget.usage_ratio * 100, 1),
+                "total_tokens": budget.total_input_tokens + budget.total_output_tokens,
+                "max_tokens": budget.max_tokens,
             }
 
         return None

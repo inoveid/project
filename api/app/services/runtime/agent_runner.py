@@ -79,6 +79,7 @@ class AgentRuntime:
         claude_session_id: Optional[str] = None,
         allowed_tools: list[str] = None,
         parent_session_id: Optional[uuid.UUID] = None,
+        max_tokens: int = 0,
     ) -> None:
         if session_id in self._sessions:
             raise AgentRuntimeError(f"Session {session_id} already running")
@@ -103,7 +104,7 @@ class AgentRuntime:
         )
         if parent_session_id:
             self._children.setdefault(parent_session_id, set()).add(session_id)
-        self._budget.start_session(str(session_id))
+        self._budget.start_session(str(session_id), max_tokens=max_tokens)
 
     async def send_message(
         self, session_id: uuid.UUID, content: str

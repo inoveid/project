@@ -17,6 +17,7 @@ export function AgentGeneralTab({ agent, onSave, onDelete }: AgentGeneralTabProp
   const [systemPrompt, setSystemPrompt] = useState(agent.system_prompt);
   const [allowedTools, setAllowedTools] = useState(agent.allowed_tools.join(", "));
   const [canCompleteTask, setCanCompleteTask] = useState(agent.can_complete_task);
+  const [maxTokens, setMaxTokens] = useState<number>((agent.config as any)?.max_tokens ?? 0);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const { canDelete, reason: deleteBlockReason } = useAgentDeletable(agent.id);
@@ -99,6 +100,27 @@ export function AgentGeneralTab({ agent, onSave, onDelete }: AgentGeneralTabProp
       </label>
 
 
+
+      <label className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-gray-600">Token limit (0 = без лимита)</span>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={0}
+            step={10000}
+            className="border border-gray-200 rounded px-2 py-1.5 text-sm w-32"
+            value={maxTokens}
+            onChange={(e) => setMaxTokens(Number(e.target.value))}
+            onBlur={() => {
+              const currentVal = (agent.config as any)?.max_tokens ?? 0;
+              if (maxTokens !== currentVal) {
+                saveField("config", { ...agent.config, max_tokens: maxTokens });
+              }
+            }}
+          />
+          <span className="text-xs text-gray-400">токенов на сессию</span>
+        </div>
+      </label>
 
       <label className="flex items-center gap-2 pt-1">
         <input

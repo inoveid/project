@@ -311,14 +311,16 @@ export function handleEvent(
 
     case "budget_warning": {
       const warn = event as any;
-      const msg = `Использовано ${warn.usage_percent ?? 80}% бюджета сессии ($${warn.spent_usd ?? "?"}/$${warn.limit_usd ?? "?"})`;
+      const tokens = warn.total_tokens ? `${(warn.total_tokens / 1000).toFixed(1)}k` : "?";
+      const msg = `Использовано ${warn.usage_percent ?? 80}% бюджета (${tokens} токенов, $${warn.spent_usd ?? "?"})`;
       setItems((prev) => [...prev, makeLocalMessage("system", msg)]);
       break;
     }
 
     case "budget_exceeded": {
       const exc = event as any;
-      const msg = `Бюджет сессии исчерпан ($${exc.spent_usd ?? "?"}/$${exc.limit_usd ?? "?"}). Агент остановлен.`;
+      const tokens = exc.total_tokens ? `${(exc.total_tokens / 1000).toFixed(1)}k` : "?";
+      const msg = `Лимит исчерпан (${tokens} токенов, $${exc.spent_usd ?? "?"}). Агент остановлен.`;
       setItems((prev) => [...prev, makeLocalMessage("system", msg)]);
       setStatus("connected");
       break;

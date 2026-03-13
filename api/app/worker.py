@@ -156,11 +156,13 @@ async def _run_session(
         # Start runtime
         if not runtime.is_running(session_id):
             try:
+                max_tokens = (agent.config or {}).get("max_tokens", 0) or 0
                 await runtime.start_session(
                     session_id=session_id, workdir=workdir,
                     system_prompt=system_prompt,
                     claude_session_id=session.claude_session_id,
                     allowed_tools=agent.allowed_tools or [],
+                    max_tokens=max_tokens,
                 )
             except Exception as exc:
                 await publish_event(sid, {"type": "error", "error": str(exc)})
