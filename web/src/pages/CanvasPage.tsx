@@ -88,7 +88,7 @@ export function CanvasPage() {
     void mutations.handleCreateAgent(teamId, {
       name: `Agent ${count + 1}`,
       role: "agent",
-      system_prompt: "",
+      system_prompt: "You are a helpful assistant.",
     });
   }, [allAgents, mutations]);
 
