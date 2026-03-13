@@ -42,10 +42,9 @@ from app.services.session_service import (
     get_session,
 )
 from app.services.sub_agent_service import (
-    find_template,
     format_sub_agent_results,
     parse_spawn_requests,
-    spawn_sub_agent,
+    run_spawn_requests,
 )
 
 logger = logging.getLogger(__name__)
@@ -189,42 +188,27 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
         full_text += round_text
         all_tool_uses.extend(round_tool_uses)
 
-        # Check for spawn_agent requests
-        spawn_requests = parse_spawn_requests(round_text) if sub_agent_templates else []
+        # Check for spawn_agent / spawn_custom requests
+        spawn_requests = parse_spawn_requests(round_text)
 
         if not spawn_requests or spawn_round >= MAX_SPAWN_ROUNDS:
             break  # No spawns or max rounds reached — exit loop
 
-        # Run sub-agents
-        results = []
+        # Run sub-agents in parallel with concurrency limit
         session = await get_session(db, session_id)
         workdir = state.get("product_workspace") or settings.workspace_path
+        max_concurrent = (agent.config or {}).get("max_sub_agents", 3) if agent else 3
 
-        for req in spawn_requests:
-            template = find_template(sub_agent_templates, req.role)
-            if not template:
-                await ws.send_json({
-                    "type": "sub_agent_error",
-                    "role": req.role,
-                    "error": f"No template found for role '{req.role}'",
-                })
-                results.append(type('R', (), {
-                    'role': req.role, 'name': req.role,
-                    'output': '', 'success': False,
-                    'error': f"No template for role '{req.role}'"
-                })())
-                continue
-
-            result = await spawn_sub_agent(
-                db=db,
-                parent_session=session,
-                template=template,
-                task=req.task,
-                workdir=workdir,
-                parent_depth=state["depth"],
-                ws_session_id=state["current_session_id"],
-            )
-            results.append(result)
+        results = await run_spawn_requests(
+            db=db,
+            parent_session=session,
+            requests=spawn_requests,
+            sub_agent_templates=sub_agent_templates,
+            workdir=workdir,
+            parent_depth=state["depth"],
+            ws_session_id=state["current_session_id"],
+            max_concurrent=max_concurrent,
+        )
 
         # Format results and feed back to parent as next message
         results_text = format_sub_agent_results(results)

@@ -142,6 +142,27 @@ export function AgentSubAgentsTab({ agent, onSave }: AgentSubAgentsTabProps) {
       {templates.length === 0 && editingIndex === null && (
         <p className="text-xs text-gray-400">No sub-agent templates yet</p>
       )}
+
+      <div className="pt-4 border-t border-gray-100">
+        <h3 className="text-xs font-medium text-gray-600 mb-2">Settings</h3>
+        <label className="flex items-center gap-2">
+          <span className="text-xs text-gray-600">Max concurrent sub-agents</span>
+          <input
+            type="number"
+            min="1"
+            max="10"
+            className="border border-gray-200 rounded px-2 py-1 text-sm w-16"
+            value={(agent.config as Record<string, unknown>)?.max_sub_agents as number ?? 3}
+            onChange={(e) => {
+              const val = parseInt(e.target.value) || 3;
+              onSave({ config: { ...agent.config, max_sub_agents: Math.min(Math.max(val, 1), 10) } });
+            }}
+          />
+        </label>
+        <p className="text-xs text-gray-400 mt-1">
+          How many sub-agents can run in parallel. Also applies to custom sub-agents.
+        </p>
+      </div>
     </div>
   );
 }

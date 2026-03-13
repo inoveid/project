@@ -119,11 +119,11 @@ async def _run_session(
                 if tools_prompt:
                     system_prompt += tools_prompt
 
-        # Add sub-agent tools from templates
-        if agent.sub_agent_templates:
-            spawn_prompt = format_spawn_tools_prompt(agent.sub_agent_templates)
-            if spawn_prompt:
-                system_prompt += spawn_prompt
+        # Add sub-agent capabilities (templates + spawn_custom)
+        # Always inject if agent has templates; spawn_custom is always available
+        spawn_prompt = format_spawn_tools_prompt(agent.sub_agent_templates or [])
+        if spawn_prompt:
+            system_prompt += spawn_prompt
 
         # Resolve workdir
         workdir = ""
