@@ -9,7 +9,6 @@ class WorkflowEdgeCreate(BaseModel):
     to_agent_id: uuid.UUID
     condition: str | None = None
     prompt_template: str | None = None
-    prompt_id: str | None = None
     order: int = 0
     requires_approval: bool = True
     max_rounds: int = 3
@@ -24,7 +23,6 @@ class WorkflowEdgeCreate(BaseModel):
 class WorkflowEdgeUpdate(BaseModel):
     condition: str | None = None
     prompt_template: str | None = None
-    prompt_id: str | None = None
     order: int | None = None
     requires_approval: bool | None = None
     max_rounds: int | None = None
@@ -37,7 +35,6 @@ class WorkflowEdgeRead(BaseModel):
     to_agent_id: uuid.UUID
     condition: str | None
     prompt_template: str | None
-    prompt_id: str | None
     order: int
     requires_approval: bool
     max_rounds: int
