@@ -44,6 +44,9 @@ export function TaskCard({ task, onClick, onStart, onDelete }: TaskCardProps) {
         >
           {statusCfg.label}
         </span>
+        {task.status === 'error' && task.error_message && (
+          <p className="text-[11px] text-red-600 mt-1 line-clamp-2">{task.error_message}</p>
+        )}
         </button>
         {onDelete && (
           <button
