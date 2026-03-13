@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { WorkflowEdge, WorkflowEdgeUpdate } from "../../../types";
+import { PromptEditor } from "../../PromptEditor";
 
 interface EdgePanelProps {
   edge: WorkflowEdge;
@@ -42,19 +43,20 @@ export function EdgePanel({ edge, onSave, onDelete, readOnly }: EdgePanelProps) 
         />
       </label>
 
-      <label className={`flex flex-col gap-1 ${disabledClass}`}>
+      <div className={`flex flex-col gap-1 ${disabledClass}`}>
         <span className="text-xs font-medium text-gray-600">Prompt template</span>
-        <textarea
-          className="border border-gray-200 rounded px-2 py-1.5 text-sm resize-y min-h-[80px] font-mono text-xs"
+        <PromptEditor
           value={promptTemplate}
-          onChange={(e) => setPromptTemplate(e.target.value)}
+          onChange={setPromptTemplate}
           onBlur={() => {
             const val = promptTemplate || null;
             if (val !== edge.prompt_template) onSave({ prompt_template: val });
           }}
+          placeholder="Промпт для следующего агента..."
+          rows={3}
           disabled={readOnly}
         />
-      </label>
+      </div>
 
 
 

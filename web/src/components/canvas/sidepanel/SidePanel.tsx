@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import type { Agent, Workflow, WorkflowEdge, AgentUpdate, WorkflowEdgeUpdate } from "../../../types";
+import type { Agent, Workflow, WorkflowEdge, AgentUpdate, WorkflowEdgeUpdate, WorkflowUpdate } from "../../../types";
 import { AgentGeneralTab } from "./AgentGeneralTab";
 import { AgentHandoffTab } from "./AgentHandoffTab";
 import { AgentSubAgentsTab } from "./AgentSubAgentsTab";
@@ -23,6 +23,7 @@ interface SidePanelProps {
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
   onDeleteEdge: (edgeId: string) => void;
   onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string) => void;
+  onUpdateWorkflow: (workflowId: string, data: WorkflowUpdate) => void;
 }
 
 type AgentTab = "general" | "handoff" | "sub-agents";
@@ -39,6 +40,7 @@ export function SidePanel({
   onUpdateEdge,
   onDeleteEdge,
   onCreateEdge,
+  onUpdateWorkflow,
 }: SidePanelProps) {
   const [activeTab, setActiveTab] = useState<AgentTab>("general");
 
@@ -105,6 +107,7 @@ export function SidePanel({
             workflowEdges={workflowEdges}
             agents={agents}
             onUpdateEdge={onUpdateEdge}
+            onUpdateWorkflow={onUpdateWorkflow}
           />
         </div>
       </PanelShell>

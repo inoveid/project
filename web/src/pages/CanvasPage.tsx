@@ -296,6 +296,9 @@ export function CanvasPage() {
                 to_agent_id: toAgentId,
               });
             }}
+            onUpdateWorkflow={(workflowId, data) => {
+              void mutations.handleUpdateWorkflow(workflowId, data);
+            }}
           />
         )}
       </div>

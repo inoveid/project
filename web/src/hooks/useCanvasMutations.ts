@@ -5,6 +5,7 @@ import { createTeam } from "../api/teams";
 import {
   createWorkflow,
   createWorkflowEdge,
+  updateWorkflow,
   updateWorkflowEdge,
   deleteWorkflowEdge,
 } from "../api/workflows";
@@ -15,6 +16,7 @@ import type {
   WorkflowCreate,
   WorkflowEdgeCreate,
   WorkflowEdgeUpdate,
+  WorkflowUpdate,
 } from "../types";
 import { useToast } from "./useToast";
 
@@ -100,7 +102,16 @@ export function useCanvasMutations() {
     }
   }, [invalidateWorkflows, addToast]);
 
-  const handleCreateEdge = useCallback(async (workflowId: string, data: WorkflowEdgeCreate) => {
+  const handleUpdateWorkflow = useCallback(async (id: string, data: WorkflowUpdate) => {
+    try {
+      await updateWorkflow(id, data);
+      invalidateWorkflows();
+    } catch (err) {
+      addToast({ type: "error", title: "Ошибка обновления workflow", message: formatError(err) });
+    }
+  }, [invalidateWorkflows, addToast]);
+
+    const handleCreateEdge = useCallback(async (workflowId: string, data: WorkflowEdgeCreate) => {
     try {
       await createWorkflowEdge(workflowId, data);
       invalidateEdges();
@@ -142,6 +153,7 @@ export function useCanvasMutations() {
     handleUpdateAgent,
     handleDeleteAgent,
     handleCreateWorkflow,
+    handleUpdateWorkflow,
     handleCreateEdge,
     handleUpdateEdge,
     handleDeleteEdge,

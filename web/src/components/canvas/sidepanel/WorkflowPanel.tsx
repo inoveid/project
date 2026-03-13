@@ -1,5 +1,6 @@
-import { useState } from "react";
-import type { Agent, Workflow, WorkflowEdge, WorkflowEdgeUpdate } from "../../../types";
+import { useState, useCallback } from "react";
+import type { Agent, Workflow, WorkflowEdge, WorkflowEdgeUpdate, WorkflowUpdate } from "../../../types";
+import { PromptEditor, type PromptVariable } from "../../PromptEditor";
 
 interface WorkflowPanelProps {
   teamId: string;
@@ -7,11 +8,12 @@ interface WorkflowPanelProps {
   workflowEdges: WorkflowEdge[];
   agents: Agent[];
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
+  onUpdateWorkflow: (workflowId: string, data: WorkflowUpdate) => void;
 }
 
 interface ChainStep {
   agent: Agent;
-  forwardEdge: WorkflowEdge | null; // edge leading TO this agent (null for starting agent)
+  forwardEdge: WorkflowEdge | null;
 }
 
 interface ReturnEdge {
@@ -19,6 +21,16 @@ interface ReturnEdge {
   fromAgent: Agent;
   toAgent: Agent;
 }
+
+const STARTING_VARIABLES: PromptVariable[] = [
+  { label: "Название задачи", value: "{{task_title}}" },
+  { label: "Описание задачи", value: "{{task_description}}" },
+];
+
+const EDGE_VARIABLES: PromptVariable[] = [
+  { label: "Название задачи", value: "{{task_title}}" },
+  { label: "Описание задачи", value: "{{task_description}}" },
+];
 
 function buildChain(
   workflow: Workflow,
@@ -28,27 +40,22 @@ function buildChain(
   const agentMap = new Map(agents.map((a) => [a.id, a]));
   const forwardEdges: WorkflowEdge[] = [];
   const returnEdgesList: ReturnEdge[] = [];
-
-  // Start from starting_agent, follow forward edges
   const visited = new Set<string>();
   const steps: ChainStep[] = [];
 
   const startAgent = agentMap.get(workflow.starting_agent_id);
   if (!startAgent) return { steps: [], returnEdges: [] };
 
-  // BFS/DFS to build linear chain
   let currentId = workflow.starting_agent_id;
   visited.add(currentId);
   steps.push({ agent: startAgent, forwardEdge: null });
 
   let safety = 20;
   while (safety-- > 0) {
-    // Find outgoing edges from current agent
     const outgoing = edges.filter((e) => e.from_agent_id === currentId);
     let advanced = false;
     for (const edge of outgoing) {
       if (!visited.has(edge.to_agent_id)) {
-        // Forward edge — new agent in chain
         const nextAgent = agentMap.get(edge.to_agent_id);
         if (nextAgent) {
           visited.add(edge.to_agent_id);
@@ -63,7 +70,6 @@ function buildChain(
     if (!advanced) break;
   }
 
-  // Identify return edges (to already-visited agents)
   for (const edge of edges) {
     if (!forwardEdges.includes(edge)) {
       const fromAgent = agentMap.get(edge.from_agent_id);
@@ -83,6 +89,7 @@ export function WorkflowPanel({
   workflowEdges,
   agents,
   onUpdateEdge,
+  onUpdateWorkflow,
 }: WorkflowPanelProps) {
   const teamWorkflows = workflows.filter((w) => w.team_id === teamId);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(
@@ -121,31 +128,41 @@ export function WorkflowPanel({
       )}
 
       {selectedWorkflow && (
-        <WorkflowChainStepper
+        <WorkflowPromptEditor
           workflow={selectedWorkflow}
           edges={wfEdges}
           agents={agents}
           onUpdateEdge={onUpdateEdge}
+          onUpdateWorkflow={onUpdateWorkflow}
         />
       )}
     </div>
   );
 }
 
-// ── Chain stepper ────────────────────────────────────────────────────────────
+// ── Workflow prompt editor with chain ────────────────────────────────────────
 
-function WorkflowChainStepper({
+function WorkflowPromptEditor({
   workflow,
   edges,
   agents,
   onUpdateEdge,
+  onUpdateWorkflow,
 }: {
   workflow: Workflow;
   edges: WorkflowEdge[];
   agents: Agent[];
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
+  onUpdateWorkflow: (workflowId: string, data: WorkflowUpdate) => void;
 }) {
   const { steps, returnEdges } = buildChain(workflow, edges, agents);
+  const [startingPrompt, setStartingPrompt] = useState(workflow.starting_prompt);
+
+  const handleStartingPromptBlur = useCallback(() => {
+    if (startingPrompt !== workflow.starting_prompt) {
+      onUpdateWorkflow(workflow.id, { starting_prompt: startingPrompt });
+    }
+  }, [startingPrompt, workflow, onUpdateWorkflow]);
 
   if (steps.length === 0) {
     return <p className="text-xs text-gray-400">Цепочка пуста</p>;
@@ -160,86 +177,154 @@ function WorkflowChainStepper({
   }
 
   return (
-    <div className="space-y-0">
-      <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-3">Цепочка</p>
-      {steps.map((step, idx) => {
-        const isFirst = idx === 0;
-        const isLast = idx === steps.length - 1;
-        const agentReturns = returnsByFrom.get(step.agent.id) || [];
+    <div className="space-y-4">
+      {/* Starting prompt */}
+      <div>
+        <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-2">
+          Стартовый промпт
+        </p>
+        <PromptEditor
+          value={startingPrompt}
+          onChange={setStartingPrompt}
+          onBlur={handleStartingPromptBlur}
+          variables={STARTING_VARIABLES}
+          placeholder="Промпт для первого агента..."
+          rows={3}
+        />
+      </div>
 
-        return (
-          <div key={step.agent.id}>
-            {/* Forward edge info */}
-            {step.forwardEdge && (
-              <EdgeConnector edge={step.forwardEdge} />
-            )}
+      {/* Chain with edge prompts */}
+      <div>
+        <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-3">
+          Цепочка
+        </p>
+        <div className="space-y-0">
+          {steps.map((step, idx) => {
+            const isFirst = idx === 0;
+            const isLast = idx === steps.length - 1;
+            const agentReturns = returnsByFrom.get(step.agent.id) || [];
 
-            {/* Agent node */}
-            <div className="flex items-start gap-3">
-              <div className="flex flex-col items-center">
-                <div className={`w-3 h-3 rounded-full border-2 ${
-                  isFirst ? "bg-green-500 border-green-600" :
-                  isLast && agentReturns.length === 0 ? "bg-red-400 border-red-500" :
-                  "bg-blue-500 border-blue-600"
-                }`} />
-                {!isLast && <div className="w-px h-4 bg-gray-300 mt-1" />}
-              </div>
-              <div className="flex-1 -mt-0.5">
-                <span className="text-sm font-medium text-gray-800">{step.agent.name}</span>
-                {isFirst && (
-                  <span className="ml-2 text-[10px] text-green-600 bg-green-50 px-1.5 py-0.5 rounded">
-                    старт
-                  </span>
+            return (
+              <div key={step.agent.id}>
+                {/* Forward edge with prompt */}
+                {step.forwardEdge && (
+                  <EdgePromptSection
+                    edge={step.forwardEdge}
+                    fromAgent={steps[idx - 1]?.agent}
+                    toAgent={step.agent}
+                    workflowId={workflow.id}
+                    onUpdateEdge={onUpdateEdge}
+                  />
                 )}
 
-                {/* Return edges from this agent */}
-                {agentReturns.length > 0 && (
-                  <div className="mt-1.5 space-y-1">
-                    {agentReturns.map((re) => (
-                      <ReturnEdgeBadge
-                        key={re.edge.id}
-                        returnEdge={re}
-                        workflowId={workflow.id}
-                        onUpdateEdge={onUpdateEdge}
-                      />
-                    ))}
+                {/* Agent node */}
+                <div className="flex items-start gap-3">
+                  <div className="flex flex-col items-center">
+                    <div className={`w-3 h-3 rounded-full border-2 ${
+                      isFirst ? "bg-green-500 border-green-600" :
+                      isLast && agentReturns.length === 0 ? "bg-red-400 border-red-500" :
+                      "bg-blue-500 border-blue-600"
+                    }`} />
+                    {(!isLast || agentReturns.length > 0) && <div className="w-px h-4 bg-gray-300 mt-1" />}
                   </div>
-                )}
+                  <div className="flex-1 -mt-0.5">
+                    <span className="text-sm font-medium text-gray-800">{step.agent.name}</span>
+                    {isFirst && (
+                      <span className="ml-2 text-[10px] text-green-600 bg-green-50 px-1.5 py-0.5 rounded">
+                        старт
+                      </span>
+                    )}
+
+                    {/* Return edges */}
+                    {agentReturns.length > 0 && (
+                      <div className="mt-2 space-y-2">
+                        {agentReturns.map((re) => (
+                          <ReturnEdgeSection
+                            key={re.edge.id}
+                            returnEdge={re}
+                            workflowId={workflow.id}
+                            onUpdateEdge={onUpdateEdge}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        );
-      })}
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
 
-// ── Forward edge connector (vertical line between agents) ────────────────────
+// ── Forward edge prompt section ──────────────────────────────────────────────
 
-function EdgeConnector({
+function EdgePromptSection({
   edge,
+  fromAgent,
+  toAgent,
+  workflowId,
+  onUpdateEdge,
 }: {
   edge: WorkflowEdge;
+  fromAgent?: Agent;
+  toAgent: Agent;
+  workflowId: string;
+  onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const [prompt, setPrompt] = useState(edge.prompt_template ?? "");
+
+  const handleBlur = () => {
+    const val = prompt || null;
+    if (val !== edge.prompt_template) {
+      onUpdateEdge(edge.id, workflowId, { prompt_template: val });
+    }
+  };
+
+  const label = fromAgent ? `${fromAgent.name} → ${toAgent.name}` : `→ ${toAgent.name}`;
+
   return (
-    <div className="flex items-center gap-3 py-0.5">
+    <div className="flex items-start gap-3 py-1">
       <div className="flex flex-col items-center">
-        <div className="w-px h-3 bg-gray-300" />
+        <div className="w-px h-full bg-gray-300" style={{ minHeight: expanded ? 80 : 24 }} />
       </div>
-      <div className="flex items-center gap-2 text-[11px] text-gray-400">
-        {edge.requires_approval ? (
-          <span title="Требует одобрения">🔒</span>
-        ) : (
-          <span title="Автоматически">⚡</span>
+      <div className="flex-1 -mt-0.5">
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-2 text-[11px] text-gray-500 hover:text-gray-700 w-full text-left"
+        >
+          {edge.requires_approval ? (
+            <span title="Требует одобрения">🔒</span>
+          ) : (
+            <span title="Автоматически">⚡</span>
+          )}
+          <span className="font-medium">{edge.condition || label}</span>
+          <span className="text-gray-300 ml-auto">{expanded ? "▲" : "▼"}</span>
+        </button>
+        {expanded && (
+          <div className="mt-2 mb-1">
+            <PromptEditor
+              value={prompt}
+              onChange={setPrompt}
+              onBlur={handleBlur}
+              variables={EDGE_VARIABLES}
+              placeholder={`Промпт перехода ${label}...`}
+              rows={2}
+            />
+          </div>
         )}
       </div>
     </div>
   );
 }
 
-// ── Return edge badge (cycle indicator with max_rounds) ──────────────────────
+// ── Return edge section ──────────────────────────────────────────────────────
 
-function ReturnEdgeBadge({
+function ReturnEdgeSection({
   returnEdge,
   workflowId,
   onUpdateEdge,
@@ -249,46 +334,62 @@ function ReturnEdgeBadge({
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
 }) {
   const { edge, toAgent } = returnEdge;
-  const [editing, setEditing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [prompt, setPrompt] = useState(edge.prompt_template ?? "");
   const [rounds, setRounds] = useState(edge.max_rounds);
 
-  function handleSave() {
-    if (rounds !== edge.max_rounds) {
-      onUpdateEdge(edge.id, workflowId, { max_rounds: rounds });
+  const handlePromptBlur = () => {
+    const val = prompt || null;
+    if (val !== edge.prompt_template) {
+      onUpdateEdge(edge.id, workflowId, { prompt_template: val });
     }
-    setEditing(false);
-  }
+  };
+
+  const handleRoundsSave = () => {
+    const val = Math.max(1, Math.min(50, rounds));
+    setRounds(val);
+    if (val !== edge.max_rounds) {
+      onUpdateEdge(edge.id, workflowId, { max_rounds: val });
+    }
+  };
 
   return (
-    <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded px-2 py-1">
-      <span className="text-amber-500 text-xs">↻</span>
-      <span className="text-xs text-amber-700">→ {toAgent.name}</span>
-      <span className="text-gray-300 text-xs">|</span>
-      {edge.requires_approval && <span className="text-[10px]" title="Требует одобрения">🔒</span>}
-      {editing ? (
-        <span className="flex items-center gap-1">
-          <input
-            type="number"
-            min={1}
-            max={99}
-            value={rounds}
-            onChange={(e) => setRounds(Number(e.target.value))}
-            className="w-10 border border-amber-300 rounded px-1 py-0.5 text-xs text-center"
-            autoFocus
-            onKeyDown={(e) => e.key === "Enter" && handleSave()}
-            onBlur={handleSave}
-          />
-          <span className="text-[10px] text-gray-400">раз</span>
-        </span>
-      ) : (
+    <div className="bg-amber-50 border border-amber-200 rounded px-2.5 py-2 space-y-2">
+      <div className="flex items-center gap-1.5">
+        <span className="text-amber-500 text-xs">↻</span>
         <button
           type="button"
-          className="text-xs text-amber-600 hover:text-amber-800 font-medium cursor-pointer"
-          onClick={(e) => { e.stopPropagation(); setEditing(true); }}
-          title={`Максимум ${edge.max_rounds} повторов`}
+          onClick={() => setExpanded(!expanded)}
+          className="flex-1 flex items-center gap-1.5 text-left"
         >
-          ×{edge.max_rounds}
+          <span className="text-xs text-amber-700 font-medium">
+            → {toAgent.name}
+          </span>
+          {edge.requires_approval && <span className="text-[10px]">🔒</span>}
+          <span className="text-amber-300 ml-auto text-[10px]">{expanded ? "▲" : "▼"}</span>
         </button>
+        <span className="text-gray-300 text-xs">|</span>
+        <input
+          type="number"
+          min={1}
+          max={50}
+          value={rounds}
+          onChange={(e) => setRounds(Number(e.target.value))}
+          onBlur={handleRoundsSave}
+          onKeyDown={(e) => e.key === "Enter" && handleRoundsSave()}
+          className="w-10 border border-amber-300 rounded px-1 py-0.5 text-xs text-center bg-white"
+        />
+        <span className="text-[10px] text-gray-400">раз</span>
+      </div>
+      {expanded && (
+        <PromptEditor
+          value={prompt}
+          onChange={setPrompt}
+          onBlur={handlePromptBlur}
+          variables={EDGE_VARIABLES}
+          placeholder={`Промпт возврата → ${toAgent.name}...`}
+          rows={2}
+        />
       )}
     </div>
   );
