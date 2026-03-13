@@ -3,6 +3,7 @@ import type { Agent, Workflow, WorkflowEdge, AgentUpdate, WorkflowEdgeUpdate } f
 import { AgentGeneralTab } from "./AgentGeneralTab";
 import { AgentPromptsTab } from "./AgentPromptsTab";
 import { AgentHandoffTab } from "./AgentHandoffTab";
+import { AgentSubAgentsTab } from "./AgentSubAgentsTab";
 import { EdgePanel } from "./EdgePanel";
 import { WorkflowPanel } from "./WorkflowPanel";
 
@@ -25,7 +26,7 @@ interface SidePanelProps {
   onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string) => void;
 }
 
-type AgentTab = "general" | "prompts" | "handoff";
+type AgentTab = "general" | "prompts" | "handoff" | "sub-agents";
 
 export function SidePanel({
   selection,
@@ -90,6 +91,13 @@ export function SidePanel({
               }
             />
           )}
+          {activeTab === "sub-agents" && (
+            <AgentSubAgentsTab
+              key={agent.id}
+              agent={agent}
+              onSave={(data) => onUpdateAgent(agent.id, agent.team_id, data)}
+            />
+          )}
         </div>
       </PanelShell>
     );
@@ -141,6 +149,7 @@ const AGENT_TABS: Array<{ id: AgentTab; label: string }> = [
   { id: "general", label: "General" },
   { id: "prompts", label: "Prompts" },
   { id: "handoff", label: "Handoff" },
+  { id: "sub-agents", label: "Sub-agents" },
 ];
 
 function PanelShell({

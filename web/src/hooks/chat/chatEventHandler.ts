@@ -221,6 +221,71 @@ export function handleEvent(
       break;
     }
 
+    case "sub_agent_spawned": {
+      setItems((prev) => {
+        const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
+        const activityItem: HandoffItem = {
+          id: "__activity__",
+          itemType: "activity",
+          agentName: event.name,
+          content: \`Sub-agent \${event.name} (\${event.role}): \${event.task.slice(0, 100)}\`,
+          created_at: new Date().toISOString(),
+        };
+        return [...withoutActivity, activityItem];
+      });
+      break;
+    }
+
+    case "sub_agent_assistant_text":
+    case "sub_agent_tool_use":
+    case "sub_agent_tool_result": {
+      const label = event.type === "sub_agent_tool_use"
+        ? \`\${(event as any).sub_agent_name}: \${(event as any).tool_name}...\`
+        : \`\${(event as any).sub_agent_name}: работает...\`;
+      setItems((prev) => {
+        const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
+        const activityItem: HandoffItem = {
+          id: "__activity__",
+          itemType: "activity",
+          agentName: (event as any).sub_agent_name || "sub-agent",
+          content: label,
+          created_at: new Date().toISOString(),
+        };
+        return [...withoutActivity, activityItem];
+      });
+      break;
+    }
+
+    case "sub_agent_done": {
+      setItems((prev) => {
+        const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
+        const activityItem: HandoffItem = {
+          id: "__activity__",
+          itemType: "activity",
+          agentName: event.name,
+          content: \`Sub-agent \${event.name} завершил работу\`,
+          created_at: new Date().toISOString(),
+        };
+        return [...withoutActivity, activityItem];
+      });
+      break;
+    }
+
+    case "sub_agent_error": {
+      setItems((prev) => {
+        const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
+        const activityItem: HandoffItem = {
+          id: "__activity__",
+          itemType: "activity",
+          agentName: event.name || "sub-agent",
+          content: \`Sub-agent error: \${(event as any).error || "unknown"}\`,
+          created_at: new Date().toISOString(),
+        };
+        return [...withoutActivity, activityItem];
+      });
+      break;
+    }
+
     default:
       console.warn("[chat] Unknown WS event type:", (event as Record<string, unknown>).type);
       break;
