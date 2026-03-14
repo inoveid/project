@@ -24,7 +24,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-WORKTREE_BASE = "/tmp/agent-worktrees"
+WORKTREE_BASE = "/workspace/.agent-worktrees"
 
 
 @dataclass
@@ -115,26 +115,43 @@ class WorkspaceService:
         branch_name = f"task/{short_id}"
         worktree_dir = os.path.join(WORKTREE_BASE, f"task-{short_id}")
 
-        # Clean up stale worktree at same path
-        if os.path.exists(worktree_dir):
-            await self._run_git(
-                "worktree", "remove", worktree_dir, "--force",
-                cwd=repo_path, check=False,
+        # Check if worktree dir already exists with work (survives restart)
+        if os.path.exists(worktree_dir) and os.path.exists(os.path.join(worktree_dir, ".git")):
+            # Worktree dir survived restart — reuse it
+            info = WorktreeInfo(
+                worktree_id=task_id,
+                worktree_path=worktree_dir,
+                branch_name=branch_name,
+                repo_path=repo_path,
             )
-            if os.path.exists(worktree_dir):
-                shutil.rmtree(worktree_dir, ignore_errors=True)
+            self._task_worktrees[task_id] = info
+            logger.info("Reusing existing worktree for task %s at %s", short_id, worktree_dir)
+            return info
 
-        # Remove stale branch if exists
-        await self._run_git(
-            "branch", "-D", branch_name, cwd=repo_path, check=False
-        )
+        # Check if branch exists with commits (worktree dir was lost but branch survived)
+        branch_exists = False
+        try:
+            await self._run_git("rev-parse", "--verify", branch_name, cwd=repo_path)
+            branch_exists = True
+        except Exception:
+            pass
 
-        # Create worktree with new branch from current HEAD
         os.makedirs(WORKTREE_BASE, exist_ok=True)
-        await self._run_git(
-            "worktree", "add", "-b", branch_name, worktree_dir,
-            cwd=repo_path,
-        )
+
+        if branch_exists:
+            # Prune stale worktree references, then recreate worktree from existing branch
+            await self._run_git("worktree", "prune", cwd=repo_path, check=False)
+            await self._run_git(
+                "worktree", "add", worktree_dir, branch_name,
+                cwd=repo_path,
+            )
+            logger.info("Restored worktree for task %s from existing branch", short_id)
+        else:
+            # Fresh start — create new branch from HEAD
+            await self._run_git(
+                "worktree", "add", "-b", branch_name, worktree_dir,
+                cwd=repo_path,
+            )
 
         # Configure git user in worktree (use agent name)
         await self._run_git(
