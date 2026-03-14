@@ -392,11 +392,19 @@ async def _handle_peer_handoff(
     # Emit done on current session (this agent's work is finished)
     await publish_event(current_sid, {"type": "done"})
 
+    # Send initial command so worker runs the agent immediately
+    peer_sid = str(peer_session.id)
+    await publish_command(peer_sid, {
+        "type": "message",
+        "content": prompt,
+        "saved": True,  # Already saved to DB above
+    })
+
     # Notify worker to start the peer session
     r = get_redis()
     await r.publish("worker:sessions", json.dumps({
         "action": "start",
-        "session_id": str(peer_session.id),
+        "session_id": peer_sid,
     }))
 
     logger.info(

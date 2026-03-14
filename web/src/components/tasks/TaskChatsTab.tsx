@@ -18,10 +18,11 @@ export function TaskChatsTab({ task }: TaskChatsTabProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const prevSessionIdsRef = useRef<Set<string>>(new Set());
 
-  // Auto-select first session
+  // Auto-select active session (or last one)
   useEffect(() => {
     if (sessions?.length && !selectedId) {
-      setSelectedId(sessions[sessions.length - 1]!.id);
+      const active = sessions.find((s) => s.status === 'active');
+      setSelectedId((active || sessions[sessions.length - 1])!.id);
     }
   }, [sessions, selectedId]);
 
@@ -135,7 +136,7 @@ function ActiveSessionChat({
     (task.status === 'awaiting_user' || chat.status === 'awaiting_approval')
     && isActive && wsReady && !approvedLocally;
 
-  const canSend = chat.status === 'connected' && isActive && task.status !== 'awaiting_user';
+  const canSend = chat.status === 'connected' && isActive && !showApproval;
 
   return (
     <>
