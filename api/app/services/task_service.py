@@ -29,6 +29,7 @@ from app.models.product import Product
 from app.models.workflow import Workflow
 from app.models.session import Session, Message
 from app.schemas.task import TaskCreate, TaskUpdate
+from app.services.workspace_service import workspace_service
 
 logger = logging.getLogger(__name__)
 
@@ -126,9 +127,22 @@ async def _stop_task_sessions(db: AsyncSession, task_id: uuid.UUID) -> None:
     logger.info("Stopped %d sessions for task %s", len(session_ids), task_id)
 
 
+async def _cleanup_task_worktree(task_id: uuid.UUID) -> None:
+    """Clean up worktree for a task if one exists."""
+    tid = str(task_id)
+    try:
+        wt = workspace_service.get_task_worktree(tid)
+        if wt:
+            logger.info("Cleaning up worktree for task %s", tid)
+            await workspace_service.cleanup_task(tid)
+    except Exception as exc:
+        logger.warning("Failed to cleanup worktree for task %s: %s", tid, exc)
+
+
 async def delete_task(db: AsyncSession, task_id: uuid.UUID) -> None:
     task = await get_task(db, task_id)
     await _stop_task_sessions(db, task_id)
+    await _cleanup_task_worktree(task.id)
     await db.delete(task)
     await db.commit()
 
@@ -180,6 +194,7 @@ async def update_task_status(
     # Stop all active sessions when task is done or errored
     if new_status in ("done", "error"):
         await _stop_task_sessions(db, task_id)
+        await _cleanup_task_worktree(task.id)
 
     # Stop stale active sessions for the same product workspace
     if new_status == "in_progress" and current_status == "backlog" and task.product_id:
