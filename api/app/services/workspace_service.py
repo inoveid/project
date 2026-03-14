@@ -98,6 +98,7 @@ class WorkspaceService:
         self,
         repo_path: str,
         task_id: str,
+        agent_name: str = "Agent",
     ) -> WorktreeInfo:
         """Create a worktree for a task. One branch for the whole task.
 
@@ -135,12 +136,12 @@ class WorkspaceService:
             cwd=repo_path,
         )
 
-        # Configure git user in worktree
+        # Configure git user in worktree (use agent name)
         await self._run_git(
             "config", "user.email", "agent@console.local", cwd=worktree_dir
         )
         await self._run_git(
-            "config", "user.name", "Agent Console", cwd=worktree_dir
+            "config", "user.name", agent_name, cwd=worktree_dir
         )
 
         info = WorktreeInfo(
@@ -422,7 +423,7 @@ class WorkspaceService:
             return None
 
         await self._run_git("add", "-A", cwd=info.worktree_path)
-        msg = message or f"[agent] work in {info.branch_name}"
+        msg = message or f"[auto-save] uncommitted changes in {info.branch_name}"
         await self._run_git("commit", "-m", msg, cwd=info.worktree_path)
 
         commit_hash = await self._run_git("rev-parse", "HEAD", cwd=info.worktree_path)

@@ -208,6 +208,7 @@ Description: {desc}"""
                 wt_info = await workspace_service.create_task_worktree(
                     repo_path=effective_workdir,
                     task_id=str(session.task_id),
+                    agent_name=agent.name,
                 )
                 task_worktree_path = wt_info.worktree_path
                 logger.info("Created task worktree: %s", task_worktree_path)
