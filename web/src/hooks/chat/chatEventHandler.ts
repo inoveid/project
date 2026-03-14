@@ -147,7 +147,7 @@ export function handleEvent(
 
     case "mr_ready": {
       const mrReadyItem: HandoffItem = {
-        id: `mr-ready-${Date.now()}`,
+        id: "__activity__",
         itemType: "activity",
         agentName: "system",
         content: `Merge Request готов (${event.diff_lines || 0} строк изменений)`,
