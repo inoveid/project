@@ -39,6 +39,22 @@ async def create_product(db: AsyncSession, data: ProductCreate) -> Product:
     db.add(product)
     await db.commit()
     await db.refresh(product)
+
+    # Auto-init git with initial commit so branches exist from the start
+    if not data.git_url:
+        import asyncio as _aio
+        for cmd in [
+            ['git', 'init'],
+            ['git', 'config', 'user.email', 'agent@console.local'],
+            ['git', 'config', 'user.name', 'Agent Console'],
+            ['git', 'commit', '--allow-empty', '-m', 'Initial commit'],
+        ]:
+            p = await _aio.create_subprocess_exec(
+                *cmd, cwd=workspace_path,
+                stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.PIPE,
+            )
+            await p.communicate()
+
     return product
 
 
@@ -238,6 +254,28 @@ async def get_product_git_info(db: AsyncSession, product_id: uuid.UUID) -> dict:
     base = product.workspace_path
     if not base or not _is_git_repo(base):
         return {"initialized": False}
+
+    # Auto-fix repos without initial commit (no branches)
+    async def _ensure_initial_commit():
+        proc = await asyncio.create_subprocess_exec(
+            'git', 'branch', '--show-current', cwd=base,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        out, _ = await proc.communicate()
+        if not out.decode().strip():
+            # No branch = no commits yet, create initial commit
+            for cmd in [
+                ['git', 'config', 'user.email', 'agent@console.local'],
+                ['git', 'config', 'user.name', 'Agent Console'],
+                ['git', 'commit', '--allow-empty', '-m', 'Initial commit'],
+            ]:
+                p = await asyncio.create_subprocess_exec(
+                    *cmd, cwd=base,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                )
+                await p.communicate()
+
+    await _ensure_initial_commit()
 
     async def run_git(args: list[str]) -> str:
         proc = await asyncio.create_subprocess_exec(
