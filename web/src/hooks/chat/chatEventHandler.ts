@@ -130,6 +130,36 @@ export function handleEvent(
       break;
     }
 
+    case "mr_status": {
+      const mrItem: HandoffItem = {
+        id: `mr-${Date.now()}`,
+        itemType: event.status === "merged" ? "mr_merged" : "mr_error",
+        agentName: "system",
+        content: event.message || (event.status === "merged" ? "MR влит в main" : "Ошибка MR"),
+        created_at: new Date().toISOString(),
+      };
+      setItems((prev) => {
+        const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
+        return [...withoutActivity, mrItem];
+      });
+      break;
+    }
+
+    case "mr_ready": {
+      const mrReadyItem: HandoffItem = {
+        id: `mr-ready-${Date.now()}`,
+        itemType: "activity",
+        agentName: "system",
+        content: `Merge Request готов (${event.diff_lines || 0} строк изменений)`,
+        created_at: new Date().toISOString(),
+      };
+      setItems((prev) => {
+        const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
+        return [...withoutActivity, mrReadyItem];
+      });
+      break;
+    }
+
     case "done": {
       setItems((prev) => prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__"));
       const text = refs.textRef.current;

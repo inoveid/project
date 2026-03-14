@@ -66,6 +66,27 @@ export function HandoffBlock({ item }: HandoffBlockProps) {
     );
   }
 
+  if (item.itemType === "mr_merged") {
+    return (
+      <div className="my-3">
+        <div className="flex items-center gap-2 text-xs text-green-600 uppercase tracking-wide">
+          <div className="flex-1 h-px bg-green-200" />
+          <span>✓ {item.content}</span>
+          <div className="flex-1 h-px bg-green-200" />
+        </div>
+      </div>
+    );
+  }
+
+  if (item.itemType === "mr_error") {
+    return (
+      <div className="my-2 flex items-center gap-2 text-red-600 text-sm">
+        <span>✗</span>
+        <span>{item.content}</span>
+      </div>
+    );
+  }
+
   // Fallback for any other item type
   return null;
 }

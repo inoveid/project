@@ -164,7 +164,7 @@ export type WsIncoming =
 
 export interface HandoffItem {
   id: string;
-  itemType: "handoff_start" | "handoff_cycle" | "approval_required" | "activity";
+  itemType: "handoff_start" | "handoff_cycle" | "approval_required" | "activity" | "mr_merged" | "mr_error";
   agentName: string;
   fromAgent?: string;
   toAgent?: string;

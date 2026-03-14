@@ -335,8 +335,20 @@ async def complete_node(state: WorkflowState, config: RunnableConfig) -> dict:
                     try:
                         await workspace_service.merge_task_branch(task_id)
                         await workspace_service.cleanup_task(task_id)
+                        await ws.send_json({
+                            "type": "mr_status",
+                            "status": "merged",
+                            "message": f"Merge Request автоматически принят. Изменения ({len(diff.splitlines())} строк) влиты в main.",
+                            "task_id": task_id,
+                        })
                     except Exception as merge_exc:
                         logger.warning("Auto-merge failed: %s", merge_exc)
+                        await ws.send_json({
+                            "type": "mr_status",
+                            "status": "error",
+                            "message": f"Ошибка auto-merge: {merge_exc}",
+                            "task_id": task_id,
+                        })
                     await publish_notification("task_completed", {
                         "agent_name": state["current_agent_name"],
                         "summary": "Auto-merged task branch",
@@ -375,12 +387,26 @@ async def mr_gate_node(state: WorkflowState, config: RunnableConfig) -> dict:
     if approved:
         # Merge task branch
         task_id = state.get("task_id")
+        cfg2 = _get_configurable(config)
+        ws2: EventSender = cfg2["websocket"]
         if task_id:
             try:
                 await workspace_service.merge_task_branch(task_id)
                 await workspace_service.cleanup_task(task_id)
+                await ws2.send_json({
+                    "type": "mr_status",
+                    "status": "merged",
+                    "message": "Merge Request одобрен. Изменения влиты в main.",
+                    "task_id": task_id,
+                })
             except Exception as exc:
                 logger.error("MR merge failed: %s", exc)
+                await ws2.send_json({
+                    "type": "mr_status",
+                    "status": "error",
+                    "message": f"Ошибка при мерже: {exc}",
+                    "task_id": task_id,
+                })
         return {"mr_approved": True}
     else:
         # Rejected — return to first agent with comment
