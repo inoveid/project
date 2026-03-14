@@ -122,3 +122,44 @@ async def git_info(
 ):
     from app.services.product_service import get_product_git_info
     return await get_product_git_info(db, product_id)
+
+
+@router.post("/products/{product_id}/git/checkout")
+async def git_checkout(
+    product_id: uuid.UUID,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import checkout_product_branch
+    branch = body.get("branch", "")
+    if not branch:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Branch name required")
+    try:
+        return await checkout_product_branch(db, product_id, branch)
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/products/{product_id}/git/diff")
+async def git_diff(
+    product_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import get_product_git_diff
+    return await get_product_git_diff(db, product_id)
+
+
+@router.get("/products/{product_id}/git/commits/{commit_hash}")
+async def git_commit_detail(
+    product_id: uuid.UUID,
+    commit_hash: str,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import get_product_commit_detail
+    try:
+        return await get_product_commit_detail(db, product_id, commit_hash)
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(e))

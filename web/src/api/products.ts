@@ -82,3 +82,28 @@ export function writeFile(productId: string, path: string, content: string): Pro
 export function getGitInfo(productId: string): Promise<GitInfo> {
   return fetchApi<GitInfo>(`/products/${productId}/git/info`);
 }
+
+export function checkoutBranch(productId: string, branch: string): Promise<{ branch: string }> {
+  return fetchApi(`/products/${productId}/git/checkout`, {
+    method: 'POST',
+    body: JSON.stringify({ branch }),
+  });
+}
+
+export function getGitDiff(productId: string): Promise<{ diff: string }> {
+  return fetchApi(`/products/${productId}/git/diff`);
+}
+
+export interface CommitDetail {
+  hash: string;
+  message: string;
+  author: string;
+  email: string;
+  date: string;
+  stats: string;
+  diff: string;
+}
+
+export function getCommitDetail(productId: string, hash: string): Promise<CommitDetail> {
+  return fetchApi<CommitDetail>(`/products/${productId}/git/commits/${hash}`);
+}

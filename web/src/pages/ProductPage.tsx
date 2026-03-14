@@ -2,8 +2,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getProduct } from '../api/products';
-import { getFileTree, readFile, writeFile, getGitInfo } from '../api/products';
-import type { FileEntry, GitInfo } from '../api/products';
+import { getFileTree, readFile, writeFile, getGitInfo, checkoutBranch, getCommitDetail } from '../api/products';
+import type { FileEntry, GitInfo, CommitDetail } from '../api/products';
 
 export function ProductPage() {
   const { productId } = useParams<{ productId: string }>();
@@ -21,6 +21,8 @@ export function ProductPage() {
   const [openFile, setOpenFile] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState('');
   const [modified, setModified] = useState(false);
+  const [selectedCommit, setSelectedCommit] = useState<CommitDetail | null>(null);
+  const [loadingCommit, setLoadingCommit] = useState(false);
 
   const { data: files } = useQuery({
     queryKey: ['product-files', id, currentPath],
@@ -56,6 +58,17 @@ export function ProductPage() {
     },
   });
 
+  const checkoutMutation = useMutation({
+    mutationFn: (branch: string) => checkoutBranch(id, branch),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['product-git', id] });
+      queryClient.invalidateQueries({ queryKey: ['product-files', id] });
+      queryClient.invalidateQueries({ queryKey: ['product-file', id] });
+      setOpenFile(null);
+      setSelectedCommit(null);
+    },
+  });
+
   const handleFileClick = (entry: FileEntry) => {
     if (entry.type === 'dir') {
       setCurrentPath(entry.path);
@@ -68,6 +81,18 @@ export function ProductPage() {
   const handleSave = useCallback(() => {
     if (openFile && modified) saveMutation.mutate();
   }, [openFile, modified, saveMutation]);
+
+  const handleCommitClick = async (hash: string) => {
+    setLoadingCommit(true);
+    try {
+      const detail = await getCommitDetail(id, hash);
+      setSelectedCommit(detail);
+    } catch {
+      setSelectedCommit(null);
+    } finally {
+      setLoadingCommit(false);
+    }
+  };
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -93,9 +118,16 @@ export function ProductPage() {
         <button onClick={() => navigate(-1)} className="text-sm text-blue-600 hover:underline">← Назад</button>
         <span className="text-sm font-medium text-gray-900">{product.name}</span>
         {gitInfo?.initialized && (
-          <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-mono">
-            {gitInfo.branch}
-          </span>
+          <select
+            value={gitInfo.branch}
+            onChange={(e) => checkoutMutation.mutate(e.target.value)}
+            disabled={checkoutMutation.isPending}
+            className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-mono border-0 focus:outline-none focus:ring-1 focus:ring-blue-400"
+          >
+            {gitInfo.branches?.map((b) => (
+              <option key={b} value={b}>{b}</option>
+            ))}
+          </select>
         )}
         {gitInfo?.changed_files ? (
           <span className="text-xs text-amber-600">{gitInfo.changed_files} изменений</span>
@@ -190,9 +222,31 @@ export function ProductPage() {
                 />
               </div>
             </>
+          ) : selectedCommit ? (
+            <>
+              <div className="px-3 py-1.5 border-b bg-gray-50 flex items-center gap-2">
+                <span className="text-xs font-mono text-blue-600">{selectedCommit.hash.slice(0, 8)}</span>
+                <span className="text-xs text-gray-700 truncate flex-1">{selectedCommit.message}</span>
+                <span className="text-[10px] text-gray-400">{selectedCommit.author}</span>
+                <button
+                  onClick={() => setSelectedCommit(null)}
+                  className="text-gray-400 hover:text-gray-600 text-sm"
+                >
+                  &times;
+                </button>
+              </div>
+              {selectedCommit.stats && (
+                <div className="px-3 py-2 border-b bg-gray-50">
+                  <pre className="text-[10px] text-gray-500 whitespace-pre-wrap">{selectedCommit.stats}</pre>
+                </div>
+              )}
+              <div className="flex-1 min-h-0 overflow-auto">
+                <pre className="p-4 text-xs font-mono whitespace-pre-wrap">{selectedCommit.diff || 'Нет изменений'}</pre>
+              </div>
+            </>
           ) : (
             <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">
-              Выберите файл для просмотра
+              Выберите файл или коммит для просмотра
             </div>
           )}
         </div>
@@ -218,14 +272,20 @@ export function ProductPage() {
               <div className="px-3 py-2">
                 <p className="text-[10px] text-gray-400 mb-2">Последние коммиты</p>
                 {gitInfo.commits?.map((c, i) => (
-                  <div key={i} className="mb-2 last:mb-0">
+                  <button
+                    key={i}
+                    onClick={() => handleCommitClick(c.hash)}
+                    className={`w-full text-left mb-1.5 last:mb-0 p-1.5 rounded transition-colors ${
+                      selectedCommit?.hash.startsWith(c.hash) ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-100'
+                    }`}
+                  >
                     <div className="flex items-center gap-1.5">
                       <span className="text-[10px] font-mono text-blue-600">{c.hash}</span>
                       <span className="text-[10px] text-gray-400">{c.date}</span>
                     </div>
                     <p className="text-xs text-gray-700 truncate">{c.message}</p>
                     <p className="text-[10px] text-gray-400">{c.author}</p>
-                  </div>
+                  </button>
                 ))}
                 {(!gitInfo.commits || gitInfo.commits.length === 0) && (
                   <p className="text-xs text-gray-400">Нет коммитов</p>

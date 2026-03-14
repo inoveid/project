@@ -258,3 +258,82 @@ async def get_product_git_info(db: AsyncSession, product_id: uuid.UUID) -> dict:
         "commits": commits,
         "changed_files": changed_files,
     }
+
+
+async def checkout_product_branch(db: AsyncSession, product_id: uuid.UUID, branch: str) -> dict:
+    """Checkout a branch in product workspace."""
+    import asyncio
+    product = await get_product(db, product_id)
+    base = product.workspace_path
+    if not base or not os.path.isdir(os.path.join(base, ".git")):
+        raise ValueError("No git repository")
+    
+    proc = await asyncio.create_subprocess_exec(
+        "git", "checkout", branch, cwd=base,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise ValueError(f"Checkout failed: {stderr.decode().strip()}")
+    
+    return {"branch": branch}
+
+
+async def get_product_git_diff(db: AsyncSession, product_id: uuid.UUID) -> dict:
+    """Get git diff for product workspace."""
+    import asyncio
+    product = await get_product(db, product_id)
+    base = product.workspace_path
+    if not base or not os.path.isdir(os.path.join(base, ".git")):
+        return {"diff": ""}
+    
+    proc = await asyncio.create_subprocess_exec(
+        "git", "diff", cwd=base,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    return {"diff": stdout.decode()}
+
+
+async def get_product_commit_detail(db: AsyncSession, product_id: uuid.UUID, commit_hash: str) -> dict:
+    """Get details of a specific commit."""
+    import asyncio
+    import re
+    product = await get_product(db, product_id)
+    base = product.workspace_path
+    if not base or not os.path.isdir(os.path.join(base, ".git")):
+        raise ValueError("No git repository")
+    
+    # Validate hash format to prevent injection
+    if not re.match(r'^[a-f0-9]{4,40}$', commit_hash):
+        raise ValueError("Invalid commit hash")
+    
+    proc = await asyncio.create_subprocess_exec(
+        "git", "show", "--stat", "--format=%H%n%s%n%an%n%ae%n%aI", commit_hash,
+        cwd=base,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise ValueError(f"Commit not found: {stderr.decode().strip()}")
+    
+    lines = stdout.decode().splitlines()
+    if len(lines) < 5:
+        raise ValueError("Invalid commit data")
+    
+    # Get diff for this commit
+    proc2 = await asyncio.create_subprocess_exec(
+        "git", "diff", f"{commit_hash}~1", commit_hash, cwd=base,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    diff_stdout, _ = await proc2.communicate()
+    
+    return {
+        "hash": lines[0],
+        "message": lines[1],
+        "author": lines[2],
+        "email": lines[3],
+        "date": lines[4],
+        "stats": "\n".join(lines[5:]).strip(),
+        "diff": diff_stdout.decode() if proc2.returncode == 0 else "",
+    }
