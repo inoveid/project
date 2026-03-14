@@ -61,6 +61,7 @@ class SessionBudget:
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     call_count: int = 0
+    max_tokens: int = 0
     _warned: bool = field(default=False, repr=False)
 
     @property
@@ -142,9 +143,7 @@ class BudgetTracker:
         if budget.max_tokens > 0:
             total = budget.total_input_tokens + budget.total_output_tokens
             if total >= budget.max_tokens:
-                raise BudgetExceededError(
-                    f"Token limit reached: {total}/{budget.max_tokens} tokens"
-                )
+                raise BudgetExceededError(total, budget.max_tokens)
         if budget.level == BudgetLevel.CRITICAL:
             raise BudgetExceededError(budget.spent_usd, budget.limit_usd)
 
