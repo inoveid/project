@@ -7,9 +7,10 @@ interface ProductCardProps {
   product: Product;
   onEdit: (product: Product) => void;
   onDeleted: () => void;
+  onClick?: () => void;
 }
 
-export function ProductCard({ product: initialProduct, onEdit, onDeleted }: ProductCardProps) {
+export function ProductCard({ product: initialProduct, onEdit, onDeleted, onClick }: ProductCardProps) {
   const isPolling = initialProduct.status === 'cloning';
   const { data: polledProduct } = useProduct(initialProduct.id, isPolling);
   const product = polledProduct ?? initialProduct;
@@ -38,11 +39,11 @@ export function ProductCard({ product: initialProduct, onEdit, onDeleted }: Prod
   }
 
   return (
-    <div className="border rounded p-4 bg-white flex flex-col gap-2">
+    <div className="border rounded p-4 bg-white flex flex-col gap-2 cursor-pointer hover:shadow-md transition-shadow" onClick={onClick}>
       <div className="flex items-start justify-between">
         <h4 className="font-semibold text-gray-900">{product.name}</h4>
         <button
-          onClick={() => onEdit(product)}
+          onClick={(e) => { e.stopPropagation(); onEdit(product); }}
           className="text-sm text-gray-500 hover:text-gray-800 px-2"
         >
           Edit
@@ -64,7 +65,7 @@ export function ProductCard({ product: initialProduct, onEdit, onDeleted }: Prod
       <div className="flex gap-2 mt-1">
         {product.status !== 'ready' && (
           <button
-            onClick={handleClone}
+            onClick={(e) => { e.stopPropagation(); handleClone(); }}
             disabled={!canClone || cloneProduct.isPending}
             title={!product.git_url ? 'Укажите git_url для клонирования' : undefined}
             className="flex-1 bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700 disabled:opacity-50"
@@ -73,7 +74,7 @@ export function ProductCard({ product: initialProduct, onEdit, onDeleted }: Prod
           </button>
         )}
         <button
-          onClick={() => setShowSpecs((v) => !v)}
+          onClick={(e) => { e.stopPropagation(); setShowSpecs((v) => !v); }}
           className={`border px-3 py-1.5 rounded text-sm hover:bg-gray-50 ${
             showSpecs ? 'bg-blue-50 border-blue-300 text-blue-700' : 'text-gray-600'
           }`}
@@ -81,7 +82,7 @@ export function ProductCard({ product: initialProduct, onEdit, onDeleted }: Prod
           Specs
         </button>
         <button
-          onClick={handleDelete}
+          onClick={(e) => { e.stopPropagation(); handleDelete(); }}
           disabled={deleteProduct.isPending}
           className="border px-3 py-1.5 rounded text-sm hover:bg-gray-50 text-gray-600 disabled:opacity-50"
         >

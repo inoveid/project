@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { ProductCard } from '../components/ProductCard';
 import { useBusiness, useUpdateBusiness } from '../hooks/useBusinesses';
 import { useProducts, useCreateProduct, useUpdateProduct } from '../hooks/useProducts';
@@ -25,6 +25,7 @@ function productToForm(product: Product): ProductFormState {
 
 export function BusinessPage() {
   const { businessId } = useParams<{ businessId: string }>();
+  const navigate = useNavigate();
   const id = businessId ?? '';
 
   const { data: business, isLoading, error } = useBusiness(id);
@@ -258,6 +259,7 @@ export function BusinessPage() {
               product={product}
               onEdit={openProductEdit}
               onDeleted={() => {}}
+              onClick={() => navigate(`/products/${product.id}`)}
             />
           ))}
         </div>

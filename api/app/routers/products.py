@@ -70,3 +70,55 @@ async def list_product_files(
 ):
     from app.services.product_service import get_product_files
     return await get_product_files(db, product_id)
+
+
+@router.get("/products/{product_id}/files/tree")
+async def list_product_files_tree(
+    product_id: uuid.UUID,
+    path: str = "",
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import get_product_files_recursive
+    return await get_product_files_recursive(db, product_id, path)
+
+
+@router.get("/products/{product_id}/file")
+async def read_file(
+    product_id: uuid.UUID,
+    path: str,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import read_product_file
+    try:
+        return await read_product_file(db, product_id, path)
+    except FileNotFoundError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/products/{product_id}/file")
+async def write_file(
+    product_id: uuid.UUID,
+    path: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import write_product_file
+    try:
+        content = body.get("content", "")
+        return await write_product_file(db, product_id, path, content)
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/products/{product_id}/git/info")
+async def git_info(
+    product_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import get_product_git_info
+    return await get_product_git_info(db, product_id)

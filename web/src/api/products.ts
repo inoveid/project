@@ -41,3 +41,44 @@ export interface ProductFile {
 export function getProductFiles(id: string): Promise<ProductFile[]> {
   return fetchApi<ProductFile[]>(`/products/${id}/files`);
 }
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  type: 'file' | 'dir';
+  size: number;
+}
+
+export interface FileContent {
+  path: string;
+  content: string;
+  size: number;
+}
+
+export interface GitInfo {
+  initialized: boolean;
+  branch?: string;
+  branches?: string[];
+  commits?: Array<{ hash: string; message: string; author: string; date: string }>;
+  changed_files?: number;
+}
+
+export function getFileTree(productId: string, path: string = ''): Promise<FileEntry[]> {
+  const params = path ? `?path=${encodeURIComponent(path)}` : '';
+  return fetchApi<FileEntry[]>(`/products/${productId}/files/tree${params}`);
+}
+
+export function readFile(productId: string, path: string): Promise<FileContent> {
+  return fetchApi<FileContent>(`/products/${productId}/file?path=${encodeURIComponent(path)}`);
+}
+
+export function writeFile(productId: string, path: string, content: string): Promise<{ path: string; size: number }> {
+  return fetchApi(`/products/${productId}/file?path=${encodeURIComponent(path)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ content }),
+  });
+}
+
+export function getGitInfo(productId: string): Promise<GitInfo> {
+  return fetchApi<GitInfo>(`/products/${productId}/git/info`);
+}

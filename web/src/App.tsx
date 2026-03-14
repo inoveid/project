@@ -13,6 +13,7 @@ import { BusinessListPage } from "./pages/BusinessListPage";
 import { BusinessPage } from "./pages/BusinessPage";
 import { LoginPage } from "./pages/LoginPage";
 import { TaskPage } from "./pages/TaskPage";
+import { ProductPage } from "./pages/ProductPage";
 import { TaskModal } from "./components/tasks/TaskModal";
 
 function AuthWidgets() {
@@ -54,6 +55,7 @@ export function App() {
           <Route path="/eval" element={<EvalDashboard />} />
           <Route path="/businesses" element={<BusinessListPage />} />
           <Route path="/businesses/:businessId" element={<BusinessPage />} />
+          <Route path="/products/:productId" element={<ProductPage />} />
           <Route path="/tasks/:id" element={<TaskPage />} />
         </Route>
       </Routes>

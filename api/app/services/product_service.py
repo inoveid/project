@@ -153,3 +153,108 @@ async def get_product_files(
         pass
 
     return entries
+
+
+async def get_product_files_recursive(db: AsyncSession, product_id: uuid.UUID, path: str = "") -> list[dict]:
+    """Get files in a subdirectory of the product workspace."""
+    product = await get_product(db, product_id)
+    base = product.workspace_path
+    if not base or not os.path.isdir(base):
+        return []
+
+    target = os.path.normpath(os.path.join(base, path)) if path else base
+    # Security: prevent path traversal
+    if not target.startswith(os.path.normpath(base)):
+        return []
+    if not os.path.isdir(target):
+        return []
+
+    items = []
+    try:
+        for entry in sorted(os.scandir(target), key=lambda e: (not e.is_dir(), e.name)):
+            if entry.name.startswith("."):
+                continue
+            rel_path = os.path.relpath(entry.path, base)
+            items.append({
+                "name": entry.name,
+                "path": rel_path,
+                "type": "dir" if entry.is_dir() else "file",
+                "size": entry.stat().st_size if entry.is_file() else 0,
+            })
+    except OSError:
+        pass
+    return items
+
+
+async def read_product_file(db: AsyncSession, product_id: uuid.UUID, path: str) -> dict:
+    """Read a file from product workspace."""
+    product = await get_product(db, product_id)
+    base = product.workspace_path
+    if not base:
+        raise ValueError("Product has no workspace")
+
+    target = os.path.normpath(os.path.join(base, path))
+    if not target.startswith(os.path.normpath(base)):
+        raise ValueError("Invalid path")
+    if not os.path.isfile(target):
+        raise FileNotFoundError(f"File not found: {path}")
+
+    content = open(target, "r", errors="replace").read()
+    return {"path": path, "content": content, "size": len(content)}
+
+
+async def write_product_file(db: AsyncSession, product_id: uuid.UUID, path: str, content: str) -> dict:
+    """Write a file in product workspace."""
+    product = await get_product(db, product_id)
+    base = product.workspace_path
+    if not base:
+        raise ValueError("Product has no workspace")
+
+    target = os.path.normpath(os.path.join(base, path))
+    if not target.startswith(os.path.normpath(base)):
+        raise ValueError("Invalid path")
+
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, "w") as f:
+        f.write(content)
+
+    return {"path": path, "size": len(content)}
+
+
+async def get_product_git_info(db: AsyncSession, product_id: uuid.UUID) -> dict:
+    """Get git info for product workspace."""
+    import asyncio
+    product = await get_product(db, product_id)
+    base = product.workspace_path
+    if not base or not os.path.isdir(os.path.join(base, ".git")):
+        return {"initialized": False}
+
+    async def run_git(args: list[str]) -> str:
+        proc = await asyncio.create_subprocess_exec(
+            "git", *args, cwd=base,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        return stdout.decode().strip()
+
+    branch = await run_git(["branch", "--show-current"])
+    branches_raw = await run_git(["branch", "-a", "--format=%(refname:short)"])
+    branches = [b.strip() for b in branches_raw.splitlines() if b.strip()]
+
+    log_raw = await run_git(["log", "--oneline", "-20", "--format=%H|%s|%an|%ar"])
+    commits = []
+    for line in log_raw.splitlines():
+        parts = line.split("|", 3)
+        if len(parts) == 4:
+            commits.append({"hash": parts[0][:8], "message": parts[1], "author": parts[2], "date": parts[3]})
+
+    status_raw = await run_git(["status", "--porcelain"])
+    changed_files = len([l for l in status_raw.splitlines() if l.strip()])
+
+    return {
+        "initialized": True,
+        "branch": branch or "main",
+        "branches": branches,
+        "commits": commits,
+        "changed_files": changed_files,
+    }
