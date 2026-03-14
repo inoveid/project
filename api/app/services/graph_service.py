@@ -85,6 +85,7 @@ class WorkflowState(TypedDict):
     gateway_approved: bool | None
     product_workspace: str | None
     messages: list
+    isolation_mode: str
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +197,13 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
 
         # Run sub-agents in parallel with concurrency limit
         session = await get_session(db, session_id)
-        workdir = state.get("product_workspace") or settings.workspace_path
+        # Check if parent session has a worktree (isolation)
+        from app.services.runtime.isolated_runner import isolated_runner
+        parent_worktree_info = isolated_runner.get_isolation_info(session_id)
+        if parent_worktree_info and parent_worktree_info.get("worktree_path"):
+            workdir = parent_worktree_info["worktree_path"]
+        else:
+            workdir = state.get("product_workspace") or settings.workspace_path
         max_concurrent = (agent.config or {}).get("max_sub_agents", 3) if agent else 3
 
         results = await run_spawn_requests(

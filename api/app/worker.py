@@ -44,6 +44,7 @@ from app.services.redis_service import init_redis, close_redis, get_redis
 import app.services.graph_service as graph_svc
 from app.services.graph_service import GraphConfigurable
 from app.services.runtime import runtime
+from app.services.runtime.isolated_runner import isolated_runner, IsolationMode
 from app.services.session_service import (
     SessionNotFoundError,
     add_message,
@@ -91,6 +92,8 @@ async def handle_session(session_id: uuid.UUID) -> None:
             pass
     finally:
         await runtime.stop_session(session_id)
+        if isolated_runner.is_isolated(session_id):
+            await isolated_runner.stop_isolated_session(session_id)
         await clear_buffer(sid)
         logger.info("Session %s cleanup complete", sid)
 
@@ -163,17 +166,33 @@ Description: {desc}"
             except Exception:
                 pass
 
+
+        # Resolve isolation mode
+        isolation_mode_str = (agent.config or {}).get("isolation_mode", "none")
+        isolation_mode = IsolationMode(isolation_mode_str) if isolation_mode_str in ("none", "worktree", "container") else IsolationMode.NONE
         # Start runtime
         if not runtime.is_running(session_id):
             try:
                 max_tokens = (agent.config or {}).get("max_tokens", 0) or 0
-                await runtime.start_session(
-                    session_id=session_id, workdir=workdir,
-                    system_prompt=system_prompt,
-                    claude_session_id=session.claude_session_id,
-                    allowed_tools=agent.allowed_tools or [],
-                    max_tokens=max_tokens,
-                )
+                if isolation_mode != IsolationMode.NONE:
+                    await isolated_runner.start_isolated_session(
+                        session_id=session_id,
+                        agent_id=str(agent.id),
+                        repo_path=effective_workdir,
+                        system_prompt=system_prompt,
+                        isolation_mode=isolation_mode,
+                        claude_session_id=session.claude_session_id,
+                        allowed_tools=agent.allowed_tools or [],
+                        max_tokens=max_tokens,
+                    )
+                else:
+                    await runtime.start_session(
+                        session_id=session_id, workdir=effective_workdir,
+                        system_prompt=system_prompt,
+                        claude_session_id=session.claude_session_id,
+                        allowed_tools=agent.allowed_tools or [],
+                        max_tokens=max_tokens,
+                    )
             except Exception as exc:
                 await publish_event(sid, {"type": "error", "error": str(exc)})
                 return
@@ -226,6 +245,7 @@ Description: {desc}"
                     "handoff_result": None,
                     "product_workspace": product_workspace,
                     "gateway_approved": None,
+                    "isolation_mode": isolation_mode_str,
                     "messages": [],
                 }
 
