@@ -244,6 +244,19 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
         except SessionNotFoundError:
             pass
 
+    # Auto-commit agent changes in worktree (so merge_task_branch doesn't create extra commit)
+    task_worktree = state.get("task_worktree_path")
+    if task_worktree and state.get("task_id"):
+        try:
+            wt_info = workspace_service.get_task_worktree(state["task_id"])
+            if wt_info:
+                await workspace_service._commit_worktree(
+                    wt_info,
+                    message=f"[{state['current_agent_name']}] work result",
+                )
+        except Exception as exc:
+            logger.warning("Auto-commit after agent failed: %s", exc)
+
     # Parse handoff
     handoff_result = await _resolve_handoff(
         db, full_text, state.get("workflow_id"), state.get("task_id"),
