@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     # Clone settings
     clone_timeout_seconds: int = 300
 
+    # Sandbox settings
+    sandbox_image: str = "agent-sandbox:latest"
+    sandbox_memory_mb: int = 512
+    sandbox_cpu_limit: float = 1.0
+
     # JWT auth
     jwt_secret: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
