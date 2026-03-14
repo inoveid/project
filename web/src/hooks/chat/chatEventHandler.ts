@@ -39,7 +39,7 @@ export function handleEvent(
     case "assistant_text":
       setStatus("typing");
       refs.textRef.current += event.content;
-      setItems((prev) => prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__"));
+      setItems((prev) => prev.filter((i) => !isHandoffItem(i) || (i.id !== "__activity__" && i.itemType !== "approval_required")));
       setItems((prev) => {
         const last = prev[prev.length - 1];
         if (last && !isHandoffItem(last) && last.role === "assistant" && last.id === "__streaming__") {
@@ -161,7 +161,8 @@ export function handleEvent(
     }
 
     case "done": {
-      setItems((prev) => prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__"));
+      setPendingApproval(null);
+      setItems((prev) => prev.filter((i) => !isHandoffItem(i) || (i.id !== "__activity__" && i.itemType !== "approval_required")));
       const text = refs.textRef.current;
       const tools = [...refs.toolsRef.current];
       refs.textRef.current = "";
