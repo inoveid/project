@@ -92,14 +92,15 @@ async def handle_session(session_id: uuid.UUID) -> None:
             pass
     finally:
         await runtime.stop_session(session_id)
-        # Commit any changes in task worktree (don't cleanup - other agents may use it)
-        if session.task_id:
-            task_wt = workspace_service.get_task_worktree(str(session.task_id))
-            if task_wt:
+        # Commit any remaining changes in task worktrees managed by this session
+        try:
+            for wt_info in workspace_service.list_active_tasks():
                 try:
-                    await workspace_service._commit_worktree(task_wt)
+                    await workspace_service._commit_worktree(wt_info)
                 except Exception:
                     pass
+        except Exception:
+            pass
         await clear_buffer(sid)
         logger.info("Session %s cleanup complete", sid)
 
