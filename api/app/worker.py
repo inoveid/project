@@ -169,6 +169,18 @@ Description: {desc}"""
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 )
                 await proc.communicate()
+                # Set git user for commits and create initial commit
+                # so that main branch exists for worktree forking
+                for cmd in [
+                    ["git", "config", "user.email", "agent@console.local"],
+                    ["git", "config", "user.name", "Agent Console"],
+                    ["git", "commit", "--allow-empty", "-m", "Initial commit"],
+                ]:
+                    p = await asyncio.create_subprocess_exec(
+                        *cmd, cwd=effective_workdir,
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    )
+                    await p.communicate()
             except Exception:
                 pass
 
