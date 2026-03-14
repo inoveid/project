@@ -140,7 +140,7 @@ export function CanvasPage() {
       if (edgeData) {
         const workflow = allWorkflows.find((w) => w.id === edgeData.workflow_id);
         if (workflow) {
-          setPanelSelection({ type: "workflows", teamId: workflow.team_id });
+          setPanelSelection({ type: "workflows", teamId: workflow.team_id, selectedWorkflowId: workflow.id });
         }
       }
     }, [allEdges, allWorkflows],
@@ -299,6 +299,9 @@ export function CanvasPage() {
             onDeleteTeam={(id) => {
               void mutations.handleDeleteTeam(id);
               setPanelSelection(null);
+            }}
+            onSelectAgent={(agentId, teamId) => {
+              setPanelSelection({ type: "agents", teamId, selectedAgentId: agentId });
             }}
             onCreateAgent={(teamId, data) => {
               void mutations.handleCreateAgent(teamId, data);

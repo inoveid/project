@@ -9,7 +9,7 @@ import { TeamPanel } from "./TeamPanel";
 export type SidePanelSelection =
   | { type: "agent"; agentId: string }
   | { type: "agents"; teamId: string; selectedAgentId?: string }
-  | { type: "workflows"; teamId: string }
+  | { type: "workflows"; teamId: string; selectedWorkflowId?: string }
   | { type: "edge"; edgeId: string }
   | { type: "team"; teamId: string };
 
@@ -32,6 +32,7 @@ interface SidePanelProps {
   teams: Team[];
   onUpdateTeam: (id: string, data: TeamUpdate) => void;
   onDeleteTeam: (id: string) => void;
+  onSelectAgent?: (agentId: string, teamId: string) => void;
 }
 
 type AgentTab = "general" | "handoff" | "sub-agents";
@@ -55,6 +56,7 @@ export function SidePanel({
   teams,
   onUpdateTeam,
   onDeleteTeam,
+  onSelectAgent,
 }: SidePanelProps) {
   const [activeTab, setActiveTab] = useState<AgentTab>("general");
 
@@ -88,6 +90,7 @@ export function SidePanel({
     return (
       <WorkflowsPanelWrapper
         teamId={selection.teamId}
+        initialWorkflowId={selection.selectedWorkflowId}
         workflows={workflows}
         workflowEdges={workflowEdges}
         agents={agents}
@@ -98,6 +101,7 @@ export function SidePanel({
         onDeleteWorkflow={onDeleteWorkflow}
         onCreateEdge={onCreateEdge}
         onDeleteEdge={onDeleteEdge}
+        onSelectAgent={onSelectAgent}
       />
     );
   }
@@ -190,6 +194,7 @@ function AgentsPanel({
   teams: Team[];
   onUpdateTeam: (id: string, data: TeamUpdate) => void;
   onDeleteTeam: (id: string) => void;
+  onSelectAgent?: (agentId: string, teamId: string) => void;
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
   onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string, condition?: string) => void;
 }) {
@@ -426,14 +431,17 @@ function AgentCreateForm({
 // ── Workflows panel wrapper ──────────────────────────────────────────────────
 
 function WorkflowsPanelWrapper({
-  teamId, workflows, workflowEdges, agents, onClose,
+  teamId, initialWorkflowId, workflows, workflowEdges, agents, onClose,
   onUpdateEdge, onUpdateWorkflow, onCreateWorkflow, onDeleteWorkflow, onCreateEdge, onDeleteEdge,
+  onSelectAgent,
 }: {
   teamId: string;
+  initialWorkflowId?: string;
   workflows: Workflow[];
   workflowEdges: WorkflowEdge[];
   agents: Agent[];
   onClose: () => void;
+  onSelectAgent?: (agentId: string, teamId: string) => void;
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
   onUpdateWorkflow: (workflowId: string, data: WorkflowUpdate) => void;
   onCreateWorkflow: (teamId: string, data: { name: string; starting_agent_id: string; starting_prompt: string }) => void;
@@ -447,6 +455,7 @@ function WorkflowsPanelWrapper({
       <div className="flex-1 overflow-y-auto">
         <WorkflowPanel
           teamId={teamId}
+          initialWorkflowId={initialWorkflowId}
           workflows={workflows}
           workflowEdges={workflowEdges}
           agents={agents}
@@ -457,6 +466,10 @@ function WorkflowsPanelWrapper({
           onCreateEdge={onCreateEdge}
           onDeleteEdge={onDeleteEdge}
           renderHeaderButtons={setHeaderButtons}
+          onSelectAgent={(agentId) => {
+            const agent = agents.find(a => a.id === agentId);
+            if (agent) onSelectAgent?.(agentId, agent.team_id);
+          }}
         />
       </div>
     </PanelShell>

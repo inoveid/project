@@ -82,15 +82,23 @@ function buildChain(
 }
 
 export function WorkflowPanel({
-  teamId, workflows, workflowEdges, agents,
+  teamId, initialWorkflowId, workflows, workflowEdges, agents,
   onUpdateEdge, onUpdateWorkflow, onCreateWorkflow, onDeleteWorkflow, onCreateEdge, onDeleteEdge,
-  renderHeaderButtons,
-}: WorkflowPanelProps & { renderHeaderButtons?: (buttons: React.ReactNode) => void }) {
+  renderHeaderButtons, onSelectAgent,
+}: WorkflowPanelProps & { initialWorkflowId?: string; renderHeaderButtons?: (buttons: React.ReactNode) => void; onSelectAgent?: (agentId: string) => void }) {
   const teamWorkflows = workflows.filter((w) => w.team_id === teamId);
   const teamAgents = agents.filter((a) => a.team_id === teamId);
-  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(teamWorkflows[0]?.id ?? "");
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(initialWorkflowId ?? teamWorkflows[0]?.id ?? "");
   const [showCreateForm, setShowCreateForm] = useState(teamWorkflows.length === 0);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  useEffect(() => {
+    if (initialWorkflowId && initialWorkflowId !== selectedWorkflowId) {
+      setSelectedWorkflowId(initialWorkflowId);
+      setShowCreateForm(false);
+      setShowDeleteConfirm(false);
+    }
+  }, [initialWorkflowId]);
 
   const selectedWorkflow = teamWorkflows.find((w) => w.id === selectedWorkflowId);
   const wfEdges = workflowEdges.filter((e) => e.workflow_id === selectedWorkflowId);
@@ -144,7 +152,8 @@ export function WorkflowPanel({
           </select>
           {selectedWorkflow && (
             <WorkflowPromptEditor key={selectedWorkflow.id} workflow={selectedWorkflow} edges={wfEdges} agents={agents}
-              onUpdateEdge={onUpdateEdge} onUpdateWorkflow={onUpdateWorkflow} onCreateEdge={onCreateEdge} onDeleteEdge={onDeleteEdge} />
+              onUpdateEdge={onUpdateEdge} onUpdateWorkflow={onUpdateWorkflow} onCreateEdge={onCreateEdge} onDeleteEdge={onDeleteEdge}
+              onSelectAgent={onSelectAgent} />
           )}
         </>
       )}
@@ -157,13 +166,14 @@ export function WorkflowPanel({
 }
 
 function WorkflowPromptEditor({
-  workflow, edges, agents, onUpdateEdge, onUpdateWorkflow, onCreateEdge, onDeleteEdge,
+  workflow, edges, agents, onUpdateEdge, onUpdateWorkflow, onCreateEdge, onDeleteEdge, onSelectAgent,
 }: {
   workflow: Workflow; edges: WorkflowEdge[]; agents: Agent[];
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
   onUpdateWorkflow: (workflowId: string, data: WorkflowUpdate) => void;
   onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string, condition?: string) => void;
   onDeleteEdge: (edgeId: string) => void;
+  onSelectAgent?: (agentId: string) => void;
 }) {
   const teamAgents = agents.filter(a => a.team_id === workflow.team_id);
   const { steps, returnEdges } = buildChain(workflow, edges, agents);
@@ -211,12 +221,6 @@ function WorkflowPromptEditor({
       </div>
 
       <div>
-        <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-2">Стартовый промпт</p>
-        <PromptEditor value={startingPrompt} onChange={setStartingPrompt} onBlur={handleStartingPromptBlur}
-          variables={[]} placeholder="Промпт для первого агента..." rows={3} />
-      </div>
-
-      <div>
         <div className="flex items-center justify-between mb-3">
           <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Цепочка</p>
           {hasEdges && (
@@ -246,8 +250,20 @@ function WorkflowPromptEditor({
                     {(!isLast || agentReturns.length > 0) && <div className="w-px h-4 bg-gray-300 mt-1" />}
                   </div>
                   <div className="flex-1 -mt-0.5">
-                    <span className="text-sm font-medium text-gray-800">{step.agent.name}</span>
+                    <button type="button" onClick={() => onSelectAgent?.(step.agent.id)}
+                      className="text-sm font-medium text-gray-800 hover:text-blue-600 transition-colors">
+                      {step.agent.name}
+                    </button>
                     {isFirst && <span className="ml-2 text-[10px] text-green-600 bg-green-50 px-1.5 py-0.5 rounded">старт</span>}
+                    {isFirst && (
+                      <div className="mt-2">
+                        <div className="rounded border border-green-200 bg-green-50/50 px-2.5 py-1.5">
+                          <p className="text-[10px] text-gray-400 mb-1">Стартовый промпт</p>
+                          <PromptEditor value={startingPrompt} onChange={setStartingPrompt} onBlur={handleStartingPromptBlur}
+                            variables={[]} placeholder="Промпт для первого агента..." rows={2} />
+                        </div>
+                      </div>
+                    )}
                     {agentReturns.length > 0 && (
                       <div className="mt-2 mb-2 space-y-2">
                         {agentReturns.map((re) => (
