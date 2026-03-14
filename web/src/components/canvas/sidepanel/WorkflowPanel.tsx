@@ -249,7 +249,7 @@ function WorkflowPromptEditor({
                     <span className="text-sm font-medium text-gray-800">{step.agent.name}</span>
                     {isFirst && <span className="ml-2 text-[10px] text-green-600 bg-green-50 px-1.5 py-0.5 rounded">старт</span>}
                     {agentReturns.length > 0 && (
-                      <div className="mt-2 space-y-2">
+                      <div className="mt-2 mb-2 space-y-2">
                         {agentReturns.map((re) => (
                           <ReturnEdgeSection key={re.edge.id} returnEdge={re} workflowId={workflow.id}
                             onUpdateEdge={onUpdateEdge} onDeleteEdge={onDeleteEdge} forceExpanded={allExpanded} />
@@ -319,11 +319,11 @@ function EdgePromptSection({
   const label = fromAgent ? `${fromAgent.name} → ${toAgent.name}` : `→ ${toAgent.name}`;
 
   return (
-    <div className="flex items-start gap-3 py-1">
-      <div className="flex flex-col items-center">
-        <div className="w-px h-full bg-gray-300" style={{ minHeight: expanded ? 80 : 24 }} />
+    <div className="flex items-stretch gap-3">
+      <div className="flex items-center justify-center w-3">
+        <div className="w-px bg-gray-300 h-full" />
       </div>
-      <div className="flex-1 -mt-0.5">
+      <div className="flex-1 py-1">
         <div className={`rounded border px-2.5 py-1.5 cursor-pointer transition-colors ${expanded ? "bg-blue-50 border-blue-200" : "bg-gray-50 border-gray-200 hover:bg-blue-50 hover:border-blue-200"}`}
           onClick={() => setLocalExpanded(!localExpanded)}>
           <div className="flex items-center gap-2 text-[11px]">
