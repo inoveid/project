@@ -11,7 +11,7 @@ interface WorkflowPanelProps {
   onUpdateWorkflow: (workflowId: string, data: WorkflowUpdate) => void;
   onCreateWorkflow: (teamId: string, data: { name: string; starting_agent_id: string; starting_prompt: string }) => void;
   onDeleteWorkflow: (id: string) => void;
-  onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string, condition?: string) => void;
+  onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string, condition?: string, promptTemplate?: string) => void;
   onDeleteEdge: (edgeId: string) => void;
 }
 
@@ -171,7 +171,7 @@ function WorkflowPromptEditor({
   workflow: Workflow; edges: WorkflowEdge[]; agents: Agent[];
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
   onUpdateWorkflow: (workflowId: string, data: WorkflowUpdate) => void;
-  onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string, condition?: string) => void;
+  onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string, condition?: string, promptTemplate?: string) => void;
   onDeleteEdge: (edgeId: string) => void;
   onSelectAgent?: (agentId: string) => void;
 }) {
@@ -183,6 +183,7 @@ function WorkflowPromptEditor({
   const [newEdgeFrom, setNewEdgeFrom] = useState("");
   const [newEdgeTo, setNewEdgeTo] = useState("");
   const [newEdgeCondition, setNewEdgeCondition] = useState("");
+  const [newEdgePrompt, setNewEdgePrompt] = useState("");
   const [allExpanded, setAllExpanded] = useState(false);
 
   const handleStartingPromptBlur = useCallback(() => {
@@ -196,8 +197,8 @@ function WorkflowPromptEditor({
 
   const handleAddEdge = () => {
     if (newEdgeFrom && newEdgeTo && newEdgeFrom !== newEdgeTo) {
-      onCreateEdge(workflow.id, newEdgeFrom, newEdgeTo, newEdgeCondition.trim() || undefined);
-      setShowAddEdge(false); setNewEdgeFrom(""); setNewEdgeTo(""); setNewEdgeCondition("");
+      onCreateEdge(workflow.id, newEdgeFrom, newEdgeTo, newEdgeCondition.trim() || undefined, newEdgePrompt.trim() || undefined);
+      setShowAddEdge(false); setNewEdgeFrom(""); setNewEdgeTo(""); setNewEdgeCondition(""); setNewEdgePrompt("");
     }
   };
 
@@ -289,6 +290,9 @@ function WorkflowPromptEditor({
               <input type="text" value={newEdgeCondition} onChange={(e) => setNewEdgeCondition(e.target.value)}
                 placeholder="Название перехода (опционально)"
                 className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-400" />
+              <textarea value={newEdgePrompt} onChange={(e) => setNewEdgePrompt(e.target.value)}
+                placeholder="Промпт перехода (опционально)"
+                className="w-full border border-gray-300 rounded px-2 py-1 text-xs resize-y min-h-[40px] focus:outline-none focus:ring-2 focus:ring-blue-400" rows={2} />
               <div className="flex gap-2">
                 <select value={newEdgeFrom} onChange={(e) => setNewEdgeFrom(e.target.value)}
                   className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs">
@@ -305,7 +309,7 @@ function WorkflowPromptEditor({
               <div className="flex gap-2">
                 <button type="button" onClick={handleAddEdge} disabled={!newEdgeFrom || !newEdgeTo || newEdgeFrom === newEdgeTo}
                   className="text-xs bg-blue-600 text-white rounded px-2.5 py-1 hover:bg-blue-700 disabled:opacity-50">Добавить</button>
-                <button type="button" onClick={() => { setShowAddEdge(false); setNewEdgeFrom(""); setNewEdgeTo(""); setNewEdgeCondition(""); }}
+                <button type="button" onClick={() => { setShowAddEdge(false); setNewEdgeFrom(""); setNewEdgeTo(""); setNewEdgeCondition(""); setNewEdgePrompt(""); }}
                   className="text-xs text-gray-500 hover:text-gray-700">Отмена</button>
               </div>
             </div>

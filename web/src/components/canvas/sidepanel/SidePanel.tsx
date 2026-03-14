@@ -24,7 +24,7 @@ interface SidePanelProps {
   onDeleteAgent: (id: string, teamId: string) => void;
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
   onDeleteEdge: (edgeId: string) => void;
-  onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string, condition?: string) => void;
+  onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string, condition?: string, promptTemplate?: string) => void;
   onUpdateWorkflow: (workflowId: string, data: WorkflowUpdate) => void;
   onCreateWorkflow: (teamId: string, data: { name: string; starting_agent_id: string; starting_prompt: string }) => void;
   onDeleteWorkflow: (id: string) => void;
@@ -89,6 +89,7 @@ export function SidePanel({
   if (selection.type === "workflows") {
     return (
       <WorkflowsPanelWrapper
+        key={`${selection.teamId}-${selection.selectedWorkflowId ?? "default"}`}
         teamId={selection.teamId}
         initialWorkflowId={selection.selectedWorkflowId}
         workflows={workflows}
@@ -196,7 +197,7 @@ function AgentsPanel({
   onDeleteTeam: (id: string) => void;
   onSelectAgent?: (agentId: string, teamId: string) => void;
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
-  onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string, condition?: string) => void;
+  onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string, condition?: string, promptTemplate?: string) => void;
 }) {
   const teamAgents = agents.filter((a) => a.team_id === teamId);
   const [selectedAgentId, setSelectedAgentId] = useState<string>(
@@ -446,7 +447,7 @@ function WorkflowsPanelWrapper({
   onUpdateWorkflow: (workflowId: string, data: WorkflowUpdate) => void;
   onCreateWorkflow: (teamId: string, data: { name: string; starting_agent_id: string; starting_prompt: string }) => void;
   onDeleteWorkflow: (id: string) => void;
-  onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string, condition?: string) => void;
+  onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string, condition?: string, promptTemplate?: string) => void;
   onDeleteEdge: (edgeId: string) => void;
 }) {
   const [headerButtons, setHeaderButtons] = useState<React.ReactNode>(null);

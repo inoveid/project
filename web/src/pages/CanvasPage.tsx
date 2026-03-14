@@ -276,11 +276,12 @@ export function CanvasPage() {
                 setPanelSelection(null);
               }
             }}
-            onCreateEdge={(workflowId, fromAgentId, toAgentId, condition) => {
+            onCreateEdge={(workflowId, fromAgentId, toAgentId, condition, promptTemplate) => {
               void mutations.handleCreateEdge(workflowId, {
                 from_agent_id: fromAgentId,
                 to_agent_id: toAgentId,
                 condition: condition ?? null,
+                prompt_template: promptTemplate ?? null,
               });
             }}
             onUpdateWorkflow={(workflowId, data) => {
