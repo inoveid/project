@@ -44,7 +44,7 @@ from app.services.redis_service import init_redis, close_redis, get_redis
 import app.services.graph_service as graph_svc
 from app.services.graph_service import GraphConfigurable
 from app.services.runtime import runtime
-from app.services.runtime.isolated_runner import isolated_runner, IsolationMode
+from app.services.workspace_service import workspace_service
 from app.services.session_service import (
     SessionNotFoundError,
     add_message,
@@ -92,8 +92,14 @@ async def handle_session(session_id: uuid.UUID) -> None:
             pass
     finally:
         await runtime.stop_session(session_id)
-        if isolated_runner.is_isolated(session_id):
-            await isolated_runner.stop_isolated_session(session_id)
+        # Commit any changes in task worktree (don't cleanup - other agents may use it)
+        if session.task_id:
+            task_wt = workspace_service.get_task_worktree(str(session.task_id))
+            if task_wt:
+                try:
+                    await workspace_service._commit_worktree(task_wt)
+                except Exception:
+                    pass
         await clear_buffer(sid)
         logger.info("Session %s cleanup complete", sid)
 
@@ -167,32 +173,39 @@ Description: {desc}"
                 pass
 
 
-        # Resolve isolation mode
-        isolation_mode_str = (agent.config or {}).get("isolation_mode", "none")
-        isolation_mode = IsolationMode(isolation_mode_str) if isolation_mode_str in ("none", "worktree", "container") else IsolationMode.NONE
+        # Check if task already has a worktree (created by earlier agent in chain)
+        task_worktree_path = None
+        if session.task_id:
+            task_worktree_path = workspace_service.get_task_worktree_path(str(session.task_id))
+
+        # If agent can write files and no worktree yet, create one
+        writing_tools = {"Write", "Edit", "Bash"}
+        agent_tools = set(agent.allowed_tools or [])
+        if not task_worktree_path and agent_tools & writing_tools and session.task_id:
+            try:
+                wt_info = await workspace_service.create_task_worktree(
+                    repo_path=effective_workdir,
+                    task_id=str(session.task_id),
+                )
+                task_worktree_path = wt_info.worktree_path
+                logger.info("Created task worktree: %s", task_worktree_path)
+            except Exception as exc:
+                logger.warning("Failed to create task worktree: %s", exc)
+
+        # Use worktree as workdir if available
+        agent_workdir = task_worktree_path or effective_workdir
+
         # Start runtime
         if not runtime.is_running(session_id):
             try:
                 max_tokens = (agent.config or {}).get("max_tokens", 0) or 0
-                if isolation_mode != IsolationMode.NONE:
-                    await isolated_runner.start_isolated_session(
-                        session_id=session_id,
-                        agent_id=str(agent.id),
-                        repo_path=effective_workdir,
-                        system_prompt=system_prompt,
-                        isolation_mode=isolation_mode,
-                        claude_session_id=session.claude_session_id,
-                        allowed_tools=agent.allowed_tools or [],
-                        max_tokens=max_tokens,
-                    )
-                else:
-                    await runtime.start_session(
-                        session_id=session_id, workdir=effective_workdir,
-                        system_prompt=system_prompt,
-                        claude_session_id=session.claude_session_id,
-                        allowed_tools=agent.allowed_tools or [],
-                        max_tokens=max_tokens,
-                    )
+                await runtime.start_session(
+                    session_id=session_id, workdir=agent_workdir,
+                    system_prompt=system_prompt,
+                    claude_session_id=session.claude_session_id,
+                    allowed_tools=agent.allowed_tools or [],
+                    max_tokens=max_tokens,
+                )
             except Exception as exc:
                 await publish_event(sid, {"type": "error", "error": str(exc)})
                 return
@@ -245,7 +258,7 @@ Description: {desc}"
                     "handoff_result": None,
                     "product_workspace": product_workspace,
                     "gateway_approved": None,
-                    "isolation_mode": isolation_mode_str,
+                    "task_worktree_path": task_worktree_path,
                     "messages": [],
                 }
 
