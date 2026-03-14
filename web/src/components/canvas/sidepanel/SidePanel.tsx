@@ -198,7 +198,7 @@ function AgentsPanel({
   const [showCreateForm, setShowCreateForm] = useState(teamAgents.length === 0);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [activeTab, setActiveTab] = useState<AgentTab>("general");
-  const [prevAgentCount, setPrevAgentCount] = useState(teamAgents.length);
+  const [knownAgentIds, setKnownAgentIds] = useState(() => new Set(teamAgents.map(a => a.id)));
 
   useEffect(() => {
     if (initialAgentId && initialAgentId !== selectedAgentId) {
@@ -208,26 +208,25 @@ function AgentsPanel({
     }
   }, [initialAgentId]);
 
-  // Select newly created agent
+  // Detect new/deleted agents
   useEffect(() => {
-    if (teamAgents.length > prevAgentCount) {
-      const newAgent = teamAgents[teamAgents.length - 1];
-      if (newAgent) {
-        setSelectedAgentId(newAgent.id);
-        setShowCreateForm(false);
-      }
+    const currentIds = new Set(teamAgents.map(a => a.id));
+    // Find newly added agent
+    const newAgent = teamAgents.find(a => !knownAgentIds.has(a.id));
+    if (newAgent) {
+      setSelectedAgentId(newAgent.id);
+      setShowCreateForm(false);
+      setShowDeleteConfirm(false);
     }
-    // If agent was deleted, select first remaining
-    if (teamAgents.length < prevAgentCount && teamAgents.length > 0) {
-      if (!teamAgents.find(a => a.id === selectedAgentId)) {
-        setSelectedAgentId(teamAgents[0].id);
-      }
+    // If selected agent was deleted, select first remaining
+    if (!currentIds.has(selectedAgentId) && teamAgents.length > 0) {
+      setSelectedAgentId(teamAgents[0].id);
     }
     if (teamAgents.length === 0) {
       setShowCreateForm(true);
     }
-    setPrevAgentCount(teamAgents.length);
-  }, [teamAgents.length]);
+    setKnownAgentIds(currentIds);
+  }, [teamAgents]);
 
   const selectedAgent = teamAgents.find((a) => a.id === selectedAgentId);
   const outgoingEdges = selectedAgent
