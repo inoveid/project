@@ -25,6 +25,7 @@ from app.schemas.agent import SubAgentTemplate
 from app.services.event_bus import publish_event
 from app.services.runtime import runtime
 from app.services.session_service import add_message
+from app.services.workspace_service import workspace_service
 
 logger = logging.getLogger(__name__)
 
@@ -182,9 +183,33 @@ async def spawn_sub_agent(
     output_parts: list[str] = []
 
     try:
+        # Determine workdir — fork if sub-agent writes files
+        sub_workdir = workdir
+        writing_tools = {"Write", "Edit", "Bash"}
+        sub_tools = set(template.allowed_tools or [])
+        task_id_for_fork = None
+
+        if sub_tools & writing_tools:
+            # Find task worktree by checking if workdir matches any task worktree
+            for task_wt in workspace_service.list_active_tasks():
+                if task_wt.worktree_path == workdir:
+                    task_id_for_fork = task_wt.worktree_id
+                    break
+
+            if task_id_for_fork:
+                try:
+                    fork_info = await workspace_service.create_sub_agent_fork(
+                        task_id=task_id_for_fork,
+                        sub_session_id=str(sub_session_id),
+                    )
+                    sub_workdir = fork_info.worktree_path
+                    logger.info("Created fork for sub-agent %s: %s", sub_name, sub_workdir)
+                except Exception as exc:
+                    logger.warning("Failed to create fork for sub-agent %s: %s", sub_name, exc)
+
         await runtime.start_session(
             session_id=sub_session_id,
-            workdir=workdir,
+            workdir=sub_workdir,
             system_prompt=template.system_prompt,
             allowed_tools=template.allowed_tools,
             parent_session_id=parent_session.id,
@@ -243,6 +268,18 @@ async def spawn_sub_agent(
         )
 
     finally:
+        # Merge sub-agent fork back if it existed
+        fork_path = workspace_service.get_sub_worktree_path(str(sub_session_id))
+        if fork_path:
+            try:
+                success, conflict_diff = await workspace_service.merge_sub_agent_fork(str(sub_session_id))
+                if not success and conflict_diff:
+                    output_parts.append(f"\n\n⚠️ MERGE CONFLICT:\n{conflict_diff[:1000]}")
+            except Exception as exc:
+                logger.warning("Failed to merge sub-agent fork: %s", exc)
+            finally:
+                await workspace_service.cleanup_sub_fork(str(sub_session_id))
+
         await runtime.stop_session(sub_session_id)
 
 
