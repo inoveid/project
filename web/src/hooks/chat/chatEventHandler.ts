@@ -220,6 +220,14 @@ export function handleEvent(
       break;
     }
 
+    case "handoff_completed": {
+      setItems((prev) => [
+        ...prev,
+        makeHandoffItem("handoff_completed", event.from_agent, event.to_agent, event.task),
+      ]);
+      break;
+    }
+
     case "status": {
       const statusLabels: Record<string, string> = {
         thinking: "Думает...",

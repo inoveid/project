@@ -367,13 +367,11 @@ async def _handle_peer_handoff(
         pass
     from_agent_name = current_session.agent.name if current_session.agent else "Agent"
 
-    # Emit handoff_start on current session
-    await publish_event(current_sid, {
-        "type": "handoff_start",
-        "from_agent": from_agent_name,
-        "to_agent": target.name,
-        "task": prompt,
-    })
+    # Mark current session as stopped (peer handoff done)
+    from datetime import datetime, timezone as tz
+    current_session.status = "stopped"
+    current_session.stopped_at = datetime.now(tz.utc)
+    await db.commit()
 
     # Try to reuse existing session for this agent + task
     existing_session = None
@@ -404,7 +402,13 @@ async def _handle_peer_handoff(
     # Add handoff prompt as user message
     await add_message(db, peer_session.id, "user", prompt)
 
-    # Emit done on current session (this agent's work is finished)
+    # Emit handoff_completed + done on current session
+    await publish_event(current_sid, {
+        "type": "handoff_completed",
+        "from_agent": from_agent_name,
+        "to_agent": target.name,
+        "task": prompt,
+    })
     await publish_event(current_sid, {"type": "done"})
 
     # Send initial command so worker runs the agent immediately

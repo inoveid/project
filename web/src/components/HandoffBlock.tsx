@@ -87,6 +87,18 @@ export function HandoffBlock({ item }: HandoffBlockProps) {
     );
   }
 
+  if (item.itemType === "handoff_completed") {
+    return (
+      <div className="my-3">
+        <div className="flex items-center gap-2 text-xs text-green-600 uppercase tracking-wide">
+          <div className="flex-1 h-px bg-green-200" />
+          <span>✓ {item.fromAgent} → {item.toAgent}</span>
+          <div className="flex-1 h-px bg-green-200" />
+        </div>
+      </div>
+    );
+  }
+
   // Fallback for any other item type
   return null;
 }
