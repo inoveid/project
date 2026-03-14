@@ -233,7 +233,31 @@ function WorkflowPromptEditor({
   const [newEdgeTo, setNewEdgeTo] = useState("");
   const [newEdgeCondition, setNewEdgeCondition] = useState("");
   const [newEdgePrompt, setNewEdgePrompt] = useState("");
-  const [allExpanded, setAllExpanded] = useState(false);
+  const [expandedEdgeIds, setExpandedEdgeIds] = useState<Set<string>>(new Set());
+
+  // Collect all edge IDs for the toggle-all logic
+  const allEdgeIds = edges.map(e => e.id);
+  const allExpanded = allEdgeIds.length > 0 && allEdgeIds.every(id => expandedEdgeIds.has(id));
+
+  const toggleAll = useCallback(() => {
+    if (allExpanded) {
+      setExpandedEdgeIds(new Set());
+    } else {
+      setExpandedEdgeIds(new Set(allEdgeIds));
+    }
+  }, [allExpanded, allEdgeIds]);
+
+  const toggleEdge = useCallback((edgeId: string) => {
+    setExpandedEdgeIds(prev => {
+      const next = new Set(prev);
+      if (next.has(edgeId)) {
+        next.delete(edgeId);
+      } else {
+        next.add(edgeId);
+      }
+      return next;
+    });
+  }, []);
 
   const handleStartingPromptBlur = useCallback(() => {
     if (startingPrompt !== workflow.starting_prompt) onUpdateWorkflow(workflow.id, { starting_prompt: startingPrompt });
@@ -263,7 +287,7 @@ function WorkflowPromptEditor({
         <div className="flex items-center justify-between mb-3">
           <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Цепочка</p>
           {hasEdges && (
-            <button type="button" onClick={() => setAllExpanded(!allExpanded)} className="text-[11px] text-blue-600 hover:text-blue-700">
+            <button type="button" onClick={toggleAll} className="text-[11px] text-blue-600 hover:text-blue-700">
               {allExpanded ? "Скрыть все" : "Показать все"}
             </button>
           )}
@@ -279,7 +303,7 @@ function WorkflowPromptEditor({
                 {/* Forward edge card with continuous line */}
                 {step.forwardEdge && (
                   <EdgePromptSection edge={step.forwardEdge} fromAgent={steps[idx - 1]?.agent} toAgent={step.agent}
-                    workflowId={workflow.id} onUpdateEdge={onUpdateEdge} onDeleteEdge={onDeleteEdge} forceExpanded={allExpanded} />
+                    workflowId={workflow.id} onUpdateEdge={onUpdateEdge} onDeleteEdge={onDeleteEdge} expanded={expandedEdgeIds.has(step.forwardEdge.id)} onToggle={() => toggleEdge(step.forwardEdge!.id)} />
                 )}
                 {/* Agent dot + name + content, with continuous line */}
                 <div className="flex gap-3">
@@ -310,7 +334,7 @@ function WorkflowPromptEditor({
                       <div className="mt-2 space-y-2">
                         {agentReturns.map((re) => (
                           <ReturnEdgeSection key={re.edge.id} returnEdge={re} workflowId={workflow.id}
-                            onUpdateEdge={onUpdateEdge} onDeleteEdge={onDeleteEdge} forceExpanded={allExpanded} />
+                            onUpdateEdge={onUpdateEdge} onDeleteEdge={onDeleteEdge} expanded={expandedEdgeIds.has(re.edge.id)} onToggle={() => toggleEdge(re.edge.id)} />
                         ))}
                       </div>
                     )}
@@ -365,15 +389,14 @@ function WorkflowPromptEditor({
 }
 
 function EdgePromptSection({
-  edge, fromAgent, toAgent, workflowId, onUpdateEdge, onDeleteEdge, forceExpanded,
+  edge, fromAgent, toAgent, workflowId, onUpdateEdge, onDeleteEdge, expanded, onToggle,
 }: {
   edge: WorkflowEdge; fromAgent?: Agent; toAgent: Agent; workflowId: string;
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
   onDeleteEdge: (edgeId: string) => void;
-  forceExpanded: boolean;
+  expanded: boolean;
+  onToggle: () => void;
 }) {
-  const [localExpanded, setLocalExpanded] = useState(false);
-  const expanded = forceExpanded || localExpanded;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [prompt, setPrompt] = useState(edge.prompt_template ?? "");
   const [condition, setCondition] = useState(edge.condition ?? "");
@@ -389,7 +412,7 @@ function EdgePromptSection({
       </div>
       <div className="flex-1 py-1">
         <div className={`rounded border px-2.5 py-1.5 cursor-pointer transition-colors ${expanded ? "bg-blue-50 border-blue-200" : "bg-gray-50 border-gray-200 hover:bg-blue-50 hover:border-blue-200"}`}
-          onClick={() => setLocalExpanded(!localExpanded)}>
+          onClick={onToggle}>
           <div className="flex items-center gap-2 text-[11px]">
             <span>{edge.requires_approval ? "🔒" : "⚡"}</span>
             <span className="font-medium text-gray-700">{edge.condition || label}</span>
@@ -434,16 +457,15 @@ function EdgePromptSection({
 }
 
 function ReturnEdgeSection({
-  returnEdge, workflowId, onUpdateEdge, onDeleteEdge, forceExpanded,
+  returnEdge, workflowId, onUpdateEdge, onDeleteEdge, expanded, onToggle,
 }: {
   returnEdge: ReturnEdge; workflowId: string;
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
   onDeleteEdge: (edgeId: string) => void;
-  forceExpanded: boolean;
+  expanded: boolean;
+  onToggle: () => void;
 }) {
   const { edge, toAgent } = returnEdge;
-  const [localExpanded, setLocalExpanded] = useState(false);
-  const expanded = forceExpanded || localExpanded;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [prompt, setPrompt] = useState(edge.prompt_template ?? "");
   const [rounds, setRounds] = useState(edge.max_rounds);
@@ -458,7 +480,7 @@ function ReturnEdgeSection({
       <div className="flex items-center gap-1.5">
         <span className="text-amber-500 text-xs">↻</span>
         <span className="text-[10px]">{edge.requires_approval ? "🔒" : "⚡"}</span>
-        <button type="button" onClick={() => setLocalExpanded(!localExpanded)} className="flex-1 flex items-center gap-1.5 text-left">
+        <button type="button" onClick={onToggle} className="flex-1 flex items-center gap-1.5 text-left">
           <span className="text-xs text-amber-700 font-medium">{edge.condition || `→ ${toAgent.name}`}</span>
           <span className="text-amber-300 ml-auto text-[10px]">{expanded ? "▲" : "▼"}</span>
         </button>
