@@ -87,6 +87,7 @@ function ActiveSessionChat({
   task: Task;
   queryClient: ReturnType<typeof useQueryClient>;
 }) {
+  const [approvedLocally, setApprovedLocally] = useState(false);
   const { data: session } = useQuery({
     queryKey: ['session', sessionId],
     queryFn: () => getSession(sessionId),
@@ -103,6 +104,13 @@ function ActiveSessionChat({
     mainLoaded && isActive,
   );
 
+  // Reset approvedLocally when a new approval_required arrives
+  useEffect(() => {
+    if (chat.status === 'awaiting_approval') {
+      setApprovedLocally(false);
+    }
+  }, [chat.status]);
+
   async function handleStop() {
     chat.stopAgent();
     await stopSession(sessionId);
@@ -112,6 +120,7 @@ function ActiveSessionChat({
 
   function handleApprove() {
     chat.approveHandoff();
+    setApprovedLocally(true);
     void queryClient.invalidateQueries({ queryKey: ['tasks', 'detail', task.id] });
     void queryClient.invalidateQueries({ queryKey: ['sessions', 'by-task', task.id] });
   }
@@ -121,8 +130,10 @@ function ActiveSessionChat({
     void queryClient.invalidateQueries({ queryKey: ['tasks', 'detail', task.id] });
   }
 
+  const wsReady = chat.status === 'connected' || chat.status === 'awaiting_approval' || chat.status === 'typing';
   const showApproval =
-    (task.status === 'awaiting_user' || chat.status === 'awaiting_approval') && isActive;
+    (task.status === 'awaiting_user' || chat.status === 'awaiting_approval')
+    && isActive && wsReady && !approvedLocally;
 
   const canSend = chat.status === 'connected' && isActive && task.status !== 'awaiting_user';
 
