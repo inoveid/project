@@ -214,6 +214,7 @@ function WorkflowPromptEditor({
   onUpdateEdge,
   onUpdateWorkflow,
   onCreateEdge,
+  onDeleteEdge,
 }: {
   workflow: Workflow;
   edges: WorkflowEdge[];
