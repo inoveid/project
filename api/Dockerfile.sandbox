@@ -1,0 +1,23 @@
+FROM python:3.12-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl git \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Claude Agent SDK
+RUN pip install --no-cache-dir claude-agent-sdk
+
+# Non-root user
+RUN useradd -m -s /bin/bash agent
+RUN mkdir -p /workspace && chown agent:agent /workspace
+
+# Mark all directories as safe for git
+RUN git config --system --add safe.directory '*'
+
+USER agent
+WORKDIR /workspace
+
+# Keep container running (worker will exec commands into it)
+CMD ["sleep", "infinity"]
