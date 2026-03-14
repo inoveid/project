@@ -238,8 +238,23 @@ async def get_product_git_info(db: AsyncSession, product_id: uuid.UUID) -> dict:
         return stdout.decode().strip()
 
     branch = await run_git(["branch", "--show-current"])
-    branches_raw = await run_git(["branch", "-a", "--format=%(refname:short)"])
-    branches = [b.strip() for b in branches_raw.splitlines() if b.strip()]
+    # Local branches
+    local_raw = await run_git(["branch", "--format=%(refname:short)"])
+    local_branches = [b.strip() for b in local_raw.splitlines() if b.strip()]
+
+    # Remote branches (exclude those that already have a local counterpart)
+    remote_raw = await run_git(["branch", "-r", "--format=%(refname:short)"])
+    remote_branches = []
+    for b in remote_raw.splitlines():
+        b = b.strip()
+        if not b or b.endswith("/HEAD"):
+            continue
+        # Strip origin/ prefix for display
+        short = b.split("/", 1)[1] if "/" in b else b
+        if short not in local_branches:
+            remote_branches.append(b)
+
+    branches = local_branches + remote_branches
 
     log_raw = await run_git(["log", "--oneline", "-20", "--format=%H|%s|%an|%ar"])
     commits = []
@@ -267,15 +282,40 @@ async def checkout_product_branch(db: AsyncSession, product_id: uuid.UUID, branc
     base = product.workspace_path
     if not base or not os.path.isdir(os.path.join(base, ".git")):
         raise ValueError("No git repository")
-    
-    proc = await asyncio.create_subprocess_exec(
-        "git", "checkout", branch, cwd=base,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-    )
-    _, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        raise ValueError(f"Checkout failed: {stderr.decode().strip()}")
-    
+
+    async def run_git(args: list[str]) -> tuple[int, str, str]:
+        proc = await asyncio.create_subprocess_exec(
+            "git", *args, cwd=base,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        return proc.returncode, stdout.decode().strip(), stderr.decode().strip()
+
+    # Stash uncommitted changes if any
+    rc, status, _ = await run_git(["status", "--porcelain"])
+    has_changes = bool(status.strip())
+    if has_changes:
+        await run_git(["stash", "push", "-m", f"auto-stash before checkout {branch}"])
+
+    # Try checkout
+    if "/" in branch and branch.startswith("origin/"):
+        # Remote branch — create local tracking branch
+        local_name = branch.split("/", 1)[1]
+        rc, _, stderr = await run_git(["checkout", "-b", local_name, branch])
+        if rc != 0 and "already exists" in stderr:
+            # Local branch already exists, just switch to it
+            rc, _, stderr = await run_git(["checkout", local_name])
+        branch = local_name
+    else:
+        rc, _, stderr = await run_git(["checkout", branch])
+
+    # Restore stashed changes
+    if has_changes:
+        await run_git(["stash", "pop"])
+
+    if rc != 0:
+        raise ValueError(f"Checkout failed: {stderr}")
+
     return {"branch": branch}
 
 
