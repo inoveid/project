@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import shutil
 import uuid
@@ -10,6 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.product import Product
 from app.schemas.product import ProductCreate, ProductUpdate
+
+
+logger = logging.getLogger(__name__)
+
+
+def _is_git_repo(path: str) -> bool:
+    """Check if path is a git repo (works for both regular repos and worktrees)."""
+    git_path = os.path.join(path, ".git")
+    return os.path.isdir(git_path) or os.path.isfile(git_path)
 
 
 async def create_product(db: AsyncSession, data: ProductCreate) -> Product:
@@ -226,7 +236,7 @@ async def get_product_git_info(db: AsyncSession, product_id: uuid.UUID) -> dict:
     import asyncio
     product = await get_product(db, product_id)
     base = product.workspace_path
-    if not base or not os.path.isdir(os.path.join(base, ".git")):
+    if not base or not _is_git_repo(base):
         return {"initialized": False}
 
     async def run_git(args: list[str]) -> str:
@@ -280,7 +290,7 @@ async def checkout_product_branch(db: AsyncSession, product_id: uuid.UUID, branc
     import asyncio
     product = await get_product(db, product_id)
     base = product.workspace_path
-    if not base or not os.path.isdir(os.path.join(base, ".git")):
+    if not base or not _is_git_repo(base):
         raise ValueError("No git repository")
 
     async def run_git(args: list[str]) -> tuple[int, str, str]:
@@ -299,22 +309,21 @@ async def checkout_product_branch(db: AsyncSession, product_id: uuid.UUID, branc
 
     # Try checkout
     if "/" in branch and branch.startswith("origin/"):
-        # Remote branch — create local tracking branch
         local_name = branch.split("/", 1)[1]
-        rc, _, stderr = await run_git(["checkout", "-b", local_name, branch])
-        if rc != 0 and "already exists" in stderr:
-            # Local branch already exists, just switch to it
-            rc, _, stderr = await run_git(["checkout", local_name])
+        rc, _, checkout_err = await run_git(["checkout", "-b", local_name, branch])
+        if rc != 0 and "already exists" in checkout_err:
+            rc, _, checkout_err = await run_git(["checkout", local_name])
         branch = local_name
     else:
-        rc, _, stderr = await run_git(["checkout", branch])
+        rc, _, checkout_err = await run_git(["checkout", branch])
 
-    # Restore stashed changes
+    # Restore stashed changes (regardless of checkout result)
     if has_changes:
         await run_git(["stash", "pop"])
 
     if rc != 0:
-        raise ValueError(f"Checkout failed: {stderr}")
+        logger.error("Git checkout failed for product %s: %s", product_id, checkout_err)
+        raise ValueError(f"Checkout failed: {checkout_err}")
 
     return {"branch": branch}
 
@@ -324,7 +333,7 @@ async def get_product_git_diff(db: AsyncSession, product_id: uuid.UUID) -> dict:
     import asyncio
     product = await get_product(db, product_id)
     base = product.workspace_path
-    if not base or not os.path.isdir(os.path.join(base, ".git")):
+    if not base or not _is_git_repo(base):
         return {"diff": ""}
     
     proc = await asyncio.create_subprocess_exec(
@@ -341,7 +350,7 @@ async def get_product_commit_detail(db: AsyncSession, product_id: uuid.UUID, com
     import re
     product = await get_product(db, product_id)
     base = product.workspace_path
-    if not base or not os.path.isdir(os.path.join(base, ".git")):
+    if not base or not _is_git_repo(base):
         raise ValueError("No git repository")
     
     # Validate hash format to prevent injection
