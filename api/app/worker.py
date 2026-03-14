@@ -165,7 +165,7 @@ Description: {desc}"""
         if not os.path.exists(git_dir):
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    "git", "init", cwd=effective_workdir,
+                    "git", "init", "-b", "main", cwd=effective_workdir,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 )
                 await proc.communicate()

@@ -72,7 +72,7 @@ class WorkspaceService:
         """Make sure repo_path is a valid git repo with at least one commit."""
         git_dir = os.path.join(repo_path, ".git")
         if not os.path.isdir(git_dir):
-            await self._run_git("init", cwd=repo_path)
+            await self._run_git("init", "-b", "main", cwd=repo_path)
             await self._run_git(
                 "config", "user.email", "agent@console.local", cwd=repo_path
             )
@@ -316,7 +316,7 @@ class WorkspaceService:
     async def merge_task_branch(
         self,
         task_id: str,
-        target_branch: str = "main",
+        target_branch: str | None = None,
     ) -> bool:
         """Merge task branch into target (final MR merge).
 
@@ -327,6 +327,10 @@ class WorkspaceService:
             raise WorkspaceError(f"No task worktree for {task_id}")
 
         await self._commit_worktree(info)
+
+        # Detect default branch if not specified
+        if not target_branch:
+            target_branch = await self._get_default_branch(info.repo_path)
 
         # Switch to target branch in main repo
         await self._run_git("checkout", target_branch, cwd=info.repo_path)
@@ -386,6 +390,28 @@ class WorkspaceService:
         return list(self._sub_worktrees.values())
 
     # ── Internal helpers ─────────────────────────────────────────
+
+    async def _get_default_branch(self, repo_path: str) -> str:
+        """Detect the default branch (main or master)."""
+        try:
+            # Try symbolic-ref first (works if HEAD points to a branch)
+            ref = await self._run_git(
+                "symbolic-ref", "--short", "HEAD", cwd=repo_path, check=False
+            )
+            if ref and ref.strip():
+                return ref.strip()
+        except Exception:
+            pass
+        # Fallback: check if main exists, otherwise master
+        branches = await self._run_git(
+            "branch", "--format=%(refname:short)", cwd=repo_path, check=False
+        )
+        branch_list = [b.strip() for b in (branches or "").splitlines() if b.strip()]
+        if "main" in branch_list:
+            return "main"
+        if "master" in branch_list:
+            return "master"
+        return branch_list[0] if branch_list else "main"
 
     async def _commit_worktree(
         self, info: WorktreeInfo, message: Optional[str] = None

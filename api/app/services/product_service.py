@@ -44,7 +44,7 @@ async def create_product(db: AsyncSession, data: ProductCreate) -> Product:
     if not data.git_url:
         import asyncio as _aio
         for cmd in [
-            ['git', 'init'],
+            ['git', 'init', '-b', 'main'],
             ['git', 'config', 'user.email', 'agent@console.local'],
             ['git', 'config', 'user.name', 'Agent Console'],
             ['git', 'commit', '--allow-empty', '-m', 'Initial commit'],
