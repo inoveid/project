@@ -473,6 +473,11 @@ async def _try_update_task_status(db, task_id, new_status):
         return
     try:
         await update_task_status(db, task_id, new_status)
+        # Notify frontend about task status change
+        await publish_notification("task_status", {
+            "task_id": str(task_id),
+            "status": new_status,
+        })
     except Exception as exc:
         logger.error("Task %s status update to %s failed: %s", task_id, new_status, exc)
 

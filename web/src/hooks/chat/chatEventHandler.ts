@@ -39,7 +39,7 @@ export function handleEvent(
     case "assistant_text":
       setStatus("typing");
       refs.textRef.current += event.content;
-      setItems((prev) => prev.filter((i) => !isHandoffItem(i) || (i.id !== "__activity__" && i.itemType !== "approval_required" && i.itemType !== "handoff_start")));
+      setItems((prev) => prev.filter((i) => !isHandoffItem(i) || (i.id !== "__activity__" && i.itemType !== "approval_required" && i.itemType !== "handoff_start") || i.itemType === "activity"));
       setItems((prev) => {
         const last = prev[prev.length - 1];
         if (last && !isHandoffItem(last) && last.role === "assistant" && last.id === "__streaming__") {

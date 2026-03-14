@@ -28,6 +28,11 @@ export type NotificationEvent =
       type: "task_error";
       error?: string;
       task_id?: string;
+    }
+  | {
+      type: "task_status";
+      status?: string;
+      task_id?: string;
     };
 
 const KNOWN_TYPES = new Set([
@@ -35,6 +40,7 @@ const KNOWN_TYPES = new Set([
   "max_cycles_reached",
   "task_completed",
   "task_error",
+  "task_status",
 ]);
 
 export function isNotificationEvent(data: unknown): data is NotificationEvent {
@@ -106,6 +112,10 @@ export function handleNotificationEvent(
         duration: 7000,
         action: makeAction("Открыть", event.task_id),
       });
+      break;
+
+    case "task_status":
+      // No toast — just triggers query invalidation in useNotificationSocket
       break;
   }
 }
