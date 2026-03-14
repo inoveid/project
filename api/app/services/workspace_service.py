@@ -1,15 +1,15 @@
 """
-WorkspaceService — manages git worktrees for agent isolation.
+WorkspaceService — manages git worktrees for task-level isolation.
 
-Each agent in a workflow chain gets its own git worktree (branch + directory),
-so agents can edit files in parallel without conflicts.
+One branch per task. All agents in the chain work in the same worktree.
+Sub-agents get forks (child branches) from the task branch.
 
 Flow:
-1. create_worktree(repo_path, agent_id) → creates branch + worktree dir
-2. Agent works in its own directory (cwd = worktree path)
-3. commit_changes(worktree_path) → commits agent's work
-4. merge_into(worktree_path, target_branch) → merges results back
-5. cleanup(worktree_path) → removes worktree + optionally the branch
+1. create_task_worktree(repo_path, task_id) → one branch for the whole task
+2. All agents in chain work in this directory (cwd = worktree path)
+3. Sub-agents fork from task branch, merge back after completion
+4. On task completion → MR (merge request) into target branch
+5. cleanup(task_id) → removes worktree + branch
 """
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ import asyncio
 import logging
 import os
 import shutil
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -30,13 +29,13 @@ WORKTREE_BASE = "/tmp/agent-worktrees"
 
 @dataclass
 class WorktreeInfo:
-    """Tracks one agent's worktree."""
+    """Tracks a worktree (task-level or sub-agent fork)."""
 
-    agent_id: str
-    session_id: str
+    worktree_id: str  # task_id for main, sub_session_id for forks
     worktree_path: str
     branch_name: str
     repo_path: str
+    parent_branch: Optional[str] = None  # set for sub-agent forks
     created_at: datetime = field(default_factory=datetime.utcnow)
 
 
@@ -45,10 +44,11 @@ class WorkspaceError(Exception):
 
 
 class WorkspaceService:
-    """Manages git worktrees for isolated agent execution."""
+    """Manages git worktrees: one per task, forks for sub-agents."""
 
     def __init__(self) -> None:
-        self._worktrees: dict[str, WorktreeInfo] = {}
+        self._task_worktrees: dict[str, WorktreeInfo] = {}  # task_id → info
+        self._sub_worktrees: dict[str, WorktreeInfo] = {}   # sub_session_id → info
 
     async def _run_git(
         self, *args: str, cwd: str, check: bool = True
@@ -85,7 +85,6 @@ class WorkspaceService:
             "rev-parse", "HEAD", cwd=repo_path, check=False
         )
         if not has_commits:
-            # Create initial commit
             gitkeep = os.path.join(repo_path, ".gitkeep")
             Path(gitkeep).touch()
             await self._run_git("add", ".gitkeep", cwd=repo_path)
@@ -93,31 +92,27 @@ class WorkspaceService:
                 "commit", "-m", "initial commit", "--allow-empty", cwd=repo_path
             )
 
-    async def create_worktree(
+    # ── Task-level worktree ──────────────────────────────────────
+
+    async def create_task_worktree(
         self,
         repo_path: str,
-        agent_id: str,
-        session_id: str,
-        branch_prefix: str = "agent",
+        task_id: str,
     ) -> WorktreeInfo:
-        """Create an isolated git worktree for an agent.
+        """Create a worktree for a task. One branch for the whole task.
 
-        Args:
-            repo_path: Path to the main git repository.
-            agent_id: UUID of the agent.
-            session_id: UUID of the session (for uniqueness).
-            branch_prefix: Prefix for branch name.
-
-        Returns:
-            WorktreeInfo with path and branch details.
+        All agents in the chain share this worktree.
+        Called once when the first writing agent starts.
         """
+        # Return existing if already created for this task
+        if task_id in self._task_worktrees:
+            return self._task_worktrees[task_id]
+
         await self.ensure_repo_initialized(repo_path)
 
-        short_id = str(session_id)[:8]
-        branch_name = f"{branch_prefix}/{agent_id[:8]}-{short_id}"
-        worktree_dir = os.path.join(
-            WORKTREE_BASE, f"{agent_id[:8]}-{short_id}"
-        )
+        short_id = task_id[:8]
+        branch_name = f"task/{short_id}"
+        worktree_dir = os.path.join(WORKTREE_BASE, f"task-{short_id}")
 
         # Clean up stale worktree at same path
         if os.path.exists(worktree_dir):
@@ -149,123 +144,269 @@ class WorkspaceService:
         )
 
         info = WorktreeInfo(
-            agent_id=agent_id,
-            session_id=session_id,
+            worktree_id=task_id,
             worktree_path=worktree_dir,
             branch_name=branch_name,
             repo_path=repo_path,
         )
-        self._worktrees[session_id] = info
+        self._task_worktrees[task_id] = info
 
         logger.info(
-            "Created worktree for agent %s: %s (branch: %s)",
-            agent_id[:8], worktree_dir, branch_name,
+            "Created task worktree %s: %s (branch: %s)",
+            short_id, worktree_dir, branch_name,
         )
         return info
 
-    async def commit_changes(
+    def get_task_worktree(self, task_id: str) -> Optional[WorktreeInfo]:
+        """Get worktree for a task, if exists."""
+        return self._task_worktrees.get(task_id)
+
+    def get_task_worktree_path(self, task_id: str) -> Optional[str]:
+        """Get worktree path for a task."""
+        info = self._task_worktrees.get(task_id)
+        return info.worktree_path if info else None
+
+    # ── Sub-agent forks ──────────────────────────────────────────
+
+    async def create_sub_agent_fork(
         self,
-        session_id: str,
-        message: Optional[str] = None,
-    ) -> Optional[str]:
-        """Commit all changes in an agent's worktree.
+        task_id: str,
+        sub_session_id: str,
+    ) -> WorktreeInfo:
+        """Create a fork (child worktree) from the task branch for a sub-agent.
 
-        Returns commit hash or None if nothing to commit.
+        Sub-agent works in its own branch, then merges back into the task branch.
         """
-        info = self._worktrees.get(session_id)
-        if not info:
-            raise WorkspaceError(f"No worktree for session {session_id}")
+        task_info = self._task_worktrees.get(task_id)
+        if not task_info:
+            raise WorkspaceError(f"No task worktree for task {task_id}")
 
-        # Check for changes
-        status = await self._run_git("status", "--porcelain", cwd=info.worktree_path)
-        if not status.strip():
-            logger.debug("No changes to commit for session %s", session_id[:8])
-            return None
+        # Commit any uncommitted changes in task worktree first
+        await self._commit_worktree(task_info)
 
-        await self._run_git("add", "-A", cwd=info.worktree_path)
+        short_id = sub_session_id[:8]
+        branch_name = f"task/{task_id[:8]}/sub-{short_id}"
+        worktree_dir = os.path.join(WORKTREE_BASE, f"sub-{short_id}")
 
-        commit_msg = message or f"[agent:{info.agent_id[:8]}] work result"
-        await self._run_git("commit", "-m", commit_msg, cwd=info.worktree_path)
+        # Clean up stale
+        if os.path.exists(worktree_dir):
+            await self._run_git(
+                "worktree", "remove", worktree_dir, "--force",
+                cwd=task_info.repo_path, check=False,
+            )
+            if os.path.exists(worktree_dir):
+                shutil.rmtree(worktree_dir, ignore_errors=True)
 
-        commit_hash = await self._run_git(
-            "rev-parse", "HEAD", cwd=info.worktree_path
+        await self._run_git(
+            "branch", "-D", branch_name, cwd=task_info.repo_path, check=False
         )
+
+        # Create worktree branching from the task branch
+        await self._run_git(
+            "worktree", "add", "-b", branch_name, worktree_dir,
+            task_info.branch_name,
+            cwd=task_info.repo_path,
+        )
+
+        await self._run_git(
+            "config", "user.email", "agent@console.local", cwd=worktree_dir
+        )
+        await self._run_git(
+            "config", "user.name", "Agent Console", cwd=worktree_dir
+        )
+
+        info = WorktreeInfo(
+            worktree_id=sub_session_id,
+            worktree_path=worktree_dir,
+            branch_name=branch_name,
+            repo_path=task_info.repo_path,
+            parent_branch=task_info.branch_name,
+        )
+        self._sub_worktrees[sub_session_id] = info
+
         logger.info(
-            "Committed changes for session %s: %s",
-            session_id[:8], commit_hash[:8],
+            "Created sub-agent fork %s from %s (branch: %s)",
+            short_id, task_info.branch_name, branch_name,
         )
-        return commit_hash
+        return info
 
-    async def get_diff(self, session_id: str, base_branch: str = "main") -> str:
-        """Get diff of agent's changes vs base branch."""
-        info = self._worktrees.get(session_id)
+    async def merge_sub_agent_fork(
+        self,
+        sub_session_id: str,
+    ) -> tuple[bool, Optional[str]]:
+        """Merge a sub-agent's fork back into the task branch.
+
+        Returns (success, conflict_diff_or_none).
+        If conflict: returns (False, diff_text) for parent agent to resolve.
+        """
+        info = self._sub_worktrees.get(sub_session_id)
         if not info:
-            raise WorkspaceError(f"No worktree for session {session_id}")
+            raise WorkspaceError(f"No sub-agent fork for {sub_session_id}")
 
-        # First commit any uncommitted changes
-        await self.commit_changes(session_id)
+        # Commit sub-agent's changes
+        await self._commit_worktree(info, message=f"[sub-agent:{sub_session_id[:8]}] work result")
 
-        # Get diff against the base
+        # Check if there are actual changes vs parent
         diff = await self._run_git(
-            "diff", f"{base_branch}...{info.branch_name}",
+            "diff", f"{info.parent_branch}...{info.branch_name}",
+            cwd=info.repo_path, check=False,
+        )
+        if not diff.strip():
+            logger.debug("Sub-agent %s made no changes", sub_session_id[:8])
+            return True, None
+
+        # Try merge into parent (task) branch worktree
+        task_info = None
+        for ti in self._task_worktrees.values():
+            if ti.branch_name == info.parent_branch:
+                task_info = ti
+                break
+
+        if not task_info:
+            raise WorkspaceError(f"Parent branch {info.parent_branch} not found")
+
+        try:
+            await self._run_git(
+                "merge", info.branch_name,
+                "-m", f"Merge sub-agent {sub_session_id[:8]}",
+                cwd=task_info.worktree_path,
+            )
+            logger.info("Merged sub-agent %s into %s", sub_session_id[:8], info.parent_branch)
+            return True, None
+        except WorkspaceError:
+            # Get conflict diff for parent agent to resolve
+            conflict_diff = await self._run_git(
+                "diff", cwd=task_info.worktree_path, check=False,
+            )
+            await self._run_git(
+                "merge", "--abort", cwd=task_info.worktree_path, check=False,
+            )
+            logger.warning("Conflict merging sub-agent %s", sub_session_id[:8])
+            return False, conflict_diff
+
+    def get_sub_worktree_path(self, sub_session_id: str) -> Optional[str]:
+        """Get worktree path for a sub-agent fork."""
+        info = self._sub_worktrees.get(sub_session_id)
+        return info.worktree_path if info else None
+
+    # ── Task completion (MR) ─────────────────────────────────────
+
+    async def get_task_diff(self, task_id: str) -> str:
+        """Get full diff of task branch vs base (for MR review)."""
+        info = self._task_worktrees.get(task_id)
+        if not info:
+            raise WorkspaceError(f"No task worktree for {task_id}")
+
+        await self._commit_worktree(info)
+
+        # Get current base branch
+        base = await self._run_git(
+            "rev-parse", "--abbrev-ref", "HEAD",
+            cwd=info.repo_path, check=False,
+        )
+        if not base or base == info.branch_name:
+            base = "main"
+
+        diff = await self._run_git(
+            "diff", f"{base}...{info.branch_name}",
             cwd=info.repo_path, check=False,
         )
         return diff
 
-    async def merge_into(
+    async def merge_task_branch(
         self,
-        session_id: str,
+        task_id: str,
         target_branch: str = "main",
-        strategy: str = "theirs",
     ) -> bool:
-        """Merge agent's worktree branch into target branch.
+        """Merge task branch into target (final MR merge).
 
-        Args:
-            session_id: Session whose worktree to merge.
-            target_branch: Branch to merge into.
-            strategy: Merge strategy for conflicts ('theirs' = agent wins).
-
-        Returns:
-            True if merge succeeded.
+        Called after approval.
         """
-        info = self._worktrees.get(session_id)
+        info = self._task_worktrees.get(task_id)
         if not info:
-            raise WorkspaceError(f"No worktree for session {session_id}")
+            raise WorkspaceError(f"No task worktree for {task_id}")
 
-        # Commit any remaining changes
-        await self.commit_changes(session_id)
+        await self._commit_worktree(info)
 
         # Switch to target branch in main repo
         await self._run_git("checkout", target_branch, cwd=info.repo_path)
 
-        # Merge agent's branch
         try:
             await self._run_git(
                 "merge", info.branch_name,
-                "-m", f"Merge {info.branch_name} into {target_branch}",
-                f"--strategy-option={strategy}",
+                "-m", f"Merge task {task_id[:8]} into {target_branch}",
                 cwd=info.repo_path,
             )
-            logger.info(
-                "Merged %s into %s for session %s",
-                info.branch_name, target_branch, session_id[:8],
-            )
+            logger.info("Merged task %s into %s", task_id[:8], target_branch)
             return True
         except WorkspaceError as e:
-            logger.error("Merge failed for session %s: %s", session_id[:8], e)
-            # Abort merge on failure
+            logger.error("Task merge failed for %s: %s", task_id[:8], e)
             await self._run_git(
-                "merge", "--abort", cwd=info.repo_path, check=False
+                "merge", "--abort", cwd=info.repo_path, check=False,
             )
             return False
 
-    async def cleanup(self, session_id: str, delete_branch: bool = True) -> None:
-        """Remove worktree and optionally its branch."""
-        info = self._worktrees.pop(session_id, None)
+    # ── Cleanup ──────────────────────────────────────────────────
+
+    async def cleanup_sub_fork(self, sub_session_id: str) -> None:
+        """Remove a sub-agent's fork worktree and branch."""
+        info = self._sub_worktrees.pop(sub_session_id, None)
         if not info:
             return
+        await self._cleanup_worktree(info)
 
-        # Remove worktree
+    async def cleanup_task(self, task_id: str, delete_branch: bool = True) -> None:
+        """Remove task worktree and optionally its branch."""
+        # Clean up any remaining sub-agent forks
+        sub_ids = [
+            sid for sid, si in self._sub_worktrees.items()
+            if si.parent_branch and task_id[:8] in si.parent_branch
+        ]
+        for sid in sub_ids:
+            await self.cleanup_sub_fork(sid)
+
+        info = self._task_worktrees.pop(task_id, None)
+        if not info:
+            return
+        await self._cleanup_worktree(info, delete_branch=delete_branch)
+
+    async def cleanup_all(self) -> None:
+        """Remove all managed worktrees (shutdown cleanup)."""
+        for sid in list(self._sub_worktrees.keys()):
+            await self.cleanup_sub_fork(sid)
+        for tid in list(self._task_worktrees.keys()):
+            await self.cleanup_task(tid)
+
+    def list_active_tasks(self) -> list[WorktreeInfo]:
+        """List all active task worktrees."""
+        return list(self._task_worktrees.values())
+
+    def list_active_forks(self) -> list[WorktreeInfo]:
+        """List all active sub-agent forks."""
+        return list(self._sub_worktrees.values())
+
+    # ── Internal helpers ─────────────────────────────────────────
+
+    async def _commit_worktree(
+        self, info: WorktreeInfo, message: Optional[str] = None
+    ) -> Optional[str]:
+        """Commit all changes in a worktree. Returns hash or None."""
+        status = await self._run_git("status", "--porcelain", cwd=info.worktree_path)
+        if not status.strip():
+            return None
+
+        await self._run_git("add", "-A", cwd=info.worktree_path)
+        msg = message or f"[agent] work in {info.branch_name}"
+        await self._run_git("commit", "-m", msg, cwd=info.worktree_path)
+
+        commit_hash = await self._run_git("rev-parse", "HEAD", cwd=info.worktree_path)
+        logger.info("Committed in %s: %s", info.branch_name, commit_hash[:8])
+        return commit_hash
+
+    async def _cleanup_worktree(
+        self, info: WorktreeInfo, delete_branch: bool = True
+    ) -> None:
+        """Remove a worktree directory and optionally its branch."""
         try:
             await self._run_git(
                 "worktree", "remove", info.worktree_path, "--force",
@@ -274,11 +415,9 @@ class WorkspaceService:
         except Exception:
             pass
 
-        # Fallback: remove directory directly
         if os.path.exists(info.worktree_path):
             shutil.rmtree(info.worktree_path, ignore_errors=True)
 
-        # Delete branch
         if delete_branch:
             await self._run_git(
                 "branch", "-D", info.branch_name,
@@ -286,28 +425,9 @@ class WorkspaceService:
             )
 
         logger.info(
-            "Cleaned up worktree for session %s (branch: %s, deleted: %s)",
-            session_id[:8], info.branch_name, delete_branch,
+            "Cleaned up worktree %s (branch: %s, deleted: %s)",
+            info.worktree_id[:8], info.branch_name, delete_branch,
         )
-
-    async def cleanup_all(self) -> None:
-        """Remove all managed worktrees (shutdown cleanup)."""
-        sessions = list(self._worktrees.keys())
-        for sid in sessions:
-            await self.cleanup(sid)
-
-    def get_worktree_path(self, session_id: str) -> Optional[str]:
-        """Get worktree path for a session, if exists."""
-        info = self._worktrees.get(session_id)
-        return info.worktree_path if info else None
-
-    def get_info(self, session_id: str) -> Optional[WorktreeInfo]:
-        """Get full worktree info for a session."""
-        return self._worktrees.get(session_id)
-
-    def list_active(self) -> list[WorktreeInfo]:
-        """List all active worktrees."""
-        return list(self._worktrees.values())
 
 
 # Singleton
