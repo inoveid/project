@@ -386,6 +386,7 @@ export interface Workflow {
   team_id: string;
   starting_agent_id: string;
   starting_prompt: string;
+  isolation_mode: "none" | "worktree";
   created_at: string;
   updated_at: string;
 }
@@ -402,6 +403,7 @@ export interface WorkflowUpdate {
   description?: string | null;
   starting_agent_id?: string;
   starting_prompt?: string;
+  isolation_mode?: "none" | "worktree";
 }
 
 export interface WorkflowEdge {

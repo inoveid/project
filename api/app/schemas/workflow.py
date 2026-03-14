@@ -9,6 +9,7 @@ class WorkflowCreate(BaseModel):
     description: str | None = None
     starting_agent_id: uuid.UUID
     starting_prompt: str = Field(..., min_length=1)
+    isolation_mode: str = Field("none", pattern="^(none|worktree)$")
 
 
 class WorkflowUpdate(BaseModel):
@@ -16,6 +17,7 @@ class WorkflowUpdate(BaseModel):
     description: str | None = None
     starting_agent_id: uuid.UUID | None = None
     starting_prompt: str | None = Field(None, min_length=1)
+    isolation_mode: str | None = Field(None, pattern="^(none|worktree)$")
 
 
 class WorkflowRead(BaseModel):
@@ -25,6 +27,7 @@ class WorkflowRead(BaseModel):
     team_id: uuid.UUID
     starting_agent_id: uuid.UUID
     starting_prompt: str
+    isolation_mode: str
     created_at: datetime
     updated_at: datetime
 

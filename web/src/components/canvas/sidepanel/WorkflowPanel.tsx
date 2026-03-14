@@ -283,6 +283,20 @@ function WorkflowPromptEditor({
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-2 px-1">
+        <span className="text-[10px] text-gray-400">Изоляция:</span>
+        <select
+          value={workflow.isolation_mode || "none"}
+          onChange={(e) => onUpdateWorkflow(workflow.id, { isolation_mode: e.target.value as "none" | "worktree" })}
+          className="text-[11px] border border-gray-200 rounded px-1.5 py-0.5 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
+        >
+          <option value="none">Выключена</option>
+          <option value="worktree">Git Worktree</option>
+        </select>
+        {workflow.isolation_mode === "worktree" && (
+          <span className="text-[10px] text-green-600">отдельная ветка на задачу → MR</span>
+        )}
+      </div>
       <div>
         <div className="flex items-center justify-between mb-3">
           <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Цепочка</p>

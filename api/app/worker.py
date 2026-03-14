@@ -178,10 +178,18 @@ Description: {desc}"
         if session.task_id:
             task_worktree_path = workspace_service.get_task_worktree_path(str(session.task_id))
 
-        # If agent can write files and no worktree yet, create one
+        # If agent can write files, no worktree yet, and isolation is enabled — create one
+        # Resolve isolation_mode from workflow settings
+        isolation_mode = "none"
+        if workflow_id:
+            from app.models.workflow import Workflow as WorkflowModel
+            wf = await db.get(WorkflowModel, workflow_id)
+            if wf:
+                isolation_mode = wf.isolation_mode or "none"
+
         writing_tools = {"Write", "Edit", "Bash"}
         agent_tools = set(agent.allowed_tools or [])
-        if not task_worktree_path and agent_tools & writing_tools and session.task_id:
+        if not task_worktree_path and agent_tools & writing_tools and session.task_id and isolation_mode == "worktree":
             try:
                 wt_info = await workspace_service.create_task_worktree(
                     repo_path=effective_workdir,
