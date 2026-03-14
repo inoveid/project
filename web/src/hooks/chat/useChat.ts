@@ -98,20 +98,8 @@ export function useChat(
     send(JSON.stringify({ type: "refine", comment }));
   }, [send, isOpen]);
 
-  // Auto-send first pending message when WebSocket connects
-  const autoSentRef = useRef(false);
-  useEffect(() => {
-    if (status !== "connected" || autoSentRef.current) return;
-    const msgs = initialMessagesRef.current;
-    if (msgs.length === 0) return;
-    const lastMsg = msgs[msgs.length - 1]!;
-    if (lastMsg.role === "user") {
-      autoSentRef.current = true;
-      send(JSON.stringify({ type: "message", content: lastMsg.content, saved: true }));
-      setStatus("typing");
-    }
-  }, [status, send]);
-
+  // Note: initial command is sent by backend (update_task_status / _handle_peer_handoff)
+  // via publish_command. No auto-send needed — it caused duplicate messages on reconnect.
   const messages = items.filter((i): i is Message => !isHandoffItem(i));
 
   return { items, messages, status, error, pendingApproval, sendMessage, stopAgent, approveHandoff, refineHandoff };
