@@ -266,6 +266,17 @@ async def get_product_git_info(db: AsyncSession, product_id: uuid.UUID) -> dict:
 
     branches = local_branches + remote_branches
 
+    # Filter out branches locked by worktrees (can't be checked out)
+    worktree_raw = await run_git(["worktree", "list", "--porcelain"])
+    locked_branches = set()
+    for line in worktree_raw.splitlines():
+        if line.startswith("branch refs/heads/"):
+            locked_branches.add(line.replace("branch refs/heads/", "").strip())
+
+    # Current branch is in a worktree too, but we still show it
+    current = branch or "main"
+    branches = [b for b in branches if b == current or b not in locked_branches]
+
     log_raw = await run_git(["log", "--oneline", "-20", "--format=%H|%s|%an|%ar"])
     commits = []
     for line in log_raw.splitlines():
