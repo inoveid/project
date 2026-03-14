@@ -23,7 +23,7 @@ interface SidePanelProps {
   onDeleteAgent: (id: string, teamId: string) => void;
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
   onDeleteEdge: (edgeId: string) => void;
-  onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string) => void;
+  onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string, condition?: string) => void;
   onUpdateWorkflow: (workflowId: string, data: WorkflowUpdate) => void;
   onCreateWorkflow: (teamId: string, data: { name: string; starting_agent_id: string; starting_prompt: string }) => void;
   onDeleteWorkflow: (id: string) => void;
@@ -189,7 +189,7 @@ function AgentsPanel({
   onDeleteAgent: (id: string, teamId: string) => void;
   onCreateAgent: (teamId: string, data: { name: string; system_prompt: string; role: string }) => void;
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
-  onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string) => void;
+  onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string, condition?: string) => void;
 }) {
   const teamAgents = agents.filter((a) => a.team_id === teamId);
   const [selectedAgentId, setSelectedAgentId] = useState<string>(
