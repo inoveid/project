@@ -80,6 +80,14 @@
 │                            │  ├─ parallel (Semaphore)     │     │
 │                            │  └─ format results           │     │
 │                            │                              │     │
+│                            │  workspace_service.py ← NEW  │     │
+│                            │  ├─ task-level worktrees     │     │
+│                            │  ├─ sub-agent forks          │     │
+│                            │  └─ MR (merge requests)     │     │
+│                            │                              │     │
+│                            │  container_service.py ← NEW  │     │
+│                            │  └─ Docker sandbox pool     │     │
+│                            │                              │     │
 │                            │  runtime (Claude Agent SDK)  │     │
 │                            │  ├─ budget                   │     │
 │                            │  ├─ circuit_breaker          │     │
@@ -258,10 +266,21 @@ START → run_agent ──→ [route_after_agent]:
              handoff    handoff     _node      _node
                 │         │          │          │
                 ▼         ▼          ▼          ▼
-              gate       END        END        END
+              gate       END   route_after   END
+                │               _complete
+                ▼              │         │
+               END         (has MR)   (no MR)
+                │              │         │
+                │              ▼         ▼
+                │            mr_gate    END
+                │              │
+                │         ┌────┴────┐
+                │      approved  rejected
+                │         │         │
+                │         ▼         ▼
+                │        END    run_agent (return to first agent)
                 │
-                ▼
-               END ← Worker reads gateway_approved + handoff_result
+                └── Worker reads gateway_approved + handoff_result
 ```
 
 **Важно:** граф всегда завершается END. Peer handoff происходит в Worker, не в графе.
@@ -276,6 +295,7 @@ START → run_agent ──→ [route_after_agent]:
 | `auto_handoff` | Устанавливает `gateway_approved=True`, → END. |
 | `complete` | Broadcast `task_completed`. |
 | `blocked` | Broadcast `max_cycles_reached`. |
+| `mr_gate` | HITL gate для MR. `interrupt()` — пауза до approve/reject. При approve — merge task branch. При reject — возврат к первому агенту с комментарием. |
 
 ### 4.3 Routing
 
@@ -287,6 +307,10 @@ START → run_agent ──→ [route_after_agent]:
 | | `BLOCKED` | → `blocked` |
 | | no handoff | → END |
 | `route_after_gate` | всегда | → END |
+| `route_after_complete` | `mr_diff` set | → `mr_gate` |
+| | no MR | → END |
+| `route_after_mr_gate` | `mr_approved=true` | → END |
+| | `mr_approved=false` | → `run_agent` |
 
 ### 4.4 WorkflowState
 
@@ -304,6 +328,9 @@ START → run_agent ──→ [route_after_agent]:
 | `handoff_result` | dict\|None | Результат handoff tool call |
 | `gateway_approved` | bool\|None | Решение HITL gate |
 | `product_workspace` | str\|None | Рабочая директория проекта |
+| `task_worktree_path` | str\|None | Путь к worktree задачи |
+| `mr_diff` | str\|None | Diff для MR (при завершении задачи) |
+| `mr_approved` | bool\|None | Решение MR gate |
 | `messages` | list | Накопленные {agent, text, tools} |
 
 ---
@@ -333,6 +360,7 @@ Endpoint: `WS /api/ws/sessions/{session_id}`
 | `done` | `{ type }` |
 | `error` | `{ type, error }` |
 | `status` | `{ type, status }` |
+| `mr_ready` | `{ type, task_id, diff_preview, diff_lines }` |
 
 **Handoff / HITL:**
 
@@ -473,7 +501,53 @@ HandoffResultType: FORWARDED, AWAITING_APPROVAL, BLOCKED, COMPLETED.
 
 ---
 
-## 10. Cross-Layer Contracts
+## 10. Workspace Isolation
+
+### 10.1 Модель
+
+Одна ветка на задачу. Все агенты цепочки работают в одном worktree.
+Суб-агенты получают fork (дочернюю ветку) при записи файлов.
+
+```
+main (проект)
+  └── task/abc123 ← ветка задачи (один worktree на всю цепочку)
+        ├── task/abc123/sub-def456 ← fork суб-агента 1
+        ├── task/abc123/sub-ghi789 ← fork суб-агента 2
+        └── (merge обратно в task/abc123)
+```
+
+### 10.2 Lifecycle
+
+1. **Создание ветки**: Worker при старте первого пишущего агента (allowed_tools ∩ {Write, Edit, Bash}) создаёт worktree через `workspace_service.create_task_worktree()`
+2. **Работа агентов**: Все агенты цепочки работают в одном worktree (cwd = worktree path)
+3. **Суб-агенты**: Пишущие суб-агенты получают fork (`create_sub_agent_fork()`), read-only — работают в ветке родителя
+4. **Merge суб-агентов**: После завершения суб-агента fork мержится обратно. При конфликте — diff передаётся родителю
+5. **MR при завершении**: Когда агент с `can_complete_task` завершает задачу:
+   - Генерируется diff (`get_task_diff()`)
+   - Отправляется `mr_ready` на фронтенд
+   - HITL gate ждёт решения (approve/reject)
+   - Approve → merge в main, cleanup
+   - Reject + комментарий → возврат к первому агенту
+
+### 10.3 Файлы
+
+| Файл | Назначение |
+|------|------------|
+| `workspace_service.py` | Git worktree management (task + sub-agent forks) |
+| `container_service.py` | Docker container pool (для будущей контейнерной изоляции) |
+| `Dockerfile.sandbox` | Образ песочницы (Python + git + Claude Agent SDK) |
+
+### 10.4 Ключевые решения
+
+- **Одна ветка на задачу** — не на агента. Reviewer и QA работают в той же ветке, что Developer
+- **Fork только для пишущих суб-агентов** — read-only суб-агенты не создают ветку
+- **Определение пишущего агента** — по `allowed_tools` (наличие Write, Edit, Bash)
+- **Конфликты суб-агентов** — при merge conflict diff передаётся родительскому агенту для разрешения
+- **ContainerPoolService** — готов, но не подключён. Для production: каждый агент в Docker-контейнере
+
+---
+
+## 11. Cross-Layer Contracts
 
 ### WS Event Contract
 
@@ -496,7 +570,7 @@ HandoffResultType: FORWARDED, AWAITING_APPROVAL, BLOCKED, COMPLETED.
 
 ---
 
-## 11. How-to Guides
+## 12. How-to Guides
 
 ### Добавить новый CRUD ресурс
 5 файлов: model → schema → service → router → main.py.
@@ -515,7 +589,7 @@ Worker автоматически инжектит prompt с описанием 
 
 ---
 
-## 12. Dependency Graph (ключевые)
+## 13. Dependency Graph (ключевые)
 
 ```
 worker.py
@@ -527,6 +601,7 @@ worker.py
   ├─→ event_bus → redis_service
   ├─→ handoff_server (generate tools, format prompt)
   ├─→ sub_agent_service (format spawn prompt)
+  ├─→ workspace_service (task worktrees)
   ├─→ session_service, task_service
   └─→ runtime (start/stop sessions)
 
@@ -550,11 +625,13 @@ runtime (AgentRuntime)
 | `runtime` | runtime/agent_runner.py | Да |
 | `_compiled_graph` | graph_service.py | Да |
 | `_redis` | redis_service.py | Да |
+| `workspace_service` | workspace_service.py | Да |
+| `container_pool` | container_service.py | Да |
 | `settings` | config.py | Нет |
 
 ---
 
-## 13. Migrations
+## 14. Migrations
 
 | # | Описание |
 |---|----------|
