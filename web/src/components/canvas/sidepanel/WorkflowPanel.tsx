@@ -198,7 +198,7 @@ function WorkflowSelector({
       <div className="flex items-center gap-1.5">
         <span className="flex-1 text-sm font-medium text-gray-800 truncate">{selected?.name}</span>
         <button type="button" onClick={() => { setEditName(selected?.name ?? ""); setEditing(true); }}
-          className="text-[11px] text-gray-400 hover:text-blue-600" title="Переименовать">✎</button>
+          className="text-[11px] text-gray-400 hover:text-blue-600">переименовать</button>
       </div>
     );
   }
@@ -210,7 +210,7 @@ function WorkflowSelector({
         {workflows.map(w => (<option key={w.id} value={w.id}>{w.name}</option>))}
       </select>
       <button type="button" onClick={() => { setEditName(selected?.name ?? ""); setEditing(true); }}
-        className="text-[11px] text-gray-400 hover:text-blue-600" title="Переименовать">✎</button>
+        className="text-[11px] text-gray-400 hover:text-blue-600">переименовать</button>
     </div>
   );
 }
