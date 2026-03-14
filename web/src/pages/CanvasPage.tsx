@@ -255,14 +255,15 @@ export function CanvasPage() {
             }}
             onDeleteAgent={(id) => {
               void mutations.handleDeleteAgent(id);
-              setPanelSelection(null);
             }}
             onUpdateEdge={(edgeId, _workflowId, data) => {
               void mutations.handleUpdateEdge(edgeId, data);
             }}
             onDeleteEdge={(edgeId) => {
               void mutations.handleDeleteEdge(edgeId);
-              setPanelSelection(null);
+              if (panelSelection?.type === "edge") {
+                setPanelSelection(null);
+              }
             }}
             onCreateEdge={(workflowId, fromAgentId, toAgentId) => {
               void mutations.handleCreateEdge(workflowId, {

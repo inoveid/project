@@ -12,6 +12,7 @@ interface WorkflowPanelProps {
   onCreateWorkflow: (teamId: string, data: { name: string; starting_agent_id: string; starting_prompt: string }) => void;
   onDeleteWorkflow: (id: string) => void;
   onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string) => void;
+  onDeleteEdge: (edgeId: string) => void;
 }
 
 interface ChainStep {
@@ -90,6 +91,7 @@ export function WorkflowPanel({
   onCreateWorkflow,
   onDeleteWorkflow,
   onCreateEdge,
+  onDeleteEdge,
 }: WorkflowPanelProps) {
   const teamWorkflows = workflows.filter((w) => w.team_id === teamId);
   const teamAgents = agents.filter((a) => a.team_id === teamId);
@@ -190,6 +192,7 @@ export function WorkflowPanel({
               onUpdateEdge={onUpdateEdge}
               onUpdateWorkflow={onUpdateWorkflow}
               onCreateEdge={onCreateEdge}
+              onDeleteEdge={onDeleteEdge}
             />
           )}
         </>
@@ -218,6 +221,7 @@ function WorkflowPromptEditor({
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
   onUpdateWorkflow: (workflowId: string, data: WorkflowUpdate) => void;
   onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string) => void;
+  onDeleteEdge: (edgeId: string) => void;
 }) {
   const teamAgents = agents.filter(a => a.team_id === workflow.team_id);
   const { steps, returnEdges } = buildChain(workflow, edges, agents);
@@ -313,6 +317,7 @@ function WorkflowPromptEditor({
                     toAgent={step.agent}
                     workflowId={workflow.id}
                     onUpdateEdge={onUpdateEdge}
+                    onDeleteEdge={onDeleteEdge}
                   />
                 )}
 
@@ -343,6 +348,7 @@ function WorkflowPromptEditor({
                             returnEdge={re}
                             workflowId={workflow.id}
                             onUpdateEdge={onUpdateEdge}
+                            onDeleteEdge={onDeleteEdge}
                           />
                         ))}
                       </div>
@@ -422,14 +428,17 @@ function EdgePromptSection({
   toAgent,
   workflowId,
   onUpdateEdge,
+  onDeleteEdge,
 }: {
   edge: WorkflowEdge;
   fromAgent?: Agent;
   toAgent: Agent;
   workflowId: string;
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
+  onDeleteEdge: (edgeId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [prompt, setPrompt] = useState(edge.prompt_template ?? "");
 
   const handleBlur = () => {
@@ -461,7 +470,7 @@ function EdgePromptSection({
           <span className="text-gray-300 ml-auto">{expanded ? "▲" : "▼"}</span>
         </button>
         {expanded && (
-          <div className="mt-2 mb-1">
+          <div className="mt-2 mb-1 space-y-2">
             <PromptEditor
               value={prompt}
               onChange={setPrompt}
@@ -470,6 +479,33 @@ function EdgePromptSection({
               placeholder={`Промпт перехода ${label}...`}
               rows={2}
             />
+            {!showDeleteConfirm ? (
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="text-[11px] text-red-500 hover:text-red-700"
+              >
+                Удалить переход
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-red-600">Удалить?</span>
+                <button
+                  type="button"
+                  onClick={() => onDeleteEdge(edge.id)}
+                  className="text-[11px] bg-red-600 text-white rounded px-2 py-0.5 hover:bg-red-700"
+                >
+                  Да
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="text-[11px] text-gray-500 hover:text-gray-700"
+                >
+                  Нет
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -483,13 +519,16 @@ function ReturnEdgeSection({
   returnEdge,
   workflowId,
   onUpdateEdge,
+  onDeleteEdge,
 }: {
   returnEdge: ReturnEdge;
   workflowId: string;
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
+  onDeleteEdge: (edgeId: string) => void;
 }) {
   const { edge, toAgent } = returnEdge;
   const [expanded, setExpanded] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [prompt, setPrompt] = useState(edge.prompt_template ?? "");
   const [rounds, setRounds] = useState(edge.max_rounds);
 
@@ -537,14 +576,43 @@ function ReturnEdgeSection({
         <span className="text-[10px] text-gray-400">раз</span>
       </div>
       {expanded && (
-        <PromptEditor
-          value={prompt}
-          onChange={setPrompt}
-          onBlur={handlePromptBlur}
-          variables={EDGE_VARIABLES}
-          placeholder={`Промпт возврата → ${toAgent.name}...`}
-          rows={2}
-        />
+        <div className="space-y-2">
+          <PromptEditor
+            value={prompt}
+            onChange={setPrompt}
+            onBlur={handlePromptBlur}
+            variables={EDGE_VARIABLES}
+            placeholder={`Промпт возврата → ${toAgent.name}...`}
+            rows={2}
+          />
+          {!showDeleteConfirm ? (
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              className="text-[11px] text-red-500 hover:text-red-700"
+            >
+              Удалить переход
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-red-600">Удалить?</span>
+              <button
+                type="button"
+                onClick={() => onDeleteEdge(edge.id)}
+                className="text-[11px] bg-red-600 text-white rounded px-2 py-0.5 hover:bg-red-700"
+              >
+                Да
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(false)}
+                className="text-[11px] text-gray-500 hover:text-gray-700"
+              >
+                Нет
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

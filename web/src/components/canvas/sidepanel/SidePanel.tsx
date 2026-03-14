@@ -91,6 +91,7 @@ export function SidePanel({
             onCreateWorkflow={onCreateWorkflow}
             onDeleteWorkflow={onDeleteWorkflow}
             onCreateEdge={onCreateEdge}
+            onDeleteEdge={onDeleteEdge}
           />
         </div>
       </PanelShell>
@@ -197,6 +198,7 @@ function AgentsPanel({
   const [showCreateForm, setShowCreateForm] = useState(teamAgents.length === 0);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [activeTab, setActiveTab] = useState<AgentTab>("general");
+  const [prevAgentCount, setPrevAgentCount] = useState(teamAgents.length);
 
   useEffect(() => {
     if (initialAgentId && initialAgentId !== selectedAgentId) {
@@ -205,6 +207,27 @@ function AgentsPanel({
       setShowDeleteConfirm(false);
     }
   }, [initialAgentId]);
+
+  // Select newly created agent
+  useEffect(() => {
+    if (teamAgents.length > prevAgentCount) {
+      const newAgent = teamAgents[teamAgents.length - 1];
+      if (newAgent) {
+        setSelectedAgentId(newAgent.id);
+        setShowCreateForm(false);
+      }
+    }
+    // If agent was deleted, select first remaining
+    if (teamAgents.length < prevAgentCount && teamAgents.length > 0) {
+      if (!teamAgents.find(a => a.id === selectedAgentId)) {
+        setSelectedAgentId(teamAgents[0].id);
+      }
+    }
+    if (teamAgents.length === 0) {
+      setShowCreateForm(true);
+    }
+    setPrevAgentCount(teamAgents.length);
+  }, [teamAgents.length]);
 
   const selectedAgent = teamAgents.find((a) => a.id === selectedAgentId);
   const outgoingEdges = selectedAgent
