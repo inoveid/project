@@ -291,6 +291,8 @@ Description: {desc}"""
                 interrupted = await _handle_graph_result(
                     publisher, db, task_id, session, *result
                 )
+                if interrupted is None:
+                    return  # Session done (completed or handoff)
 
             elif cmd_type == "approve" and interrupted:
                 await _try_update_task_status(db, task_id, "in_progress")
@@ -299,6 +301,8 @@ Description: {desc}"""
                 interrupted = await _handle_graph_result(
                     publisher, db, task_id, session, *result
                 )
+                if interrupted is None:
+                    return  # Session done (peer handoff approved)
 
             elif cmd_type == "refine" and interrupted:
                 comment = command.get("comment", "")
@@ -313,6 +317,8 @@ Description: {desc}"""
                 interrupted = await _handle_graph_result(
                     publisher, db, task_id, session, *result
                 )
+                if interrupted is None:
+                    return  # Session done
 
             elif cmd_type == "reject" and interrupted:
                 # Legacy reject — treat as empty refine fallback (stop)
@@ -321,6 +327,8 @@ Description: {desc}"""
                 interrupted = await _handle_graph_result(
                     publisher, db, task_id, session, *result
                 )
+                if interrupted is None:
+                    return  # Session done
 
             elif cmd_type == "message" and interrupted:
                 await publish_event(sid, {
@@ -476,7 +484,7 @@ async def _handle_graph_result(
     errored: bool,
     last_state: dict | None = None,
 ) -> bool:
-    """Handle graph result. Now includes peer handoff logic."""
+    """Handle graph result. Returns: True=interrupted, False=continue, None=exit session."""
     if errored:
         await publisher.send_json({"type": "done"})
         return False
@@ -522,10 +530,13 @@ async def _handle_graph_result(
                     "type": "error",
                     "error": f"Ошибка перехода к следующему агенту: {exc}",
                 })
-            return False  # This session is done
+            logger.info("Session %s: peer handoff done, exiting", session.id)
+            return None  # Signal command loop to exit — this session is done
 
     if completed:
         await _try_update_task_status(db, task_id, "done")
+        await publisher.send_json({"type": "done"})
+        return None  # Task completed — exit command loop
 
     await publisher.send_json({"type": "done"})
     return False
@@ -608,7 +619,7 @@ async def run_worker() -> None:
 
                 if action == "start":
                     if sid in active_tasks and not active_tasks[sid].done():
-                        logger.warning("Session %s already active in worker", sid)
+                        logger.debug("Session %s already active in worker (WS reconnect)", sid)
                         continue
                     task = asyncio.create_task(
                         handle_session(uuid.UUID(sid)),
