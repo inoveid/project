@@ -61,8 +61,8 @@ async def websocket_session(
 
     sid = str(session_id)
 
-    # Tell Worker to start handling this session (idempotent)
-    await _notify_worker_start(sid)
+    # Worker is started by backend (update_task_status / _handle_peer_handoff).
+    # WS is a pure proxy — no worker management here.
 
     # Two concurrent tasks:
     # 1. Forward Redis events → WebSocket (to client)

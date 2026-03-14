@@ -34,7 +34,6 @@ from app.models.agent import Agent
 from app.models.session import Session as SessionModel
 from app.schemas.session import SessionCreate
 from app.services.event_bus import (
-    clear_buffer,
     publish_command,
     publish_event,
     publish_notification,
@@ -101,7 +100,7 @@ async def handle_session(session_id: uuid.UUID) -> None:
                     pass
         except Exception:
             pass
-        await clear_buffer(sid)
+        # Buffer kept alive (TTL=1h) for WS reconnection replay
         logger.info("Session %s cleanup complete", sid)
 
 
