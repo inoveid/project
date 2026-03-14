@@ -352,10 +352,17 @@ async def _handle_peer_handoff(
     task_id = current_session.task_id
     current_sid = str(current_session.id)
 
+    # Ensure agent relationship is loaded
+    try:
+        await db.refresh(current_session, ["agent"])
+    except Exception:
+        pass
+    from_agent_name = current_session.agent.name if current_session.agent else "Agent"
+
     # Emit handoff_start on current session
     await publish_event(current_sid, {
         "type": "handoff_start",
-        "from_agent": current_session.agent.name,
+        "from_agent": from_agent_name,
         "to_agent": target.name,
         "task": prompt,
     })
@@ -409,7 +416,7 @@ async def _handle_peer_handoff(
 
     logger.info(
         "Peer handoff: %s → %s (session %s)",
-        current_session.agent.name, target.name, peer_session.id,
+        from_agent_name, target.name, peer_session.id,
     )
 
 
@@ -502,12 +509,19 @@ async def _handle_graph_result(
         hr = last_state.get("handoff_result")
         if gateway_approved and hr and hr.get("to_agent_id"):
             # Peer handoff — create next session, Worker starts it
-            await _handle_peer_handoff(
-                db, session, hr,
-                chain=last_state.get("chain", []),
-                workflow_id=last_state.get("workflow_id"),
-                product_workspace=last_state.get("product_workspace"),
-            )
+            try:
+                await _handle_peer_handoff(
+                    db, session, hr,
+                    chain=last_state.get("chain", []),
+                    workflow_id=last_state.get("workflow_id"),
+                    product_workspace=last_state.get("product_workspace"),
+                )
+            except Exception as exc:
+                logger.error("Peer handoff failed: %s", exc, exc_info=True)
+                await publisher.send_json({
+                    "type": "error",
+                    "error": f"Ошибка перехода к следующему агенту: {exc}",
+                })
             return False  # This session is done
 
     if completed:
