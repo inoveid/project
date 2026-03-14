@@ -76,8 +76,8 @@ export function buildCanvasLayout(
     const columns = Math.max(Math.ceil(Math.sqrt(agents.length)), 1);
 
     const groupWidth = Math.max(columns * (NODE_WIDTH + NODE_GAP_X) + GROUP_PADDING * 2 - NODE_GAP_X, 300);
-    const rows = Math.ceil(agents.length / columns);
-    const groupHeight = Math.max(rows * (NODE_HEIGHT + NODE_GAP_Y) + GROUP_HEADER_HEIGHT + GROUP_PADDING * 2 - NODE_GAP_Y, 100);
+    // rows calculated after positioning to account for slot skipping
+    let maxRow = Math.max(Math.ceil(agents.length / columns) - 1, 0);
 
     const groupId = `team-${team.id}`;
     const teamWorkflows = workflows.filter((w) => w.team_id === team.id);
@@ -96,16 +96,43 @@ export function buildCanvasLayout(
         validationIssues: validation.issuesByNode.get(team.id) ?? EMPTY_ISSUES,
         isLocked: isTeamLocked,
       } satisfies TeamGroupNodeData,
-      style: { width: groupWidth, height: groupHeight },
+      style: { width: groupWidth, height: 100 }, // will be updated after agent positioning
     });
 
-    agents.forEach((agent, idx) => {
-      const col = idx % columns;
-      const row = Math.floor(idx / columns);
+    // Collect occupied grid slots from agents with saved positions
+    const occupiedSlots = new Set<string>();
+    for (const agent of agents) {
+      if (agent.position_x !== null && agent.position_y !== null) {
+        const col = Math.round((agent.position_x - GROUP_PADDING) / (NODE_WIDTH + NODE_GAP_X));
+        const row = Math.round((agent.position_y - GROUP_HEADER_HEIGHT - GROUP_PADDING) / (NODE_HEIGHT + NODE_GAP_Y));
+        occupiedSlots.add(`${col},${row}`);
+      }
+    }
 
+    let nextFreeSlot = 0;
+
+    agents.forEach((agent) => {
       const hasPosition = agent.position_x !== null && agent.position_y !== null;
-      const x = hasPosition ? agent.position_x! : GROUP_PADDING + col * (NODE_WIDTH + NODE_GAP_X);
-      const y = hasPosition ? agent.position_y! : GROUP_HEADER_HEIGHT + GROUP_PADDING + row * (NODE_HEIGHT + NODE_GAP_Y);
+      let x: number, y: number;
+
+      if (hasPosition) {
+        x = agent.position_x!;
+        y = agent.position_y!;
+        const savedRow = Math.round((y - GROUP_HEADER_HEIGHT - GROUP_PADDING) / (NODE_HEIGHT + NODE_GAP_Y));
+        if (savedRow > maxRow) maxRow = savedRow;
+      } else {
+        // Find next grid slot not occupied by a saved-position agent
+        let col: number, row: number;
+        do {
+          col = nextFreeSlot % columns;
+          row = Math.floor(nextFreeSlot / columns);
+          nextFreeSlot++;
+        } while (occupiedSlots.has(`${col},${row}`));
+
+        x = GROUP_PADDING + col * (NODE_WIDTH + NODE_GAP_X);
+        y = GROUP_HEADER_HEIGHT + GROUP_PADDING + row * (NODE_HEIGHT + NODE_GAP_Y);
+        if (row > maxRow) maxRow = row;
+      }
 
       const isStart = startingAgentIds.has(agent.id);
       const isEnd = !agentsWithOutgoing.has(agent.id) && workflowEdges.some((e) => e.to_agent_id === agent.id);
@@ -128,6 +155,11 @@ export function buildCanvasLayout(
         style: { width: NODE_WIDTH },
       });
     });
+
+    const groupHeight = Math.max((maxRow + 1) * (NODE_HEIGHT + NODE_GAP_Y) + GROUP_HEADER_HEIGHT + GROUP_PADDING * 2 - NODE_GAP_Y, 100);
+    // Update group node style with final height
+    const groupNode = nodes.find(n => n.id === groupId);
+    if (groupNode) groupNode.style = { width: groupWidth, height: groupHeight };
 
     groupOffsetY += groupHeight + GROUP_GAP;
   }
