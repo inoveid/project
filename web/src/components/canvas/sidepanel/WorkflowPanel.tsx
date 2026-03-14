@@ -230,27 +230,30 @@ function WorkflowPromptEditor({
             </button>
           )}
         </div>
-        <div className="space-y-0">
+        <div>
           {steps.map((step, idx) => {
             const isFirst = idx === 0;
             const isLast = idx === steps.length - 1;
             const agentReturns = returnsByFrom.get(step.agent.id) || [];
+            const showLine = !isLast || agentReturns.length > 0;
             return (
               <div key={step.agent.id}>
+                {/* Forward edge card with continuous line */}
                 {step.forwardEdge && (
                   <EdgePromptSection edge={step.forwardEdge} fromAgent={steps[idx - 1]?.agent} toAgent={step.agent}
                     workflowId={workflow.id} onUpdateEdge={onUpdateEdge} onDeleteEdge={onDeleteEdge} forceExpanded={allExpanded} />
                 )}
-                <div className="flex items-start gap-3">
-                  <div className="flex flex-col items-center">
-                    <div className={`w-3 h-3 rounded-full border-2 ${
+                {/* Agent dot + name + content, with continuous line */}
+                <div className="flex gap-3">
+                  <div className="flex flex-col items-center w-3 shrink-0">
+                    <div className={`w-3 h-3 rounded-full border-2 shrink-0 ${
                       isFirst ? "bg-green-500 border-green-600" :
                       isLast && agentReturns.length === 0 ? "bg-red-400 border-red-500" :
                       "bg-blue-500 border-blue-600"
                     }`} />
-                    {(!isLast || agentReturns.length > 0) && <div className="w-px h-4 bg-gray-300 mt-1" />}
+                    {showLine && <div className="w-px flex-1 bg-gray-300" />}
                   </div>
-                  <div className="flex-1 -mt-0.5">
+                  <div className="flex-1 -mt-0.5 pb-2">
                     <button type="button" onClick={() => onSelectAgent?.(step.agent.id)}
                       className="text-sm font-medium text-gray-800 hover:text-blue-600 transition-colors">
                       {step.agent.name}
@@ -266,12 +269,15 @@ function WorkflowPromptEditor({
                       </div>
                     )}
                     {agentReturns.length > 0 && (
-                      <div className="mt-2 mb-2 space-y-2">
+                      <div className="mt-2 space-y-2">
                         {agentReturns.map((re) => (
                           <ReturnEdgeSection key={re.edge.id} returnEdge={re} workflowId={workflow.id}
                             onUpdateEdge={onUpdateEdge} onDeleteEdge={onDeleteEdge} forceExpanded={allExpanded} />
                         ))}
                       </div>
+                    )}
+                    {isLast && agentReturns.length === 0 && (
+                      <p className="text-[10px] text-gray-400 mt-1 italic">конец цепочки</p>
                     )}
                   </div>
                 </div>
@@ -347,7 +353,11 @@ function EdgePromptSection({
         <div className={`rounded border px-2.5 py-1.5 cursor-pointer transition-colors ${expanded ? "bg-blue-50 border-blue-200" : "bg-gray-50 border-gray-200 hover:bg-blue-50 hover:border-blue-200"}`}
           onClick={() => setLocalExpanded(!localExpanded)}>
           <div className="flex items-center gap-2 text-[11px]">
-            {edge.requires_approval ? <span title="Требует одобрения">🔒</span> : <span title="Автоматически">⚡</span>}
+            <button type="button" title={edge.requires_approval ? "Требует одобрения (клик — снять)" : "Автоматически (клик — требовать одобрение)"}
+              onClick={(e) => { e.stopPropagation(); onUpdateEdge(edge.id, workflowId, { requires_approval: !edge.requires_approval }); }}
+              className="hover:scale-110 transition-transform">
+              {edge.requires_approval ? "🔒" : "⚡"}
+            </button>
             <span className="font-medium text-gray-700">{edge.condition || label}</span>
             <span className="text-gray-300 ml-auto">{expanded ? "▲" : "▼"}</span>
           </div>
@@ -409,8 +419,12 @@ function ReturnEdgeSection({
         <span className="text-amber-500 text-xs">↻</span>
         <button type="button" onClick={() => setLocalExpanded(!localExpanded)} className="flex-1 flex items-center gap-1.5 text-left">
           <span className="text-xs text-amber-700 font-medium">{edge.condition || `→ ${toAgent.name}`}</span>
-          {edge.requires_approval && <span className="text-[10px]">🔒</span>}
           <span className="text-amber-300 ml-auto text-[10px]">{expanded ? "▲" : "▼"}</span>
+        </button>
+        <button type="button" title={edge.requires_approval ? "Требует одобрения (клик — снять)" : "Автоматически (клик — требовать одобрение)"}
+          onClick={() => onUpdateEdge(edge.id, workflowId, { requires_approval: !edge.requires_approval })}
+          className="text-[10px] hover:scale-110 transition-transform">
+          {edge.requires_approval ? "🔒" : "⚡"}
         </button>
         <span className="text-gray-300 text-xs">|</span>
         <input type="number" min={1} max={50} value={rounds} onChange={(e) => setRounds(Number(e.target.value))}
