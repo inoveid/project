@@ -23,6 +23,7 @@ export interface TeamGroupNodeData {
   agentCount: number;
   onAddAgent?: (teamId: string) => void;
   onAddWorkflow?: (teamId: string) => void;
+  onTeamSettings?: (teamId: string) => void;
   validationIssues: ValidationIssue[];
   isLocked: boolean;
   [key: string]: unknown;

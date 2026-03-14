@@ -13,7 +13,7 @@ function getBorderClass(data: TeamGroupNodeData): string {
 
 export function TeamGroupNode({ data }: NodeProps) {
   const nodeData = getNodeData<TeamGroupNodeData>(data);
-  const { team, agentCount, onAddAgent, onAddWorkflow, validationIssues, isLocked } = nodeData;
+  const { team, agentCount, onAddAgent, onAddWorkflow, onTeamSettings, validationIssues, isLocked } = nodeData;
   const borderClass = getBorderClass(nodeData);
   const infoIssues = validationIssues.filter((i) => i.type === "info");
 
@@ -47,6 +47,13 @@ export function TeamGroupNode({ data }: NodeProps) {
             onClick={(e) => { e.stopPropagation(); onAddWorkflow?.(team.id); }}
           >
             Workflows
+          </button>
+          <button
+            className="text-xs text-gray-500 border border-gray-200 rounded px-2 py-0.5 hover:bg-gray-100 nopan nodrag"
+            onClick={(e) => { e.stopPropagation(); onTeamSettings?.(team.id); }}
+            title="Настройки команды"
+          >
+            ⚙
           </button>
         </div>
       </div>

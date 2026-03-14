@@ -1,4 +1,4 @@
-import type { Node, Edge } from "@xyflow/react";
+import { MarkerType, type Node, type Edge } from "@xyflow/react";
 import type { Agent, Team, ValidationIssue, Workflow, WorkflowEdge } from "../../types";
 import type { AgentNodeData, TeamGroupNodeData } from "./types";
 
@@ -38,6 +38,7 @@ interface LayoutResult {
 interface LayoutCallbacks {
   onAddAgent?: (teamId: string) => void;
   onAddWorkflow?: (teamId: string) => void;
+  onTeamSettings?: (teamId: string) => void;
 }
 
 interface ValidationContext {
@@ -93,6 +94,7 @@ export function buildCanvasLayout(
         agentCount: agents.length,
         onAddAgent: callbacks.onAddAgent,
         onAddWorkflow: callbacks.onAddWorkflow,
+        onTeamSettings: callbacks.onTeamSettings,
         validationIssues: validation.issuesByNode.get(team.id) ?? EMPTY_ISSUES,
         isLocked: isTeamLocked,
       } satisfies TeamGroupNodeData,
@@ -177,6 +179,7 @@ export function buildCanvasLayout(
         color,
         edgeId: edge.id,
       },
+      markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
       style: { stroke: color, strokeWidth: 2 },
       animated: false,
     });
@@ -210,8 +213,8 @@ export function applyWorkflowFilter(
   return edges.map((edge) => {
     if (selectedEdgeIds.has(edge.id)) {
       const color = workflowColorMap.get(selectedWorkflowId) ?? "#94a3b8";
-      return { ...edge, style: { ...edge.style, stroke: color, strokeWidth: 3, opacity: 1 } };
+      return { ...edge, markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 }, style: { ...edge.style, stroke: color, strokeWidth: 3, opacity: 1 } };
     }
-    return { ...edge, style: { ...edge.style, stroke: "#d1d5db", strokeWidth: 1, opacity: 0.4 } };
+    return { ...edge, markerEnd: { type: MarkerType.ArrowClosed, color: "#d1d5db", width: 16, height: 16 }, style: { ...edge.style, stroke: "#d1d5db", strokeWidth: 1, opacity: 0.4 } };
   });
 }

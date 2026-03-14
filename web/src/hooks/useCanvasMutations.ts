@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { createAgent, updateAgent, deleteAgent } from "../api/agents";
-import { createTeam } from "../api/teams";
+import { createTeam, updateTeam, deleteTeam } from "../api/teams";
 import {
   createWorkflow,
   createWorkflowEdge,
@@ -14,6 +14,7 @@ import type {
   AgentCreate,
   AgentUpdate,
   TeamCreate,
+  TeamUpdate,
   WorkflowCreate,
   WorkflowEdgeCreate,
   WorkflowEdgeUpdate,
@@ -63,6 +64,27 @@ export function useCanvasMutations() {
       addToast({ type: "error", title: "Ошибка создания команды", message: formatError(err) });
     }
   }, [invalidateTeams, addToast]);
+
+  const handleUpdateTeam = useCallback(async (id: string, data: TeamUpdate) => {
+    try {
+      await updateTeam(id, data);
+      invalidateTeams();
+    } catch (err) {
+      addToast({ type: "error", title: "Ошибка обновления команды", message: formatError(err) });
+    }
+  }, [invalidateTeams, addToast]);
+
+  const handleDeleteTeam = useCallback(async (id: string) => {
+    try {
+      await deleteTeam(id);
+      invalidateTeams();
+      invalidateAgents();
+      invalidateWorkflows();
+      invalidateEdges();
+    } catch (err) {
+      addToast({ type: "error", title: "Ошибка удаления команды", message: formatError(err) });
+    }
+  }, [invalidateTeams, invalidateAgents, invalidateWorkflows, invalidateEdges, addToast]);
 
   const handleCreateAgent = useCallback(async (teamId: string, data: AgentCreate) => {
     try {
@@ -160,6 +182,8 @@ export function useCanvasMutations() {
 
   return {
     handleCreateTeam,
+    handleUpdateTeam,
+    handleDeleteTeam,
     handleCreateAgent,
     handleUpdateAgent,
     handleDeleteAgent,

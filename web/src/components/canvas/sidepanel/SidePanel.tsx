@@ -1,16 +1,18 @@
 import { useState, useEffect } from "react";
-import type { Agent, Workflow, WorkflowEdge, AgentUpdate, WorkflowEdgeUpdate, WorkflowUpdate } from "../../../types";
+import type { Agent, Team, Workflow, WorkflowEdge, AgentUpdate, TeamUpdate, WorkflowEdgeUpdate, WorkflowUpdate } from "../../../types";
 import { AgentGeneralTab } from "./AgentGeneralTab";
 import { AgentHandoffTab } from "./AgentHandoffTab";
 import { AgentSubAgentsTab } from "./AgentSubAgentsTab";
 import { EdgePanel } from "./EdgePanel";
 import { WorkflowPanel } from "./WorkflowPanel";
+import { TeamPanel } from "./TeamPanel";
 
 export type SidePanelSelection =
   | { type: "agent"; agentId: string }
   | { type: "agents"; teamId: string; selectedAgentId?: string }
   | { type: "workflows"; teamId: string }
-  | { type: "edge"; edgeId: string };
+  | { type: "edge"; edgeId: string }
+  | { type: "team"; teamId: string };
 
 interface SidePanelProps {
   selection: SidePanelSelection;
@@ -28,6 +30,9 @@ interface SidePanelProps {
   onCreateWorkflow: (teamId: string, data: { name: string; starting_agent_id: string; starting_prompt: string }) => void;
   onDeleteWorkflow: (id: string) => void;
   onCreateAgent: (teamId: string, data: { name: string; system_prompt: string; role: string }) => void;
+  teams: Team[];
+  onUpdateTeam: (id: string, data: TeamUpdate) => void;
+  onDeleteTeam: (id: string) => void;
 }
 
 type AgentTab = "general" | "handoff" | "sub-agents";
@@ -48,6 +53,9 @@ export function SidePanel({
   onCreateWorkflow,
   onDeleteWorkflow,
   onCreateAgent,
+  teams,
+  onUpdateTeam,
+  onDeleteTeam,
 }: SidePanelProps) {
   const [activeTab, setActiveTab] = useState<AgentTab>("general");
 
@@ -92,6 +100,27 @@ export function SidePanel({
             onDeleteWorkflow={onDeleteWorkflow}
             onCreateEdge={onCreateEdge}
             onDeleteEdge={onDeleteEdge}
+          />
+        </div>
+      </PanelShell>
+    );
+  }
+
+  // ── Team settings panel ──
+  if (selection.type === "team") {
+    const team = teams.find((t) => t.id === selection.teamId);
+    if (!team) return null;
+    return (
+      <PanelShell title={team.name} onClose={onClose}>
+        <div className="flex-1 overflow-y-auto p-4">
+          <TeamPanel
+            key={team.id}
+            team={team}
+            onSave={(data) => onUpdateTeam(team.id, data)}
+            onDelete={() => {
+              onDeleteTeam(team.id);
+              onClose();
+            }}
           />
         </div>
       </PanelShell>
@@ -188,6 +217,9 @@ function AgentsPanel({
   onUpdateAgent: (id: string, teamId: string, data: AgentUpdate) => void;
   onDeleteAgent: (id: string, teamId: string) => void;
   onCreateAgent: (teamId: string, data: { name: string; system_prompt: string; role: string }) => void;
+  teams: Team[];
+  onUpdateTeam: (id: string, data: TeamUpdate) => void;
+  onDeleteTeam: (id: string) => void;
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
   onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string, condition?: string) => void;
 }) {

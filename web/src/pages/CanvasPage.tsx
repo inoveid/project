@@ -89,6 +89,10 @@ export function CanvasPage() {
     setPanelSelection({ type: "workflows", teamId });
   }, []);
 
+  const handleTeamSettings = useCallback((teamId: string) => {
+    setPanelSelection({ type: "team", teamId });
+  }, []);
+
   // Build layout
   const { nodes, edges: rawEdges, workflowColorMap } = useMemo(() => {
     if (!teams) return { nodes: [], edges: [], workflowColorMap: new Map<string, string>() };
@@ -104,11 +108,11 @@ export function CanvasPage() {
     const layout = buildCanvasLayout(
       teams, agentsByTeam, allWorkflows, allEdges, colorMap,
       new Set(),
-      { onAddAgent: handleAddAgent, onAddWorkflow: handleAddWorkflow },
+      { onAddAgent: handleAddAgent, onAddWorkflow: handleAddWorkflow, onTeamSettings: handleTeamSettings },
       { issuesByNode, lockedWorkflowIds },
     );
     return { ...layout, workflowColorMap: colorMap };
-  }, [teams, allAgents, allWorkflows, allEdges, handleAddAgent, handleAddWorkflow, issuesByNode, lockedWorkflowIds]);
+  }, [teams, allAgents, allWorkflows, allEdges, handleAddAgent, handleAddWorkflow, handleTeamSettings, issuesByNode, lockedWorkflowIds]);
 
   const edges = useMemo(
     () => applyWorkflowFilter(rawEdges, selectedWorkflowId, allEdges, workflowColorMap),
@@ -280,6 +284,14 @@ export function CanvasPage() {
             }}
             onDeleteWorkflow={(id) => {
               void mutations.handleDeleteWorkflow(id);
+            }}
+            teams={teams ?? []}
+            onUpdateTeam={(id, data) => {
+              void mutations.handleUpdateTeam(id, data);
+            }}
+            onDeleteTeam={(id) => {
+              void mutations.handleDeleteTeam(id);
+              setPanelSelection(null);
             }}
             onCreateAgent={(teamId, data) => {
               void mutations.handleCreateAgent(teamId, data);
