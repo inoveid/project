@@ -146,12 +146,12 @@ export function WorkflowPanel({
 
       {!showCreateForm && teamWorkflows.length > 0 && (
         <>
-          {teamWorkflows.length > 1 ? (
-            <select value={selectedWorkflowId} onChange={(e) => { setSelectedWorkflowId(e.target.value); setShowDeleteConfirm(false); }}
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm">
-              {teamWorkflows.map((w) => (<option key={w.id} value={w.id}>{w.name}</option>))}
-            </select>
-          ) : null}
+          <WorkflowSelector
+            workflows={teamWorkflows}
+            selectedId={selectedWorkflowId}
+            onSelect={(id) => { setSelectedWorkflowId(id); setShowDeleteConfirm(false); }}
+            onRename={(name) => { if (selectedWorkflow) onUpdateWorkflow(selectedWorkflow.id, { name }); }}
+          />
           {selectedWorkflow && (
             <WorkflowPromptEditor key={selectedWorkflow.id} workflow={selectedWorkflow} edges={wfEdges} agents={agents}
               onUpdateEdge={onUpdateEdge} onUpdateWorkflow={onUpdateWorkflow} onCreateEdge={onCreateEdge} onDeleteEdge={onDeleteEdge}
@@ -167,8 +167,56 @@ export function WorkflowPanel({
   );
 }
 
+function WorkflowSelector({
+  workflows, selectedId, onSelect, onRename,
+}: {
+  workflows: Workflow[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+  onRename: (name: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const selected = workflows.find(w => w.id === selectedId);
+  const [editName, setEditName] = useState(selected?.name ?? "");
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)}
+          autoFocus onKeyDown={(e) => {
+            if (e.key === "Enter") { const n = editName.trim(); if (n) { onRename(n); setEditing(false); } }
+            if (e.key === "Escape") setEditing(false);
+          }}
+          onBlur={() => { const n = editName.trim(); if (n && n !== selected?.name) onRename(n); setEditing(false); }}
+          className="flex-1 border border-blue-300 rounded px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+      </div>
+    );
+  }
+
+  if (workflows.length === 1) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <span className="flex-1 text-sm font-medium text-gray-800 truncate">{selected?.name}</span>
+        <button type="button" onClick={() => { setEditName(selected?.name ?? ""); setEditing(true); }}
+          className="text-[11px] text-gray-400 hover:text-blue-600" title="Переименовать">✎</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <select value={selectedId} onChange={(e) => onSelect(e.target.value)}
+        className="flex-1 border border-gray-300 rounded px-3 py-1.5 text-sm">
+        {workflows.map(w => (<option key={w.id} value={w.id}>{w.name}</option>))}
+      </select>
+      <button type="button" onClick={() => { setEditName(selected?.name ?? ""); setEditing(true); }}
+        className="text-[11px] text-gray-400 hover:text-blue-600" title="Переименовать">✎</button>
+    </div>
+  );
+}
+
 function WorkflowPromptEditor({
-  workflow, edges, agents, onUpdateEdge, onUpdateWorkflow, onCreateEdge, onDeleteEdge, onSelectAgent, showNameInput = true,
+  workflow, edges, agents, onUpdateEdge, onUpdateWorkflow, onCreateEdge, onDeleteEdge, onSelectAgent,
 }: {
   workflow: Workflow; edges: WorkflowEdge[]; agents: Agent[];
   onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
@@ -176,12 +224,10 @@ function WorkflowPromptEditor({
   onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string, condition?: string, promptTemplate?: string) => void;
   onDeleteEdge: (edgeId: string) => void;
   onSelectAgent?: (agentId: string) => void;
-  showNameInput?: boolean;
 }) {
   const teamAgents = agents.filter(a => a.team_id === workflow.team_id);
   const { steps, returnEdges } = buildChain(workflow, edges, agents);
   const [startingPrompt, setStartingPrompt] = useState(workflow.starting_prompt);
-  const [workflowName, setWorkflowName] = useState(workflow.name);
   const [showAddEdge, setShowAddEdge] = useState(false);
   const [newEdgeFrom, setNewEdgeFrom] = useState("");
   const [newEdgeTo, setNewEdgeTo] = useState("");
@@ -192,11 +238,6 @@ function WorkflowPromptEditor({
   const handleStartingPromptBlur = useCallback(() => {
     if (startingPrompt !== workflow.starting_prompt) onUpdateWorkflow(workflow.id, { starting_prompt: startingPrompt });
   }, [startingPrompt, workflow, onUpdateWorkflow]);
-
-  const handleNameBlur = useCallback(() => {
-    const trimmed = workflowName.trim();
-    if (trimmed && trimmed !== workflow.name) onUpdateWorkflow(workflow.id, { name: trimmed });
-  }, [workflowName, workflow, onUpdateWorkflow]);
 
   const handleAddEdge = () => {
     if (newEdgeFrom && newEdgeTo && newEdgeFrom !== newEdgeTo) {
@@ -218,14 +259,6 @@ function WorkflowPromptEditor({
 
   return (
     <div className="space-y-4">
-      {showNameInput && (
-        <div>
-          <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide mb-2">Название</p>
-          <input type="text" value={workflowName} onChange={(e) => setWorkflowName(e.target.value)} onBlur={handleNameBlur}
-            className="w-full border border-gray-300 rounded px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
-        </div>
-      )}
-
       <div>
         <div className="flex items-center justify-between mb-3">
           <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Цепочка</p>
