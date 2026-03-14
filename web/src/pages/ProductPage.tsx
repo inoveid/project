@@ -258,16 +258,6 @@ export function ProductPage() {
               <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Git</p>
             </div>
             <div className="flex-1 overflow-y-auto">
-              {/* Branch */}
-              <div className="px-3 py-2 border-b">
-                <p className="text-[10px] text-gray-400 mb-1">Ветка</p>
-                <p className="text-xs font-mono text-gray-800">{gitInfo.branch}</p>
-                {gitInfo.branches && gitInfo.branches.length > 1 && (
-                  <p className="text-[10px] text-gray-400 mt-1">
-                    {gitInfo.branches.length} веток
-                  </p>
-                )}
-              </div>
               {/* Commits */}
               <div className="px-3 py-2">
                 <p className="text-[10px] text-gray-400 mb-2">Последние коммиты</p>
