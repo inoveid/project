@@ -1,14 +1,13 @@
 import { useState } from "react";
 import type { Team, TeamUpdate } from "../../../types";
-import { DeleteConfirm } from "./DeleteConfirm";
 
 interface TeamPanelProps {
   team: Team;
   onSave: (data: TeamUpdate) => void;
-  onDelete: () => void;
+  onDelete?: () => void;
 }
 
-export function TeamPanel({ team, onSave, onDelete }: TeamPanelProps) {
+export function TeamPanel({ team, onSave }: TeamPanelProps) {
   const [name, setName] = useState(team.name);
   const [description, setDescription] = useState(team.description ?? "");
 
@@ -49,7 +48,6 @@ export function TeamPanel({ team, onSave, onDelete }: TeamPanelProps) {
         <span>Создана: {new Date(team.created_at).toLocaleDateString("ru")}</span>
       </div>
 
-      <DeleteConfirm entityName={team.name} onConfirm={onDelete} />
     </div>
   );
 }

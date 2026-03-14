@@ -112,7 +112,12 @@ export function useCanvasMutations() {
       invalidateTeams();
       invalidateEdges();
     } catch (err) {
-      addToast({ type: "error", title: "Ошибка удаления агента", message: formatError(err) });
+      const msg = formatError(err);
+      if (msg.includes("409")) {
+        addToast({ type: "warning", title: "Невозможно удалить агента", message: "Агент используется в активном workflow. Завершите задачу перед удалением." });
+      } else {
+        addToast({ type: "error", title: "Ошибка удаления агента", message: msg });
+      }
     }
   }, [invalidateAgents, invalidateTeams, invalidateEdges, addToast]);
 

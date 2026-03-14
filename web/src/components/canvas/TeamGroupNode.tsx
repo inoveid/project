@@ -49,11 +49,10 @@ export function TeamGroupNode({ data }: NodeProps) {
             Workflows
           </button>
           <button
-            className="text-xs text-gray-500 border border-gray-200 rounded px-2 py-0.5 hover:bg-gray-100 nopan nodrag"
+            className="text-xs text-blue-600 border border-blue-200 rounded px-2 py-0.5 hover:bg-blue-100 nopan nodrag"
             onClick={(e) => { e.stopPropagation(); onTeamSettings?.(team.id); }}
-            title="Настройки команды"
           >
-            ⚙
+            Team
           </button>
         </div>
       </div>

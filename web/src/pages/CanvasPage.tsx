@@ -132,11 +132,18 @@ export function CanvasPage() {
     }, [allAgents],
   );
 
-  // Edge click → side panel
+  // Edge click → open workflow panel for this edge
   const handleEdgeClick = useCallback(
     (_event: React.MouseEvent, edge: { id: string }) => {
-      setPanelSelection({ type: "edge", edgeId: edge.id });
-    }, [],
+      const rawEdgeId = stripNodePrefix(edge.id, "edge-");
+      const edgeData = allEdges.find((e) => e.id === rawEdgeId);
+      if (edgeData) {
+        const workflow = allWorkflows.find((w) => w.id === edgeData.workflow_id);
+        if (workflow) {
+          setPanelSelection({ type: "workflows", teamId: workflow.team_id });
+        }
+      }
+    }, [allEdges, allWorkflows],
   );
 
   // Drag & drop → debounced position save (allowed even when locked)

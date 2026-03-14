@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type { Agent, Workflow, WorkflowEdge, WorkflowEdgeUpdate, WorkflowUpdate } from "../../../types";
 import { PromptEditor, type PromptVariable } from "../../PromptEditor";
 
@@ -84,7 +84,8 @@ function buildChain(
 export function WorkflowPanel({
   teamId, workflows, workflowEdges, agents,
   onUpdateEdge, onUpdateWorkflow, onCreateWorkflow, onDeleteWorkflow, onCreateEdge, onDeleteEdge,
-}: WorkflowPanelProps) {
+  renderHeaderButtons,
+}: WorkflowPanelProps & { renderHeaderButtons?: (buttons: React.ReactNode) => void }) {
   const teamWorkflows = workflows.filter((w) => w.team_id === teamId);
   const teamAgents = agents.filter((a) => a.team_id === teamId);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(teamWorkflows[0]?.id ?? "");
@@ -94,22 +95,27 @@ export function WorkflowPanel({
   const selectedWorkflow = teamWorkflows.find((w) => w.id === selectedWorkflowId);
   const wfEdges = workflowEdges.filter((e) => e.workflow_id === selectedWorkflowId);
 
+  useEffect(() => {
+    if (!renderHeaderButtons) return;
+    if (teamWorkflows.length === 0) { renderHeaderButtons(null); return; }
+    renderHeaderButtons(
+      <>
+        <button type="button" onClick={() => { setShowCreateForm(v => !v); setShowDeleteConfirm(false); }}
+          className="text-[11px] text-blue-600 border border-blue-200 rounded px-2 py-0.5 hover:bg-blue-50">
+          {showCreateForm ? "Отмена" : "Добавить"}
+        </button>
+        {selectedWorkflow && !showCreateForm && (
+          <button type="button" onClick={() => setShowDeleteConfirm(v => !v)}
+            className="text-[11px] text-red-500 border border-red-200 rounded px-2 py-0.5 hover:bg-red-50">
+            Удалить
+          </button>
+        )}
+      </>
+    );
+  }, [showCreateForm, showDeleteConfirm, selectedWorkflow, teamWorkflows.length, renderHeaderButtons]);
+
   return (
     <div className="p-4 space-y-4">
-      {teamWorkflows.length > 0 && (
-        <div className="flex items-center gap-1">
-          <button type="button" onClick={() => { setShowCreateForm(!showCreateForm); setShowDeleteConfirm(false); }}
-            className="text-[11px] text-blue-600 border border-blue-200 rounded px-2 py-0.5 hover:bg-blue-50">
-            {showCreateForm ? "Отмена" : "Добавить"}
-          </button>
-          {selectedWorkflow && !showCreateForm && (
-            <button type="button" onClick={() => setShowDeleteConfirm(!showDeleteConfirm)}
-              className="text-[11px] text-red-500 border border-red-200 rounded px-2 py-0.5 hover:bg-red-50">
-              Удалить
-            </button>
-          )}
-        </div>
-      )}
 
       {showDeleteConfirm && selectedWorkflow && (
         <div className="p-3 border border-red-200 rounded bg-red-50 space-y-2">

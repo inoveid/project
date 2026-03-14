@@ -3,7 +3,6 @@ import type { Agent, Team, Workflow, WorkflowEdge, AgentUpdate, TeamUpdate, Work
 import { AgentGeneralTab } from "./AgentGeneralTab";
 import { AgentHandoffTab } from "./AgentHandoffTab";
 import { AgentSubAgentsTab } from "./AgentSubAgentsTab";
-import { EdgePanel } from "./EdgePanel";
 import { WorkflowPanel } from "./WorkflowPanel";
 import { TeamPanel } from "./TeamPanel";
 
@@ -87,43 +86,32 @@ export function SidePanel({
   // ── Workflows panel ──
   if (selection.type === "workflows") {
     return (
-      <PanelShell title="Workflows" onClose={onClose}>
-        <div className="flex-1 overflow-y-auto">
-          <WorkflowPanel
-            teamId={selection.teamId}
-            workflows={workflows}
-            workflowEdges={workflowEdges}
-            agents={agents}
-            onUpdateEdge={onUpdateEdge}
-            onUpdateWorkflow={onUpdateWorkflow}
-            onCreateWorkflow={onCreateWorkflow}
-            onDeleteWorkflow={onDeleteWorkflow}
-            onCreateEdge={onCreateEdge}
-            onDeleteEdge={onDeleteEdge}
-          />
-        </div>
-      </PanelShell>
+      <WorkflowsPanelWrapper
+        teamId={selection.teamId}
+        workflows={workflows}
+        workflowEdges={workflowEdges}
+        agents={agents}
+        onClose={onClose}
+        onUpdateEdge={onUpdateEdge}
+        onUpdateWorkflow={onUpdateWorkflow}
+        onCreateWorkflow={onCreateWorkflow}
+        onDeleteWorkflow={onDeleteWorkflow}
+        onCreateEdge={onCreateEdge}
+        onDeleteEdge={onDeleteEdge}
+      />
     );
   }
 
   // ── Team settings panel ──
   if (selection.type === "team") {
-    const team = teams.find((t) => t.id === selection.teamId);
-    if (!team) return null;
     return (
-      <PanelShell title={team.name} onClose={onClose}>
-        <div className="flex-1 overflow-y-auto p-4">
-          <TeamPanel
-            key={team.id}
-            team={team}
-            onSave={(data) => onUpdateTeam(team.id, data)}
-            onDelete={() => {
-              onDeleteTeam(team.id);
-              onClose();
-            }}
-          />
-        </div>
-      </PanelShell>
+      <TeamPanelWrapper
+        teamId={selection.teamId}
+        teams={teams}
+        onClose={onClose}
+        onUpdateTeam={onUpdateTeam}
+        onDeleteTeam={onDeleteTeam}
+      />
     );
   }
 
@@ -171,26 +159,8 @@ export function SidePanel({
     );
   }
 
-  // ── Edge selection ──
-  const rawEdgeId = selection.edgeId.replace(/^edge-/, "");
-  const edge = workflowEdges.find((e) => e.id === rawEdgeId);
-  if (!edge) return null;
-
-  const isEdgeLocked = lockedWorkflowIds.has(edge.workflow_id);
-
-  return (
-    <PanelShell title="Edge settings" onClose={onClose}>
-      <div className="flex-1 overflow-y-auto p-4">
-        <EdgePanel
-          key={edge.id}
-          edge={edge}
-          onSave={(data) => onUpdateEdge(edge.id, edge.workflow_id, data)}
-          onDelete={() => onDeleteEdge(edge.id)}
-          readOnly={isEdgeLocked}
-        />
-      </div>
-    </PanelShell>
-  );
+  // ── Edge selection (redirected to workflow panel) ──
+  return null;
 }
 
 // ── Agents panel with selector ──────────────────────────────────────────────
@@ -450,6 +420,103 @@ function AgentCreateForm({
         Создать
       </button>
     </form>
+  );
+}
+
+// ── Workflows panel wrapper ──────────────────────────────────────────────────
+
+function WorkflowsPanelWrapper({
+  teamId, workflows, workflowEdges, agents, onClose,
+  onUpdateEdge, onUpdateWorkflow, onCreateWorkflow, onDeleteWorkflow, onCreateEdge, onDeleteEdge,
+}: {
+  teamId: string;
+  workflows: Workflow[];
+  workflowEdges: WorkflowEdge[];
+  agents: Agent[];
+  onClose: () => void;
+  onUpdateEdge: (edgeId: string, workflowId: string, data: WorkflowEdgeUpdate) => void;
+  onUpdateWorkflow: (workflowId: string, data: WorkflowUpdate) => void;
+  onCreateWorkflow: (teamId: string, data: { name: string; starting_agent_id: string; starting_prompt: string }) => void;
+  onDeleteWorkflow: (id: string) => void;
+  onCreateEdge: (workflowId: string, fromAgentId: string, toAgentId: string, condition?: string) => void;
+  onDeleteEdge: (edgeId: string) => void;
+}) {
+  const [headerButtons, setHeaderButtons] = useState<React.ReactNode>(null);
+  return (
+    <PanelShell title="Workflows" onClose={onClose} headerButtons={headerButtons}>
+      <div className="flex-1 overflow-y-auto">
+        <WorkflowPanel
+          teamId={teamId}
+          workflows={workflows}
+          workflowEdges={workflowEdges}
+          agents={agents}
+          onUpdateEdge={onUpdateEdge}
+          onUpdateWorkflow={onUpdateWorkflow}
+          onCreateWorkflow={onCreateWorkflow}
+          onDeleteWorkflow={onDeleteWorkflow}
+          onCreateEdge={onCreateEdge}
+          onDeleteEdge={onDeleteEdge}
+          renderHeaderButtons={setHeaderButtons}
+        />
+      </div>
+    </PanelShell>
+  );
+}
+
+// ── Team panel wrapper ───────────────────────────────────────────────────────
+
+function TeamPanelWrapper({
+  teamId, teams, onClose, onUpdateTeam, onDeleteTeam,
+}: {
+  teamId: string;
+  teams: Team[];
+  onClose: () => void;
+  onUpdateTeam: (id: string, data: TeamUpdate) => void;
+  onDeleteTeam: (id: string) => void;
+}) {
+  const team = teams.find((t) => t.id === teamId);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  if (!team) return null;
+
+  return (
+    <PanelShell
+      title={team.name}
+      onClose={onClose}
+      headerButtons={
+        <button
+          type="button"
+          onClick={() => setShowDeleteConfirm(!showDeleteConfirm)}
+          className="text-[11px] text-red-500 border border-red-200 rounded px-2 py-0.5 hover:bg-red-50"
+        >
+          Удалить
+        </button>
+      }
+    >
+      <div className="flex-1 overflow-y-auto p-4">
+        {showDeleteConfirm && (
+          <div className="p-3 border border-red-200 rounded bg-red-50 space-y-2 mb-4">
+            <p className="text-sm text-red-700">Удалить команду <b>{team.name}</b>? Все агенты и связи будут удалены.</p>
+            <div className="flex gap-2">
+              <button type="button" className="text-sm bg-red-600 text-white rounded px-3 py-1 hover:bg-red-700"
+                onClick={() => { onDeleteTeam(team.id); onClose(); }}>
+                Да, удалить
+              </button>
+              <button type="button" className="text-sm text-gray-500 hover:text-gray-700"
+                onClick={() => setShowDeleteConfirm(false)}>
+                Отмена
+              </button>
+            </div>
+          </div>
+        )}
+        <TeamPanel
+          key={team.id}
+          team={team}
+          onSave={(data) => onUpdateTeam(team.id, data)}
+          onDelete={() => { onDeleteTeam(team.id); onClose(); }}
+        />
+      </div>
+    </PanelShell>
   );
 }
 
