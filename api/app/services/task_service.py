@@ -248,6 +248,26 @@ async def update_task_status(
 
                 await db.commit()
                 logger.info("Auto-created session %s for task %s (agent %s)", session.id, task.id, workflow.starting_agent_id)
+
+                # Send initial command and notify worker
+                from app.services.event_bus import publish_command
+                from app.services.redis_service import get_redis
+                import json
+
+                sid = str(session.id)
+                task_prompt = prompt or task.description or task.title or "Start task"
+                await publish_command(sid, {
+                    "type": "message",
+                    "content": task_prompt,
+                    "saved": bool(prompt),
+                })
+
+                r = get_redis()
+                await r.publish("worker:sessions", json.dumps({
+                    "action": "start",
+                    "session_id": sid,
+                }))
+                logger.info("Notified worker to start session %s", sid)
         except Exception:
             logger.exception("Failed to auto-create session for task %s", task.id)
 
