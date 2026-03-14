@@ -36,6 +36,7 @@ from app.services.handoff_server import (
     parse_handoff_from_text,
 )
 from app.services.runtime import runtime
+from app.services.workspace_service import workspace_service
 from app.services.session_service import (
     SessionNotFoundError,
     add_message,
@@ -85,7 +86,9 @@ class WorkflowState(TypedDict):
     gateway_approved: bool | None
     product_workspace: str | None
     messages: list
-    isolation_mode: str
+    task_worktree_path: str | None
+    mr_diff: str | None
+    mr_approved: bool | None
 
 
 # ---------------------------------------------------------------------------
@@ -197,13 +200,7 @@ async def run_agent_node(state: WorkflowState, config: RunnableConfig) -> dict:
 
         # Run sub-agents in parallel with concurrency limit
         session = await get_session(db, session_id)
-        # Check if parent session has a worktree (isolation)
-        from app.services.runtime.isolated_runner import isolated_runner
-        parent_worktree_info = isolated_runner.get_isolation_info(session_id)
-        if parent_worktree_info and parent_worktree_info.get("worktree_path"):
-            workdir = parent_worktree_info["worktree_path"]
-        else:
-            workdir = state.get("product_workspace") or settings.workspace_path
+        workdir = state.get("task_worktree_path") or state.get("product_workspace") or settings.workspace_path
         max_concurrent = (agent.config or {}).get("max_sub_agents", 3) if agent else 3
 
         results = await run_spawn_requests(
@@ -316,6 +313,29 @@ async def auto_handoff_node(state: WorkflowState, config: RunnableConfig) -> dic
 
 async def complete_node(state: WorkflowState, config: RunnableConfig) -> dict:
     """Task completed by agent."""
+    cfg = _get_configurable(config)
+    ws: EventSender = cfg["websocket"]
+
+    # Check if task has a worktree — if so, generate MR diff
+    task_id = state.get("task_id")
+    if task_id and state.get("task_worktree_path"):
+        try:
+            diff = await workspace_service.get_task_diff(task_id)
+            if diff.strip():
+                # Publish MR event for frontend
+                await ws.send_json({
+                    "type": "mr_ready",
+                    "task_id": task_id,
+                    "diff_preview": diff[:2000],
+                    "diff_lines": len(diff.splitlines()),
+                })
+                return {
+                    "mr_diff": diff,
+                    "mr_approved": None,  # waiting for approval
+                }
+        except Exception as exc:
+            logger.warning("Failed to get task diff: %s", exc)
+
     hr = state["handoff_result"]
     summary = hr.get("tool_args", {}).get("summary", "") if hr else ""
     await publish_notification("task_completed", {
@@ -324,6 +344,36 @@ async def complete_node(state: WorkflowState, config: RunnableConfig) -> dict:
         "task_id": state.get("task_id", ""),
     })
     return {"handoff_result": None, "gateway_approved": None}
+
+
+
+async def mr_gate_node(state: WorkflowState, config: RunnableConfig) -> dict:
+    """HITL gate for MR approval. Pauses until user approves or rejects."""
+    decision = interrupt({
+        "type": "mr_approval",
+        "task_id": state.get("task_id"),
+        "diff_preview": (state.get("mr_diff") or "")[:2000],
+    })
+
+    approved = decision.get("approved", False)
+    comment = decision.get("comment", "")
+
+    if approved:
+        # Merge task branch
+        task_id = state.get("task_id")
+        if task_id:
+            try:
+                await workspace_service.merge_task_branch(task_id)
+                await workspace_service.cleanup_task(task_id)
+            except Exception as exc:
+                logger.error("MR merge failed: %s", exc)
+        return {"mr_approved": True}
+    else:
+        # Rejected — return to first agent with comment
+        return {
+            "mr_approved": False,
+            "task": f"MR отклонён. Комментарий: {comment}\n\nВнеси исправления.",
+        }
 
 
 async def blocked_node(state: WorkflowState, config: RunnableConfig) -> dict:
@@ -386,6 +436,19 @@ def route_after_gate(state: WorkflowState) -> Literal["run_agent", "__end__"]:
     return END
 
 
+
+def route_after_complete(state: WorkflowState) -> str:
+    if state.get("mr_diff") and state.get("mr_approved") is None:
+        return "mr_gate"
+    return END
+
+
+def route_after_mr_gate(state: WorkflowState) -> str:
+    if state.get("mr_approved"):
+        return END
+    return "run_agent"  # rejected, go back to first agent
+
+
 # ---------------------------------------------------------------------------
 # Graph builder
 # ---------------------------------------------------------------------------
@@ -399,13 +462,15 @@ def build_graph(checkpointer: AsyncPostgresSaver):
     graph.add_node("auto_handoff", auto_handoff_node)
     graph.add_node("complete", complete_node)
     graph.add_node("blocked", blocked_node)
+    graph.add_node("mr_gate", mr_gate_node)
 
     graph.add_edge(START, "run_agent")
     graph.add_conditional_edges("run_agent", route_after_agent)
     graph.add_edge("notify_handoff", "gate")
     graph.add_conditional_edges("gate", route_after_gate)
     graph.add_edge("auto_handoff", END)
-    graph.add_edge("complete", END)
+    graph.add_conditional_edges("complete", route_after_complete)
+    graph.add_conditional_edges("mr_gate", route_after_mr_gate)
     graph.add_edge("blocked", END)
 
     return graph.compile(checkpointer=checkpointer)
