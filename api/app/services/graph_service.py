@@ -89,6 +89,7 @@ class WorkflowState(TypedDict):
     task_worktree_path: str | None
     mr_diff: str | None
     mr_approved: bool | None
+    auto_merge: bool
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +330,19 @@ async def complete_node(state: WorkflowState, config: RunnableConfig) -> dict:
                     "diff_preview": diff[:2000],
                     "diff_lines": len(diff.splitlines()),
                 })
+                if state.get("auto_merge"):
+                    # Auto-merge: skip MR gate
+                    try:
+                        await workspace_service.merge_task_branch(task_id)
+                        await workspace_service.cleanup_task(task_id)
+                    except Exception as merge_exc:
+                        logger.warning("Auto-merge failed: %s", merge_exc)
+                    await publish_notification("task_completed", {
+                        "agent_name": state["current_agent_name"],
+                        "summary": "Auto-merged task branch",
+                        "task_id": task_id,
+                    })
+                    return {"handoff_result": None, "gateway_approved": None}
                 return {
                     "mr_diff": diff,
                     "mr_approved": None,  # waiting for approval

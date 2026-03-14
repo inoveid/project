@@ -10,6 +10,7 @@ class WorkflowCreate(BaseModel):
     starting_agent_id: uuid.UUID
     starting_prompt: str = Field(..., min_length=1)
     isolation_mode: str = Field("none", pattern="^(none|worktree)$")
+    auto_merge: bool = False
 
 
 class WorkflowUpdate(BaseModel):
@@ -18,6 +19,7 @@ class WorkflowUpdate(BaseModel):
     starting_agent_id: uuid.UUID | None = None
     starting_prompt: str | None = Field(None, min_length=1)
     isolation_mode: str | None = Field(None, pattern="^(none|worktree)$")
+    auto_merge: bool | None = None
 
 
 class WorkflowRead(BaseModel):
@@ -28,6 +30,7 @@ class WorkflowRead(BaseModel):
     starting_agent_id: uuid.UUID
     starting_prompt: str
     isolation_mode: str
+    auto_merge: bool
     created_at: datetime
     updated_at: datetime
 

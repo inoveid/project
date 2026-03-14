@@ -179,13 +179,15 @@ Description: {desc}"""
             task_worktree_path = workspace_service.get_task_worktree_path(str(session.task_id))
 
         # If agent can write files, no worktree yet, and isolation is enabled — create one
-        # Resolve isolation_mode from workflow settings
+        # Resolve isolation_mode and auto_merge from workflow settings
         isolation_mode = "none"
+        auto_merge = False
         if workflow_id:
             from app.models.workflow import Workflow as WorkflowModel
             wf = await db.get(WorkflowModel, workflow_id)
             if wf:
                 isolation_mode = wf.isolation_mode or "none"
+                auto_merge = wf.auto_merge
 
         writing_tools = {"Write", "Edit", "Bash"}
         agent_tools = set(agent.allowed_tools or [])
@@ -267,6 +269,7 @@ Description: {desc}"""
                     "product_workspace": product_workspace,
                     "gateway_approved": None,
                     "task_worktree_path": task_worktree_path,
+                    "auto_merge": auto_merge,
                     "messages": [],
                 }
 

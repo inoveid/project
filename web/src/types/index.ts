@@ -387,6 +387,7 @@ export interface Workflow {
   starting_agent_id: string;
   starting_prompt: string;
   isolation_mode: "none" | "worktree";
+  auto_merge: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -404,6 +405,7 @@ export interface WorkflowUpdate {
   starting_agent_id?: string;
   starting_prompt?: string;
   isolation_mode?: "none" | "worktree";
+  auto_merge?: boolean;
 }
 
 export interface WorkflowEdge {
