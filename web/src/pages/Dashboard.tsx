@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { useBusinesses } from '../hooks/useBusinesses';
 import { useProducts } from '../hooks/useProducts';
@@ -8,7 +9,6 @@ import { KanbanColumn } from '../components/tasks/KanbanColumn';
 import { TaskCard } from '../components/tasks/TaskCard';
 import { CreateTaskModal } from '../components/tasks/CreateTaskModal';
 import { FilterBar } from '../components/tasks/FilterBar';
-import { TaskModal } from '../components/tasks/TaskModal';
 import { useToast } from '../hooks/useToast';
 import { useAuthStatus } from '../hooks/useAuth';
 import { isTransitionAllowed, getTransitionError } from '../components/tasks/statusConfig';
@@ -66,7 +66,6 @@ export function Dashboard() {
   const [showDone, setShowDone] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [activeDragTask, setActiveDragTask] = useState<Task | null>(null);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   const { data: businesses } = useBusinesses();
   const { data: products } = useProducts(filters.businessId ?? '');
@@ -76,6 +75,8 @@ export function Dashboard() {
   const updateTaskStatus = useUpdateTaskStatus();
   const deleteTaskMutation = useDeleteTask();
   const { data: authStatus } = useAuthStatus();
+  const navigate = useNavigate();
+  const location = useLocation();
   const isAuthed = authStatus?.logged_in ?? false;
 
   const sensors = useSensors(
@@ -169,7 +170,7 @@ export function Dashboard() {
   }
 
   function handleTaskClick(task: Task) {
-    setSelectedTaskId(task.id);
+    navigate(`/tasks/${task.id}`, { state: { background: location } });
   }
 
   const filtersSelected = !!filters.businessId && !!filters.productId;
@@ -232,12 +233,6 @@ export function Dashboard() {
         />
       )}
 
-      {selectedTaskId && (
-        <TaskModal
-          taskId={selectedTaskId}
-          onClose={() => setSelectedTaskId(null)}
-        />
-      )}
 
     </div>
   );
