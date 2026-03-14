@@ -125,11 +125,11 @@ async def _run_session(
                 task = session.task
                 if task.title or task.description:
                     desc = (task.description or "")[:500]
-                    system_prompt += f"
+                    system_prompt += f"""
 
 ## Current Task
 Title: {task.title or 'N/A'}
-Description: {desc}"
+Description: {desc}"""
 
                 if task.workflow_id:
                     workflow_id = task.workflow_id
