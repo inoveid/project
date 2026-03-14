@@ -1,9 +1,33 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import Editor, { type Monaco } from '@monaco-editor/react';
 import { getProduct } from '../api/products';
 import { getFileTree, readFile, writeFile, getGitInfo, checkoutBranch, getCommitDetail } from '../api/products';
-import type { FileEntry, GitInfo, CommitDetail } from '../api/products';
+import type { FileEntry, CommitDetail } from '../api/products';
+
+// Map file extension to Monaco language
+function getLanguage(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase() ?? '';
+  const map: Record<string, string> = {
+    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+    py: 'python', json: 'json', md: 'markdown', html: 'html', css: 'css',
+    scss: 'scss', less: 'less', yaml: 'yaml', yml: 'yaml', xml: 'xml',
+    sql: 'sql', sh: 'shell', bash: 'shell', zsh: 'shell', dockerfile: 'dockerfile',
+    rs: 'rust', go: 'go', java: 'java', kt: 'kotlin', rb: 'ruby',
+    php: 'php', c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp',
+    toml: 'ini', ini: 'ini', env: 'ini', gitignore: 'plaintext',
+    svg: 'xml', graphql: 'graphql', gql: 'graphql',
+  };
+  return map[ext] || 'plaintext';
+}
+
+interface OpenTab {
+  path: string;
+  content: string;
+  originalContent: string;
+  language: string;
+}
 
 export function ProductPage() {
   const { productId } = useParams<{ productId: string }>();
@@ -18,11 +42,10 @@ export function ProductPage() {
   });
 
   const [currentPath, setCurrentPath] = useState('');
-  const [openFile, setOpenFile] = useState<string | null>(null);
-  const [fileContent, setFileContent] = useState('');
-  const [modified, setModified] = useState(false);
+  const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
+  const [activeTab, setActiveTab] = useState<string | null>(null);
   const [selectedCommit, setSelectedCommit] = useState<CommitDetail | null>(null);
-  const [loadingCommit, setLoadingCommit] = useState(false);
+  const editorRef = useRef<any>(null);
 
   const { data: files } = useQuery({
     queryKey: ['product-files', id, currentPath],
@@ -37,23 +60,13 @@ export function ProductPage() {
     refetchInterval: 10000,
   });
 
-  const { data: fileData } = useQuery({
-    queryKey: ['product-file', id, openFile],
-    queryFn: () => readFile(id, openFile!),
-    enabled: !!id && !!openFile,
-  });
-
-  useEffect(() => {
-    if (fileData) {
-      setFileContent(fileData.content);
-      setModified(false);
-    }
-  }, [fileData]);
-
   const saveMutation = useMutation({
-    mutationFn: () => writeFile(id, openFile!, fileContent),
-    onSuccess: () => {
-      setModified(false);
+    mutationFn: ({ path, content }: { path: string; content: string }) =>
+      writeFile(id, path, content),
+    onSuccess: (_, { path, content }) => {
+      setOpenTabs(prev => prev.map(t =>
+        t.path === path ? { ...t, originalContent: content } : t
+      ));
       queryClient.invalidateQueries({ queryKey: ['product-git', id] });
     },
   });
@@ -63,37 +76,73 @@ export function ProductPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['product-git', id] });
       queryClient.invalidateQueries({ queryKey: ['product-files', id] });
-      queryClient.invalidateQueries({ queryKey: ['product-file', id] });
-      setOpenFile(null);
+      setOpenTabs([]);
+      setActiveTab(null);
       setSelectedCommit(null);
     },
   });
 
-  const handleFileClick = (entry: FileEntry) => {
+  // Open file in a tab
+  const openFileInTab = useCallback(async (entry: FileEntry) => {
     if (entry.type === 'dir') {
       setCurrentPath(entry.path);
-      setOpenFile(null);
-    } else {
-      setOpenFile(entry.path);
+      return;
     }
-  };
 
-  const handleSave = useCallback(() => {
-    if (openFile && modified) saveMutation.mutate();
-  }, [openFile, modified, saveMutation]);
-
-  const handleCommitClick = async (hash: string) => {
-    setLoadingCommit(true);
-    try {
-      const detail = await getCommitDetail(id, hash);
-      setSelectedCommit(detail);
-    } catch {
+    // Already open? Just switch
+    const existing = openTabs.find(t => t.path === entry.path);
+    if (existing) {
+      setActiveTab(entry.path);
       setSelectedCommit(null);
-    } finally {
-      setLoadingCommit(false);
+      return;
     }
-  };
 
+    // Load and open
+    try {
+      const data = await readFile(id, entry.path);
+      const tab: OpenTab = {
+        path: entry.path,
+        content: data.content,
+        originalContent: data.content,
+        language: getLanguage(entry.path),
+      };
+      setOpenTabs(prev => [...prev, tab]);
+      setActiveTab(entry.path);
+      setSelectedCommit(null);
+    } catch {
+      // ignore
+    }
+  }, [id, openTabs]);
+
+  // Close tab
+  const closeTab = useCallback((path: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setOpenTabs(prev => {
+      const next = prev.filter(t => t.path !== path);
+      if (activeTab === path) {
+        setActiveTab(next.length > 0 ? next[next.length - 1].path : null);
+      }
+      return next;
+    });
+  }, [activeTab]);
+
+  // Update content in tab
+  const handleEditorChange = useCallback((value: string | undefined) => {
+    if (!activeTab || value === undefined) return;
+    setOpenTabs(prev => prev.map(t =>
+      t.path === activeTab ? { ...t, content: value } : t
+    ));
+  }, [activeTab]);
+
+  // Save current file
+  const handleSave = useCallback(() => {
+    const tab = openTabs.find(t => t.path === activeTab);
+    if (tab && tab.content !== tab.originalContent) {
+      saveMutation.mutate({ path: tab.path, content: tab.content });
+    }
+  }, [activeTab, openTabs, saveMutation]);
+
+  // Ctrl+S
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -105,6 +154,24 @@ export function ProductPage() {
     return () => document.removeEventListener('keydown', handler);
   }, [handleSave]);
 
+  // Commit detail click
+  const handleCommitClick = async (hash: string) => {
+    try {
+      const detail = await getCommitDetail(id, hash);
+      setSelectedCommit(detail);
+      setActiveTab(null);
+    } catch {
+      setSelectedCommit(null);
+    }
+  };
+
+  const currentTab = openTabs.find(t => t.path === activeTab);
+  const isModified = (path: string) => {
+    const tab = openTabs.find(t => t.path === path);
+    return tab ? tab.content !== tab.originalContent : false;
+  };
+  const hasAnyModified = openTabs.some(t => t.content !== t.originalContent);
+
   if (!product) {
     return <p className="text-gray-400 p-4">Загрузка...</p>;
   }
@@ -114,8 +181,10 @@ export function ProductPage() {
   return (
     <div className="flex flex-col h-[calc(100vh-64px)]">
       {/* Top bar */}
-      <div className="flex items-center gap-3 px-4 py-2 border-b bg-white">
-        <button onClick={() => navigate(-1)} className="text-sm text-blue-600 hover:underline">← Назад</button>
+      <div className="flex items-center gap-3 px-4 py-2 border-b bg-white shrink-0">
+        <button onClick={() => navigate(-1)} className="text-sm text-blue-600 hover:underline">
+          ← Назад
+        </button>
         <span className="text-sm font-medium text-gray-900">{product.name}</span>
         {gitInfo?.initialized && (
           <select
@@ -132,25 +201,25 @@ export function ProductPage() {
         {gitInfo?.changed_files ? (
           <span className="text-xs text-amber-600">{gitInfo.changed_files} изменений</span>
         ) : null}
-        {modified && (
+        {hasAnyModified && (
           <button
             onClick={handleSave}
             disabled={saveMutation.isPending}
             className="ml-auto text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 disabled:opacity-50"
           >
-            {saveMutation.isPending ? 'Сохранение...' : 'Сохранить'}
+            {saveMutation.isPending ? 'Сохранение...' : 'Сохранить (Ctrl+S)'}
           </button>
         )}
       </div>
 
       <div className="flex flex-1 min-h-0">
         {/* File tree */}
-        <div className="w-64 border-r bg-gray-50 flex flex-col overflow-hidden">
+        <div className="w-56 border-r bg-gray-50 flex flex-col overflow-hidden shrink-0">
           {/* Breadcrumb */}
-          <div className="px-3 py-2 border-b text-xs flex items-center gap-1 flex-wrap">
+          <div className="px-3 py-2 border-b text-xs flex items-center gap-1 flex-wrap shrink-0">
             <button
-              onClick={() => { setCurrentPath(''); setOpenFile(null); }}
-              className="text-blue-600 hover:underline"
+              onClick={() => setCurrentPath('')}
+              className={`hover:underline ${currentPath ? 'text-blue-600' : 'text-gray-800 font-medium'}`}
             >
               root
             </button>
@@ -158,11 +227,10 @@ export function ProductPage() {
               <span key={i} className="flex items-center gap-1">
                 <span className="text-gray-400">/</span>
                 <button
-                  onClick={() => {
-                    setCurrentPath(pathParts.slice(0, i + 1).join('/'));
-                    setOpenFile(null);
-                  }}
-                  className="text-blue-600 hover:underline"
+                  onClick={() => setCurrentPath(pathParts.slice(0, i + 1).join('/'))}
+                  className={`hover:underline ${
+                    i === pathParts.length - 1 ? 'text-gray-800 font-medium' : 'text-blue-600'
+                  }`}
                 >
                   {part}
                 </button>
@@ -173,10 +241,7 @@ export function ProductPage() {
           <div className="flex-1 overflow-y-auto">
             {currentPath && (
               <button
-                onClick={() => {
-                  const parent = pathParts.slice(0, -1).join('/');
-                  setCurrentPath(parent);
-                }}
+                onClick={() => setCurrentPath(pathParts.slice(0, -1).join('/'))}
                 className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-100"
               >
                 ..
@@ -185,15 +250,15 @@ export function ProductPage() {
             {files?.map((entry) => (
               <button
                 key={entry.path}
-                onClick={() => handleFileClick(entry)}
+                onClick={() => openFileInTab(entry)}
                 className={`w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 flex items-center gap-2 ${
-                  openFile === entry.path ? 'bg-blue-100 text-blue-700' : 'text-gray-700'
+                  activeTab === entry.path ? 'bg-blue-100 text-blue-700' : 'text-gray-700'
                 }`}
               >
-                <span className="text-gray-400">{entry.type === 'dir' ? '📁' : '📄'}</span>
-                <span className="truncate">{entry.name}</span>
+                <span className="text-[10px] text-gray-400 w-3">{entry.type === 'dir' ? '📁' : '📄'}</span>
+                <span className="truncate flex-1">{entry.name}</span>
                 {entry.type === 'file' && (
-                  <span className="ml-auto text-gray-300 text-[10px]">
+                  <span className="text-gray-300 text-[10px] shrink-0">
                     {entry.size > 1024 ? `${Math.round(entry.size / 1024)}K` : `${entry.size}B`}
                   </span>
                 )}
@@ -207,24 +272,69 @@ export function ProductPage() {
 
         {/* Editor area */}
         <div className="flex-1 flex flex-col min-w-0">
-          {openFile ? (
-            <>
-              <div className="px-3 py-1.5 border-b bg-gray-50 flex items-center gap-2">
-                <span className="text-xs text-gray-500 font-mono truncate">{openFile}</span>
-                {modified && <span className="text-xs text-amber-500">●</span>}
-              </div>
-              <div className="flex-1 min-h-0">
-                <textarea
-                  value={fileContent}
-                  onChange={(e) => { setFileContent(e.target.value); setModified(true); }}
-                  className="w-full h-full p-4 font-mono text-sm resize-none focus:outline-none"
-                  spellCheck={false}
-                />
-              </div>
-            </>
+          {/* Tabs */}
+          {openTabs.length > 0 && (
+            <div className="flex border-b bg-gray-100 overflow-x-auto shrink-0">
+              {openTabs.map((tab) => {
+                const fileName = tab.path.split('/').pop() ?? tab.path;
+                const modified = isModified(tab.path);
+                return (
+                  <button
+                    key={tab.path}
+                    onClick={() => { setActiveTab(tab.path); setSelectedCommit(null); }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs border-r border-gray-200 shrink-0 ${
+                      activeTab === tab.path
+                        ? 'bg-white text-gray-900 border-b-2 border-b-blue-500'
+                        : 'text-gray-500 hover:bg-gray-50'
+                    }`}
+                  >
+                    <span className="truncate max-w-[120px]">{fileName}</span>
+                    {modified && <span className="text-amber-500 text-[10px]">●</span>}
+                    <span
+                      onClick={(e) => closeTab(tab.path, e)}
+                      className="text-gray-400 hover:text-gray-700 ml-1"
+                    >
+                      ×
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Monaco editor */}
+          {currentTab ? (
+            <div className="flex-1 min-h-0">
+              <Editor
+                key={currentTab.path}
+                defaultValue={currentTab.content}
+                language={currentTab.language}
+                theme="vs-dark"
+                onChange={handleEditorChange}
+                onMount={(editor) => { editorRef.current = editor; }}
+                options={{
+                  fontSize: 13,
+                  fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+                  minimap: { enabled: true },
+                  scrollBeyondLastLine: false,
+                  wordWrap: 'on',
+                  lineNumbers: 'on',
+                  renderWhitespace: 'selection',
+                  bracketPairColorization: { enabled: true },
+                  automaticLayout: true,
+                  tabSize: 2,
+                  formatOnPaste: true,
+                  suggestOnTriggerCharacters: true,
+                  folding: true,
+                  foldingStrategy: 'indentation',
+                  links: true,
+                  padding: { top: 8 },
+                }}
+              />
+            </div>
           ) : selectedCommit ? (
             <>
-              <div className="px-3 py-1.5 border-b bg-gray-50 flex items-center gap-2">
+              <div className="px-3 py-1.5 border-b bg-gray-50 flex items-center gap-2 shrink-0">
                 <span className="text-xs font-mono text-blue-600">{selectedCommit.hash.slice(0, 8)}</span>
                 <span className="text-xs text-gray-700 truncate flex-1">{selectedCommit.message}</span>
                 <span className="text-[10px] text-gray-400">{selectedCommit.author}</span>
@@ -232,20 +342,34 @@ export function ProductPage() {
                   onClick={() => setSelectedCommit(null)}
                   className="text-gray-400 hover:text-gray-600 text-sm"
                 >
-                  &times;
+                  ×
                 </button>
               </div>
               {selectedCommit.stats && (
-                <div className="px-3 py-2 border-b bg-gray-50">
+                <div className="px-3 py-2 border-b bg-gray-50 shrink-0">
                   <pre className="text-[10px] text-gray-500 whitespace-pre-wrap">{selectedCommit.stats}</pre>
                 </div>
               )}
-              <div className="flex-1 min-h-0 overflow-auto">
-                <pre className="p-4 text-xs font-mono whitespace-pre-wrap">{selectedCommit.diff || 'Нет изменений'}</pre>
+              <div className="flex-1 min-h-0">
+                <Editor
+                  value={selectedCommit.diff || '// Нет изменений'}
+                  language="plaintext"
+                  theme="vs-dark"
+                  options={{
+                    readOnly: true,
+                    fontSize: 12,
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                    lineNumbers: 'off',
+                    wordWrap: 'on',
+                    automaticLayout: true,
+                    padding: { top: 8 },
+                  }}
+                />
               </div>
             </>
           ) : (
-            <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">
+            <div className="flex-1 flex items-center justify-center bg-[#1e1e1e] text-gray-500 text-sm">
               Выберите файл или коммит для просмотра
             </div>
           )}
@@ -253,20 +377,21 @@ export function ProductPage() {
 
         {/* Git panel */}
         {gitInfo?.initialized && (
-          <div className="w-72 border-l bg-gray-50 flex flex-col overflow-hidden">
-            <div className="px-3 py-2 border-b">
+          <div className="w-64 border-l bg-gray-50 flex flex-col overflow-hidden shrink-0">
+            <div className="px-3 py-2 border-b shrink-0">
               <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Git</p>
             </div>
             <div className="flex-1 overflow-y-auto">
-              {/* Commits */}
               <div className="px-3 py-2">
                 <p className="text-[10px] text-gray-400 mb-2">Последние коммиты</p>
                 {gitInfo.commits?.map((c, i) => (
                   <button
                     key={i}
                     onClick={() => handleCommitClick(c.hash)}
-                    className={`w-full text-left mb-1.5 last:mb-0 p-1.5 rounded transition-colors ${
-                      selectedCommit?.hash.startsWith(c.hash) ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-100'
+                    className={`w-full text-left mb-1 last:mb-0 p-1.5 rounded transition-colors ${
+                      selectedCommit?.hash.startsWith(c.hash)
+                        ? 'bg-blue-50 border border-blue-200'
+                        : 'hover:bg-gray-100'
                     }`}
                   >
                     <div className="flex items-center gap-1.5">
