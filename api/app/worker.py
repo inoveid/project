@@ -510,31 +510,18 @@ async def _handle_graph_result(
         await _try_update_task_status(db, task_id, "awaiting_user")
         # Check if this is an MR gate interrupt (not handoff)
         mr_diff = (last_state or {}).get("mr_diff")
-        state_keys = list((last_state or {}).keys())
-        logger.info("_handle_graph_result: interrupted=True, state_keys=%s", state_keys)
-        logger.info("_handle_graph_result: mr_diff=%s (len=%d), mr_approved=%s, handoff_result=%s, gateway_approved=%s",
-                     bool(mr_diff), len(mr_diff) if mr_diff else 0,
-                     (last_state or {}).get("mr_approved"),
-                     bool((last_state or {}).get("handoff_result")),
-                     (last_state or {}).get("gateway_approved"))
         if mr_diff and (last_state or {}).get("mr_approved") is None:
             # MR gate interrupt — mr_ready was already sent by complete_node
-            logger.info("_handle_graph_result: MR gate interrupt detected, sending done")
             await publisher.send_json({"type": "done"})
             return True
-        logger.info("_handle_graph_result: NOT MR gate (mr_diff=%s, mr_approved=%s), checking handoff_result",
-                   bool(mr_diff), (last_state or {}).get("mr_approved"))
         hr = (last_state or {}).get("handoff_result")
         if hr:
-            logger.info("_handle_graph_result: handoff_result found, will send approval_required")
             steps = []
             for msg in (last_state or {}).get("messages", []):
                 if isinstance(msg, dict) and msg.get("agent"):
                     text = msg.get("text", "")
                     summary = text[:200] + "..." if len(text) > 200 else text
                     steps.append({"agent": msg["agent"], "summary": summary})
-            logger.info("_handle_graph_result: SENDING approval_required (from=%s, to=%s)",
-                       (last_state or {}).get("current_agent_name", ""), hr.get("to_agent_name", ""))
             await publisher.send_json({
                 "type": "approval_required",
                 "from_agent": (last_state or {}).get("current_agent_name", ""),
@@ -589,13 +576,7 @@ async def _run_graph(graph, input, config: dict) -> tuple[bool, bool, bool, dict
         chunk_count = 0
         async for chunk in graph.astream(input, config, stream_mode="values"):
             chunk_count += 1
-            chunk_keys = list(chunk.keys()) if isinstance(chunk, dict) else []
-            logger.info("_run_graph chunk #%d: keys=%s, mr_diff=%s, mr_approved=%s",
-                       chunk_count, chunk_keys[:5],
-                       bool(chunk.get("mr_diff")) if isinstance(chunk, dict) else "N/A",
-                       chunk.get("mr_approved") if isinstance(chunk, dict) else "N/A")
             if "__interrupt__" in chunk:
-                logger.info("_run_graph: interrupt detected in chunk")
                 return True, False, False, chunk
             last_state = chunk
             hr = chunk.get("handoff_result")

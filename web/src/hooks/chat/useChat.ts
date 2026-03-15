@@ -28,12 +28,6 @@ export function useChat(
     toolsRef: pendingToolsRef,
   }), []);
 
-  // Debug: log mrReview state changes
-  if (typeof window !== "undefined") {
-    (window as any).__mrReview = mrReview;
-    (window as any).__pendingApproval = pendingApproval;
-  }
-
   const onEvent = useCallback(
     (event: WsIncoming) => {
       handleEvent(event, refs, { setItems, setStatus, setError, setPendingApproval, setMrReview });
@@ -106,7 +100,6 @@ export function useChat(
   }, [send, isOpen]);
 
   const approveMR = useCallback(() => {
-    console.log("[useChat] approveMR called");
     if (!isOpen()) return;
     setMrReview(null);
     setItems((prev) => prev.filter((i) => !isHandoffItem(i) || i.itemType !== "mr_review"));
@@ -115,7 +108,6 @@ export function useChat(
   }, [send, isOpen]);
 
   const rejectMR = useCallback((comment: string) => {
-    console.log("[useChat] rejectMR called:", comment);
     if (!isOpen()) return;
     setMrReview(null);
     setItems((prev) => {

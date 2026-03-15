@@ -7,7 +7,6 @@ import { ToastProvider } from "./hooks/useToast";
 import { hasToken } from "./api/client";
 import { Dashboard } from "./pages/Dashboard";
 import { CanvasPage } from "./pages/CanvasPage";
-import { ChatPage } from "./pages/ChatPage";
 import { EvalDashboard } from "./pages/EvalDashboard";
 import { BusinessListPage } from "./pages/BusinessListPage";
 import { BusinessPage } from "./pages/BusinessPage";
@@ -51,7 +50,6 @@ export function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/teams" element={<CanvasPage />} />
           <Route path="/teams/:id" element={<Navigate to="/teams" replace />} />
-          <Route path="/chat/:sessionId" element={<ChatPage />} />
           <Route path="/eval" element={<EvalDashboard />} />
           <Route path="/businesses" element={<BusinessListPage />} />
           <Route path="/businesses/:businessId" element={<BusinessPage />} />

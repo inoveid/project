@@ -350,8 +350,6 @@ async def complete_node(state: WorkflowState, config: RunnableConfig) -> dict:
             if diff.strip():
                 # Publish MR event for frontend
                 diff_files = parse_unified_diff(diff)
-                logger.info("complete_node: SENDING mr_ready, task_id=%s, diff_files=%d, diff_lines=%d",
-                           task_id, len(diff_files), len(diff.splitlines()))
                 await ws.send_json({
                     "type": "mr_ready",
                     "task_id": task_id,
@@ -384,7 +382,6 @@ async def complete_node(state: WorkflowState, config: RunnableConfig) -> dict:
                         "task_id": task_id,
                     })
                     return {"handoff_result": None, "gateway_approved": None}
-                logger.info("complete_node: returning mr_diff (len=%d), mr_approved=None → will route to mr_gate", len(diff))
                 return {
                     "mr_diff": diff,
                     "mr_approved": None,  # waiting for approval
@@ -392,7 +389,6 @@ async def complete_node(state: WorkflowState, config: RunnableConfig) -> dict:
         except Exception as exc:
             logger.warning("Failed to get task diff: %s", exc)
 
-    logger.info("complete_node: NO diff found, falling through to task_completed. hr=%s", bool(state.get("handoff_result")))
     hr = state["handoff_result"]
     summary = hr.get("tool_args", {}).get("summary", "") if hr else ""
     await publish_notification("task_completed", {
@@ -406,14 +402,11 @@ async def complete_node(state: WorkflowState, config: RunnableConfig) -> dict:
 
 async def mr_gate_node(state: WorkflowState, config: RunnableConfig) -> dict:
     """HITL gate for MR approval. Pauses until user approves or rejects."""
-    logger.info("mr_gate_node: entering interrupt, task_id=%s, mr_diff_len=%d",
-               state.get("task_id"), len(state.get("mr_diff") or ""))
     decision = interrupt({
         "type": "mr_approval",
         "task_id": state.get("task_id"),
         "diff_preview": (state.get("mr_diff") or "")[:2000],
     })
-    logger.info("mr_gate_node: resumed with decision=%s (type=%s)", decision, type(decision).__name__)
 
     # Handle both dict {"approved": True} and plain bool from Command(resume=True/False)
     if isinstance(decision, dict):
@@ -507,12 +500,9 @@ def route_after_agent(
         logger.info("route_after_agent → END (no handoff, no worktree)")
         return END
     rt = hr.get("result_type")
-    logger.info("route_after_agent: result_type=%s (type=%s), wt=%s", rt, type(rt).__name__, bool(wt))
     if rt == HandoffResultType.COMPLETED:
-        logger.info("route_after_agent → complete (COMPLETED)")
         return "complete"
     if rt == HandoffResultType.BLOCKED:
-        logger.info("route_after_agent → blocked")
         return "blocked"
     if rt == HandoffResultType.AWAITING_APPROVAL:
         # If worktree exists, show MR review instead of handoff approval
@@ -535,13 +525,8 @@ def route_after_gate(state: WorkflowState) -> Literal["run_agent", "__end__"]:
 
 
 def route_after_complete(state: WorkflowState) -> str:
-    mr_diff = bool(state.get("mr_diff"))
-    mr_approved = state.get("mr_approved")
-    logger.info("route_after_complete: mr_diff=%s, mr_approved=%s", mr_diff, mr_approved)
-    if mr_diff and mr_approved is None:
-        logger.info("route_after_complete → mr_gate")
+    if state.get("mr_diff") and state.get("mr_approved") is None:
         return "mr_gate"
-    logger.info("route_after_complete → END")
     return END
 
 

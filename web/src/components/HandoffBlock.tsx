@@ -67,7 +67,7 @@ export function HandoffBlock({ item }: HandoffBlockProps) {
   }
 
   if (item.itemType === "mr_review") {
-    // MRReviewCard is rendered at ChatPanel level (needs callbacks), show placeholder here
+    // MRReviewCard is rendered at TaskChatsTab level (needs callbacks), show placeholder here
     return (
       <div className="my-3">
         <div className="flex items-center gap-2 text-xs text-indigo-600 uppercase tracking-wide">
