@@ -371,13 +371,13 @@ export function ProductPage() {
         {gitInfo?.initialized && syncStatus && (
           syncStatus.has_remote ? (
             <div className="flex items-center gap-1">
-              {(syncStatus.ahead ?? 0) > 0 ? (
+              {(syncStatus.ahead ?? 0) > 0 || syncStatus.remote_branch_exists === false || (!syncStatus.upstream && (syncStatus.ahead ?? 0) === 0 && (syncStatus.behind ?? 0) === 0) ? (
                 <button
                   onClick={() => pushMutation.mutate()}
                   disabled={pushMutation.isPending}
                   className="flex items-center gap-1 text-xs bg-green-50 text-green-700 hover:bg-green-100 px-2 py-1 rounded transition-colors disabled:opacity-50"
                 >
-                  {pushMutation.isPending ? '...' : <><span>↑{syncStatus.ahead}</span><span>Push</span></>}
+                  {pushMutation.isPending ? '...' : <><span>↑{(syncStatus.ahead ?? 0) > 0 ? syncStatus.ahead : ''}</span><span>Push</span></>}
                 </button>
               ) : (syncStatus.behind ?? 0) > 0 ? (
                 <button
