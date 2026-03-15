@@ -381,9 +381,7 @@ class WorkspaceService:
             cwd=info.repo_path, check=False,
         )
         logger.info(
-            "get_task_diff: base=%s, branch=%s, repo=%s
-  branch_log: %s
-  base_log: %s",
+            "get_task_diff: base=%s, branch=%s, repo=%s, branch_log: %s, base_log: %s",
             base, info.branch_name, info.repo_path,
             branch_log[:200] if branch_log else "(empty)",
             base_log[:200] if base_log else "(empty)",
