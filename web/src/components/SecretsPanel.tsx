@@ -107,7 +107,7 @@ export function SecretsPanel({ productId }: SecretsPanelProps) {
           ))}
         </div>
       ) : (
-        <div className="text-center py-8 text-gray-400 text-sm">
+        <div className="py-8 text-gray-400 text-sm">
           Нет секретов. Добавьте API-ключи и токены для агентов.
         </div>
       )}
