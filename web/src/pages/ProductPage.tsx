@@ -128,6 +128,9 @@ export function ProductPage() {
   const [showBranchInput, setShowBranchInput] = useState(false);
   const [showChanges, setShowChanges] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
+  const [showBranchDropdown, setShowBranchDropdown] = useState(false);
+  const [branchSearch, setBranchSearch] = useState('');
+  const branchDropdownRef = useRef<HTMLDivElement>(null);
 
   const createBranchMutation = useMutation({
     mutationFn: (name: string) => createBranch(id, name),
@@ -211,6 +214,22 @@ export function ProductPage() {
     return () => document.removeEventListener('keydown', handler);
   }, [handleSave]);
 
+  // Close branch dropdown on click outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (branchDropdownRef.current && !branchDropdownRef.current.contains(e.target as Node)) {
+        setShowBranchDropdown(false);
+        setBranchSearch('');
+        setShowBranchInput(false);
+        setNewBranchName('');
+      }
+    };
+    if (showBranchDropdown) {
+      document.addEventListener('mousedown', handler);
+      return () => document.removeEventListener('mousedown', handler);
+    }
+  }, [showBranchDropdown]);
+
   // Commit detail click
   const handleCommitClick = async (hash: string) => {
     try {
@@ -238,72 +257,187 @@ export function ProductPage() {
   return (
     <div className="flex flex-col h-[calc(100vh-64px)]">
       {/* Top bar */}
-      <div className="flex items-center gap-3 px-4 py-2 border-b bg-white shrink-0">
+      <div className="flex items-center gap-2 px-4 py-2 border-b bg-white shrink-0">
         <button onClick={() => navigate(-1)} className="text-sm text-blue-600 hover:underline">
           ← Назад
         </button>
         <span className="text-sm font-medium text-gray-900">{product.name}</span>
+
+        {/* Branch selector dropdown */}
         {gitInfo?.initialized && (
-          <select
-            value={gitInfo.branch}
-            onChange={(e) => checkoutMutation.mutate(e.target.value)}
-            disabled={checkoutMutation.isPending}
-            className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-mono border-0 focus:outline-none focus:ring-1 focus:ring-blue-400"
-          >
-            {gitInfo.branches?.map((b) => (
-              <option key={b} value={b}>{b}</option>
-            ))}
-          </select>
-        )}
-        {gitInfo?.initialized && (
-          <button
-            onClick={() => setShowBranchInput(!showBranchInput)}
-            className="text-xs text-gray-500 hover:text-blue-600 px-1"
-            title="Создать ветку"
-          >
-            +
-          </button>
-        )}
-        {showBranchInput && (
-          <form
-            onSubmit={(e) => { e.preventDefault(); if (newBranchName.trim()) createBranchMutation.mutate(newBranchName.trim()); }}
-            className="flex items-center gap-1"
-          >
-            <input
-              type="text"
-              value={newBranchName}
-              onChange={(e) => setNewBranchName(e.target.value)}
-              placeholder="new-branch"
-              autoFocus
-              className="text-xs px-2 py-0.5 border rounded font-mono w-36 focus:outline-none focus:ring-1 focus:ring-blue-400"
-            />
+          <div className="relative" ref={branchDropdownRef}>
             <button
-              type="submit"
-              disabled={!newBranchName.trim() || createBranchMutation.isPending}
-              className="text-xs px-2 py-0.5 bg-blue-600 text-white rounded disabled:opacity-50"
+              onClick={() => { setShowBranchDropdown(!showBranchDropdown); setBranchSearch(''); }}
+              className="flex items-center gap-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 pl-2 pr-1.5 py-1 rounded font-mono transition-colors"
             >
-              {createBranchMutation.isPending ? '...' : 'OK'}
+              <span className="text-gray-400 text-[10px]">⎇</span>
+              <span>{gitInfo.branch}</span>
+              <span className="text-gray-400 text-[10px]">▾</span>
             </button>
-            <button
-              type="button"
-              onClick={() => { setShowBranchInput(false); setNewBranchName(''); }}
-              className="text-xs text-gray-400 hover:text-gray-600"
-            >
-              ✕
-            </button>
-          </form>
+            {showBranchDropdown && (
+              <div className="absolute top-full left-0 mt-1 w-64 bg-white border rounded-lg shadow-lg z-50 overflow-hidden">
+                <div className="p-2 border-b">
+                  <input
+                    type="text"
+                    value={branchSearch}
+                    onChange={(e) => setBranchSearch(e.target.value)}
+                    placeholder="Найти ветку..."
+                    autoFocus
+                    className="w-full text-xs px-2 py-1.5 border rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  />
+                </div>
+                <div className="max-h-48 overflow-y-auto">
+                  {gitInfo.branches
+                    ?.filter(b => !branchSearch || b.toLowerCase().includes(branchSearch.toLowerCase()))
+                    .map(b => (
+                      <button
+                        key={b}
+                        onClick={() => {
+                          if (b !== gitInfo.branch) checkoutMutation.mutate(b);
+                          setShowBranchDropdown(false);
+                          setBranchSearch('');
+                        }}
+                        className={`w-full text-left px-3 py-1.5 text-xs font-mono hover:bg-blue-50 flex items-center gap-2 ${
+                          b === gitInfo.branch ? 'bg-blue-50 text-blue-700' : 'text-gray-700'
+                        }`}
+                      >
+                        {b === gitInfo.branch && <span className="text-blue-500 text-[10px]">●</span>}
+                        <span className={b === gitInfo.branch ? '' : 'pl-4'}>{b}</span>
+                      </button>
+                    ))
+                  }
+                  {gitInfo.branches?.filter(b => !branchSearch || b.toLowerCase().includes(branchSearch.toLowerCase())).length === 0 && (
+                    <p className="text-xs text-gray-400 px-3 py-2">Не найдено</p>
+                  )}
+                </div>
+                <div className="border-t p-2">
+                  {showBranchInput ? (
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        if (newBranchName.trim()) {
+                          createBranchMutation.mutate(newBranchName.trim());
+                          setShowBranchDropdown(false);
+                        }
+                      }}
+                      className="flex items-center gap-1"
+                    >
+                      <input
+                        type="text"
+                        value={newBranchName}
+                        onChange={(e) => setNewBranchName(e.target.value)}
+                        placeholder="new-branch"
+                        autoFocus
+                        className="flex-1 text-xs px-2 py-1 border rounded font-mono focus:outline-none focus:ring-1 focus:ring-blue-400"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!newBranchName.trim() || createBranchMutation.isPending}
+                        className="text-xs px-2 py-1 bg-blue-600 text-white rounded disabled:opacity-50"
+                      >
+                        {createBranchMutation.isPending ? '...' : 'OK'}
+                      </button>
+                    </form>
+                  ) : (
+                    <button
+                      onClick={() => setShowBranchInput(true)}
+                      className="w-full text-left text-xs text-blue-600 hover:text-blue-700 px-1 py-0.5"
+                    >
+                      + Новая ветка
+                    </button>
+                  )}
+                  {createBranchMutation.isError && (
+                    <p className="text-[10px] text-red-500 mt-1">{(createBranchMutation.error as Error).message}</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         )}
-        {createBranchMutation.isError && (
-          <span className="text-[10px] text-red-500">{(createBranchMutation.error as Error).message}</span>
-        )}
+
+        {/* Changes badge */}
         {gitInfo?.changed_files ? (
           <button
             onClick={() => setShowChanges(true)}
-            className="text-xs text-amber-600 hover:text-amber-700 hover:underline"
+            className="flex items-center gap-1 text-xs bg-amber-50 text-amber-700 hover:bg-amber-100 px-2 py-1 rounded transition-colors"
+            title={`${gitInfo.changed_files} незакоммиченных ${gitInfo.changed_files === 1 ? 'изменение' : 'изменений'}`}
           >
-            {gitInfo.changed_files} {gitInfo.changed_files === 1 ? 'изменение' : gitInfo.changed_files < 5 ? 'изменения' : 'изменений'}
+            <span className="text-amber-500 text-[10px]">●</span>
+            <span>{gitInfo.changed_files}</span>
           </button>
         ) : null}
+
+        {/* Sync button */}
+        {gitInfo?.initialized && syncStatus && (
+          syncStatus.has_remote ? (
+            <div className="flex items-center gap-1">
+              {(syncStatus.ahead ?? 0) > 0 ? (
+                <button
+                  onClick={() => pushMutation.mutate()}
+                  disabled={pushMutation.isPending}
+                  className="flex items-center gap-1 text-xs bg-green-50 text-green-700 hover:bg-green-100 px-2 py-1 rounded transition-colors disabled:opacity-50"
+                >
+                  {pushMutation.isPending ? '...' : <><span>↑{syncStatus.ahead}</span><span>Push</span></>}
+                </button>
+              ) : (syncStatus.behind ?? 0) > 0 ? (
+                <button
+                  onClick={() => pullMutation.mutate()}
+                  disabled={pullMutation.isPending}
+                  className="flex items-center gap-1 text-xs bg-orange-50 text-orange-700 hover:bg-orange-100 px-2 py-1 rounded transition-colors disabled:opacity-50"
+                >
+                  {pullMutation.isPending ? '...' : <><span>↓{syncStatus.behind}</span><span>Pull</span></>}
+                </button>
+              ) : (
+                <span className="text-xs text-gray-400 px-1" title="Синхронизировано">✓</span>
+              )}
+              {pushMutation.isError && (
+                <span className="text-[10px] text-red-500 max-w-[200px] truncate" title={(pushMutation.error as Error).message}>
+                  {(pushMutation.error as Error).message}
+                </span>
+              )}
+              {pullMutation.isError && (
+                <span className="text-[10px] text-red-500 max-w-[200px] truncate" title={(pullMutation.error as Error).message}>
+                  {(pullMutation.error as Error).message}
+                </span>
+              )}
+            </div>
+          ) : (
+            showRemoteInput ? (
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  value={remoteUrl}
+                  onChange={(e) => setRemoteUrl(e.target.value)}
+                  placeholder="https://github.com/..."
+                  className="text-xs px-2 py-1 border rounded w-48 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                />
+                <button
+                  onClick={() => addRemoteMutation.mutate(remoteUrl)}
+                  disabled={!remoteUrl || addRemoteMutation.isPending}
+                  className="text-xs px-2 py-1 bg-blue-600 text-white rounded disabled:opacity-50"
+                >
+                  {addRemoteMutation.isPending ? '...' : 'OK'}
+                </button>
+                <button
+                  onClick={() => { setShowRemoteInput(false); setRemoteUrl(''); }}
+                  className="text-xs text-gray-400 hover:text-gray-600"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowRemoteInput(true)}
+                className="text-xs text-gray-500 hover:text-blue-600 px-1"
+                title="Подключить remote"
+              >
+                ⊕
+              </button>
+            )
+          )
+        )}
+
+        {/* Save button */}
         {hasAnyModified && (
           <button
             onClick={handleSave}
@@ -499,107 +633,6 @@ export function ProductPage() {
               <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Git</p>
             </div>
             <div className="flex-1 overflow-y-auto">
-              {/* Sync status */}
-              <div className="px-3 py-2 border-b">
-                {syncStatus?.has_remote ? (
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] text-gray-400 truncate flex-1" title={syncStatus.remote_url}>
-                        {syncStatus.remote_url?.replace(/^https?:\/\//, '').replace(/\.git$/, '') ?? syncStatus.remote}
-                      </span>
-                      <button
-                        onClick={() => refetchSync()}
-                        className="text-[10px] text-gray-400 hover:text-gray-600"
-                        title="Обновить"
-                      >
-                        ⟳
-                      </button>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      {(syncStatus.ahead ?? 0) > 0 && (
-                        <span className="text-[10px] text-green-600">↑{syncStatus.ahead}</span>
-                      )}
-                      {(syncStatus.behind ?? 0) > 0 && (
-                        <span className="text-[10px] text-orange-600">↓{syncStatus.behind}</span>
-                      )}
-                      {(syncStatus.ahead ?? 0) === 0 && (syncStatus.behind ?? 0) === 0 && syncStatus.upstream && (
-                        <span className="text-[10px] text-gray-400">Up to date</span>
-                      )}
-                      {!syncStatus.upstream && (
-                        <span className="text-[10px] text-gray-400">Нет upstream</span>
-                      )}
-                    </div>
-                    <div className="flex gap-1">
-                      <button
-                        onClick={() => pushMutation.mutate()}
-                        disabled={pushMutation.isPending}
-                        className="flex-1 text-[10px] px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-                      >
-                        {pushMutation.isPending ? '...' : `Push${(syncStatus.ahead ?? 0) > 0 ? ` (${syncStatus.ahead})` : ''}`}
-                      </button>
-                      <button
-                        onClick={() => pullMutation.mutate()}
-                        disabled={pullMutation.isPending || (syncStatus.behind ?? 0) === 0}
-                        className="flex-1 text-[10px] px-2 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-50"
-                      >
-                        {pullMutation.isPending ? '...' : `Pull${(syncStatus.behind ?? 0) > 0 ? ` (${syncStatus.behind})` : ''}`}
-                      </button>
-                    </div>
-                    {pushMutation.isError && (
-                      <p className="text-[10px] text-red-500 break-all">{(pushMutation.error as Error).message}</p>
-                    )}
-                    {pullMutation.isError && (
-                      <p className="text-[10px] text-red-500 break-all">{(pullMutation.error as Error).message}</p>
-                    )}
-                    {syncStatus.fetch_error && (
-                      <p className="text-[10px] text-red-500 break-all">Fetch: {syncStatus.fetch_error}</p>
-                    )}
-                  </div>
-                ) : syncStatus && !syncStatus.has_remote ? (
-                  <div className="space-y-1.5">
-                    <p className="text-[10px] text-gray-400">Нет remote</p>
-                    {showRemoteInput ? (
-                      <div className="space-y-1">
-                        <input
-                          type="text"
-                          value={remoteUrl}
-                          onChange={(e) => setRemoteUrl(e.target.value)}
-                          placeholder="https://github.com/..."
-                          className="w-full text-[10px] px-2 py-1 border rounded"
-                        />
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => addRemoteMutation.mutate(remoteUrl)}
-                            disabled={!remoteUrl || addRemoteMutation.isPending}
-                            className="flex-1 text-[10px] px-2 py-1 bg-blue-600 text-white rounded disabled:opacity-50"
-                          >
-                            {addRemoteMutation.isPending ? '...' : 'Добавить'}
-                          </button>
-                          <button
-                            onClick={() => { setShowRemoteInput(false); setRemoteUrl(''); }}
-                            className="text-[10px] px-2 py-1 text-gray-500 hover:text-gray-700"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                        {addRemoteMutation.isError && (
-                          <p className="text-[10px] text-red-500">{(addRemoteMutation.error as Error).message}</p>
-                        )}
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => setShowRemoteInput(true)}
-                        className="text-[10px] text-blue-600 hover:underline"
-                      >
-                        + Добавить remote
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-[10px] text-gray-300">Загрузка...</p>
-                )}
-              </div>
-
               {/* Commits */}
               <div className="px-3 py-2">
                 <p className="text-[10px] text-gray-400 mb-2">Последние коммиты</p>
