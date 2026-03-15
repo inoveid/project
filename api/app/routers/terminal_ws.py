@@ -111,7 +111,7 @@ async def websocket_terminal(
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            "/bin/bash", "--login",
+            "/bin/bash",
             stdin=slave_fd,
             stdout=slave_fd,
             stderr=slave_fd,
