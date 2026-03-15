@@ -874,22 +874,22 @@ async def discard_file(db: AsyncSession, product_id: uuid.UUID, file_path: str) 
     if not target.startswith(os.path.normpath(base)):
         raise ValueError("Invalid path")
 
-    async def run_git(args: list[str]) -> tuple[int, str]:
+    async def run_git(args: list[str]) -> tuple[int, str, str]:
         proc = await asyncio.create_subprocess_exec(
             "git", *args, cwd=base,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await proc.communicate()
-        return proc.returncode, stderr.decode().strip()
+        return proc.returncode, stdout.decode().strip(), stderr.decode().strip()
 
     # Check if file is untracked
-    rc, status_out = await run_git(["status", "--porcelain", "--", file_path])
+    _, status_out, _ = await run_git(["status", "--porcelain", "--", file_path])
     if status_out.startswith("??"):
         # Untracked — remove it
-        try:
+        if os.path.isfile(target):
             os.remove(target)
-        except FileNotFoundError:
-            pass
+        elif os.path.isdir(target):
+            shutil.rmtree(target)
     else:
         # Tracked — restore from HEAD
         await run_git(["checkout", "HEAD", "--", file_path])
