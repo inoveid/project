@@ -96,8 +96,31 @@ async def update_product(
 
 async def delete_product(db: AsyncSession, product_id: uuid.UUID) -> None:
     product = await get_product(db, product_id)
+
+    # Cascade: stop sessions, clean worktrees, delete tasks
+    from app.models.task import Task
+    from app.models.session import Session
+    from app.services.task_service import _stop_task_sessions, _cleanup_task_worktree
+
+    task_stmt = select(Task).where(Task.product_id == product_id)
+    task_result = await db.execute(task_stmt)
+    tasks = list(task_result.scalars().all())
+
+    for task in tasks:
+        await _stop_task_sessions(db, task.id)
+        await _cleanup_task_worktree(task.id)
+        # Sessions with task_id → will be orphaned, delete them
+        session_stmt = select(Session).where(Session.task_id == task.id)
+        session_result = await db.execute(session_stmt)
+        for sess in session_result.scalars().all():
+            await db.delete(sess)
+        await db.delete(task)
+
+    # Delete orphan sessions (product workspace, no task)
+    # These don't exist in current model, but safety net
+
     shutil.rmtree(product.workspace_path, ignore_errors=True)
-    await db.delete(product)
+    await db.delete(product)  # Specs and secrets cascade via FK
     await db.commit()
 
 
