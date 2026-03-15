@@ -783,3 +783,98 @@ async def get_product_commit_detail(db: AsyncSession, product_id: uuid.UUID, com
         "total_additions": total_additions,
         "total_deletions": total_deletions,
     }
+
+
+async def get_changed_files(db: AsyncSession, product_id: uuid.UUID) -> dict:
+    """Get list of changed files with their diffs."""
+    product = await get_product(db, product_id)
+    base = product.workspace_path
+    if not base or not _is_git_repo(base):
+        return {"files": []}
+
+    async def run_git(args: list[str]) -> str:
+        proc = await asyncio.create_subprocess_exec(
+            "git", *args, cwd=base,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        return stdout.decode().strip()
+
+    # Get status
+    status_raw = await run_git(["status", "--porcelain"])
+    if not status_raw:
+        return {"files": []}
+
+    files = []
+    for line in status_raw.splitlines():
+        if not line.strip():
+            continue
+        status_code = line[:2]
+        file_path = line[3:].strip()
+        # Determine status
+        if status_code.startswith("?"):
+            status = "untracked"
+        elif status_code[0] == "A" or status_code[1] == "A":
+            status = "added"
+        elif status_code[0] == "D" or status_code[1] == "D":
+            status = "deleted"
+        elif status_code[0] == "M" or status_code[1] == "M":
+            status = "modified"
+        elif status_code[0] == "R":
+            status = "renamed"
+        else:
+            status = "modified"
+        files.append({"path": file_path, "status": status})
+
+    # Get combined diff (staged + unstaged)
+    diff_raw = await run_git(["diff", "HEAD"])
+    parsed = _parse_diff(diff_raw) if diff_raw else []
+
+    # Also get diff for untracked files — show their content
+    for f in files:
+        if f["status"] == "untracked":
+            full_path = os.path.join(base, f["path"])
+            try:
+                content = open(full_path, "r", errors="replace").read()
+                f["content_preview"] = content[:2000]
+            except Exception:
+                pass
+
+    return {"files": files, "diff_files": parsed}
+
+
+async def discard_file(db: AsyncSession, product_id: uuid.UUID, file_path: str) -> dict:
+    """Discard changes for a specific file (git checkout / git clean)."""
+    product = await get_product(db, product_id)
+    base = product.workspace_path
+    if not base or not _is_git_repo(base):
+        raise ValueError("No git repository")
+
+    # Security: prevent path traversal
+    target = os.path.normpath(os.path.join(base, file_path))
+    if not target.startswith(os.path.normpath(base)):
+        raise ValueError("Invalid path")
+
+    async def run_git(args: list[str]) -> tuple[int, str]:
+        proc = await asyncio.create_subprocess_exec(
+            "git", *args, cwd=base,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        return proc.returncode, stderr.decode().strip()
+
+    # Check if file is untracked
+    rc, status_out = await run_git(["status", "--porcelain", "--", file_path])
+    if status_out.startswith("??"):
+        # Untracked — remove it
+        try:
+            os.remove(target)
+        except FileNotFoundError:
+            pass
+    else:
+        # Tracked — restore from HEAD
+        await run_git(["checkout", "HEAD", "--", file_path])
+        # Also unstage if staged
+        await run_git(["reset", "HEAD", "--", file_path])
+
+    return {"ok": True, "path": file_path}

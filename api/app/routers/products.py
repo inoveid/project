@@ -301,3 +301,30 @@ async def delete_secret(
     if secret:
         await db.delete(secret)
         await db.commit()
+
+
+@router.get("/products/{product_id}/git/changes")
+async def git_changes(
+    product_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import get_changed_files
+    return await get_changed_files(db, product_id)
+
+
+@router.post("/products/{product_id}/git/discard")
+async def git_discard(
+    product_id: uuid.UUID,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import discard_file
+    path = body.get("path", "")
+    if not path:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Path is required")
+    try:
+        return await discard_file(db, product_id, path)
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(e))
