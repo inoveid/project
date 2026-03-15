@@ -94,6 +94,31 @@ export function getGitDiff(productId: string): Promise<{ diff: string }> {
   return fetchApi(`/products/${productId}/git/diff`);
 }
 
+export interface DiffLine {
+  type: "add" | "delete" | "context";
+  content: string;
+  old_no: number | null;
+  new_no: number | null;
+}
+
+export interface DiffHunk {
+  header: string;
+  old_start: number;
+  old_lines: number;
+  new_start: number;
+  new_lines: number;
+  lines: DiffLine[];
+}
+
+export interface DiffFile {
+  path: string;
+  old_path: string | null;
+  status: "modified" | "added" | "deleted" | "renamed" | "binary";
+  additions: number;
+  deletions: number;
+  hunks: DiffHunk[];
+}
+
 export interface CommitDetail {
   hash: string;
   message: string;
@@ -102,6 +127,9 @@ export interface CommitDetail {
   date: string;
   stats: string;
   diff: string;
+  files: DiffFile[];
+  total_additions: number;
+  total_deletions: number;
 }
 
 export function getCommitDetail(productId: string, hash: string): Promise<CommitDetail> {

@@ -5,6 +5,7 @@ import Editor, { type Monaco } from '@monaco-editor/react';
 import { getProduct } from '../api/products';
 import { getFileTree, readFile, writeFile, getGitInfo, checkoutBranch, getCommitDetail } from '../api/products';
 import type { FileEntry, CommitDetail } from '../api/products';
+import { DiffViewer } from '../components/DiffViewer';
 
 // Map file extension to Monaco language
 function getLanguage(path: string): string {
@@ -345,27 +346,18 @@ export function ProductPage() {
                   ×
                 </button>
               </div>
-              {selectedCommit.stats && (
-                <div className="px-3 py-2 border-b bg-gray-50 shrink-0">
-                  <pre className="text-[10px] text-gray-500 whitespace-pre-wrap">{selectedCommit.stats}</pre>
-                </div>
-              )}
               <div className="flex-1 min-h-0">
-                <Editor
-                  value={selectedCommit.diff || '// Нет изменений'}
-                  language="plaintext"
-                  theme="vs-dark"
-                  options={{
-                    readOnly: true,
-                    fontSize: 12,
-                    minimap: { enabled: false },
-                    scrollBeyondLastLine: false,
-                    lineNumbers: 'off',
-                    wordWrap: 'on',
-                    automaticLayout: true,
-                    padding: { top: 8 },
-                  }}
-                />
+                {selectedCommit.files && selectedCommit.files.length > 0 ? (
+                  <DiffViewer
+                    files={selectedCommit.files}
+                    totalAdditions={selectedCommit.total_additions ?? 0}
+                    totalDeletions={selectedCommit.total_deletions ?? 0}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
+                    Нет изменений
+                  </div>
+                )}
               </div>
             </>
           ) : (

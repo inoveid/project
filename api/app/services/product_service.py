@@ -393,6 +393,129 @@ async def get_product_git_diff(db: AsyncSession, product_id: uuid.UUID) -> dict:
     return {"diff": stdout.decode()}
 
 
+
+
+def _parse_diff(raw_diff: str) -> list[dict]:
+    """Parse unified diff into structured file list.
+    
+    Returns list of:
+    {
+        "path": "src/main.py",
+        "old_path": "src/old_main.py" | None,  # for renames
+        "status": "modified" | "added" | "deleted" | "renamed" | "binary",
+        "additions": 5,
+        "deletions": 2,
+        "hunks": [
+            {
+                "header": "@@ -10,7 +10,8 @@ def foo():",
+                "old_start": 10, "old_lines": 7,
+                "new_start": 10, "new_lines": 8,
+                "lines": [
+                    {"type": "context", "content": " unchanged line", "old_no": 10, "new_no": 10},
+                    {"type": "delete",  "content": "-removed line",   "old_no": 11, "new_no": None},
+                    {"type": "add",     "content": "+added line",     "old_no": None, "new_no": 11},
+                ]
+            }
+        ]
+    }
+    """
+    import re
+    files: list[dict] = []
+    current_file: dict | None = None
+    current_hunk: dict | None = None
+    old_no = 0
+    new_no = 0
+
+    for line in raw_diff.splitlines():
+        # New file diff header
+        if line.startswith("diff --git"):
+            if current_file:
+                files.append(current_file)
+            m = re.match(r"diff --git a/(.*?) b/(.*)", line)
+            old_path = m.group(1) if m else ""
+            new_path = m.group(2) if m else ""
+            current_file = {
+                "path": new_path,
+                "old_path": old_path if old_path != new_path else None,
+                "status": "modified",
+                "additions": 0,
+                "deletions": 0,
+                "hunks": [],
+            }
+            current_hunk = None
+            continue
+
+        if not current_file:
+            continue
+
+        # Binary file
+        if line.startswith("Binary files") or line.startswith("GIT binary patch"):
+            current_file["status"] = "binary"
+            continue
+
+        # New/deleted file markers
+        if line.startswith("new file mode"):
+            current_file["status"] = "added"
+            continue
+        if line.startswith("deleted file mode"):
+            current_file["status"] = "deleted"
+            continue
+        if line.startswith("rename from"):
+            current_file["status"] = "renamed"
+            continue
+
+        # Skip index/--- /+++ lines
+        if line.startswith("index ") or line.startswith("---") or line.startswith("+++"):
+            continue
+
+        # Hunk header
+        hunk_match = re.match(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)", line)
+        if hunk_match:
+            old_start = int(hunk_match.group(1))
+            old_lines = int(hunk_match.group(2) or "1")
+            new_start = int(hunk_match.group(3))
+            new_lines = int(hunk_match.group(4) or "1")
+            old_no = old_start
+            new_no = new_start
+            current_hunk = {
+                "header": line,
+                "old_start": old_start,
+                "old_lines": old_lines,
+                "new_start": new_start,
+                "new_lines": new_lines,
+                "lines": [],
+            }
+            current_file["hunks"].append(current_hunk)
+            continue
+
+        if not current_hunk:
+            continue
+
+        # Diff lines
+        if line.startswith("+"):
+            current_hunk["lines"].append({
+                "type": "add", "content": line, "old_no": None, "new_no": new_no,
+            })
+            new_no += 1
+            current_file["additions"] += 1
+        elif line.startswith("-"):
+            current_hunk["lines"].append({
+                "type": "delete", "content": line, "old_no": old_no, "new_no": None,
+            })
+            old_no += 1
+            current_file["deletions"] += 1
+        else:
+            current_hunk["lines"].append({
+                "type": "context", "content": line, "old_no": old_no, "new_no": new_no,
+            })
+            old_no += 1
+            new_no += 1
+
+    if current_file:
+        files.append(current_file)
+
+    return files
+
 async def get_product_commit_detail(db: AsyncSession, product_id: uuid.UUID, commit_hash: str) -> dict:
     """Get details of a specific commit."""
     import asyncio
@@ -426,6 +549,11 @@ async def get_product_commit_detail(db: AsyncSession, product_id: uuid.UUID, com
     )
     diff_stdout, _ = await proc2.communicate()
     
+    raw_diff = diff_stdout.decode() if proc2.returncode == 0 else ""
+    parsed_files = _parse_diff(raw_diff)
+    total_additions = sum(f["additions"] for f in parsed_files)
+    total_deletions = sum(f["deletions"] for f in parsed_files)
+
     return {
         "hash": lines[0],
         "message": lines[1],
@@ -433,5 +561,8 @@ async def get_product_commit_detail(db: AsyncSession, product_id: uuid.UUID, com
         "email": lines[3],
         "date": lines[4],
         "stats": "\n".join(lines[5:]).strip(),
-        "diff": diff_stdout.decode() if proc2.returncode == 0 else "",
+        "diff": raw_diff,
+        "files": parsed_files,
+        "total_additions": total_additions,
+        "total_deletions": total_deletions,
     }
