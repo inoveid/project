@@ -273,6 +273,12 @@ async def get_product_git_info(db: AsyncSession, product_id: uuid.UUID) -> dict:
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
         await fix_proc.communicate()
+        # Set up tracking for the branch
+        track_proc = await asyncio.create_subprocess_exec(
+            "git", "branch", "--set-upstream-to", f"origin/{target}", target, cwd=base,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        await track_proc.communicate()
         branch = target
 
     # Local branches
@@ -529,12 +535,27 @@ async def get_sync_status(db: AsyncSession, product_id: uuid.UUID) -> dict:
     remote_name = remote_out.splitlines()[0].strip()
     _, remote_url = await run_git(["remote", "get-url", remote_name])
 
+    # Unshallow if needed (shallow clones can't count ahead/behind)
+    shallow_path = os.path.join(base, ".git", "shallow")
+    if os.path.isfile(shallow_path):
+        unshal = await asyncio.create_subprocess_exec(
+            "git", "fetch", "--unshallow", remote_name, cwd=base,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            await asyncio.wait_for(unshal.communicate(), timeout=60)
+        except asyncio.TimeoutError:
+            pass
+
     # Fetch latest
     fetch_proc = await asyncio.create_subprocess_exec(
         "git", "fetch", "--quiet", remote_name, cwd=base,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
-    await asyncio.wait_for(fetch_proc.communicate(), timeout=30)
+    try:
+        await asyncio.wait_for(fetch_proc.communicate(), timeout=30)
+    except asyncio.TimeoutError:
+        pass
 
     # Get current branch
     _, branch = await run_git(["branch", "--show-current"])
