@@ -346,3 +346,54 @@ async def git_commit_endpoint(
     except ValueError as e:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/products/{product_id}/git/branch/rename")
+async def git_rename_branch(
+    product_id: uuid.UUID,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import rename_branch
+    old_name = body.get("old_name", "")
+    new_name = body.get("new_name", "")
+    if not old_name or not new_name:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="old_name and new_name required")
+    try:
+        return await rename_branch(db, product_id, old_name, new_name)
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/products/{product_id}/git/branch/{branch_name}")
+async def git_delete_branch(
+    product_id: uuid.UUID,
+    branch_name: str,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import delete_branch
+    try:
+        return await delete_branch(db, product_id, branch_name)
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/products/{product_id}/git/merge")
+async def git_merge_branch(
+    product_id: uuid.UUID,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import merge_branch
+    source = body.get("source", "")
+    if not source:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="source branch required")
+    try:
+        return await merge_branch(db, product_id, source)
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(e))

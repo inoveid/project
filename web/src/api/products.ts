@@ -223,3 +223,23 @@ export function gitCommit(productId: string, message: string): Promise<{ ok: boo
     body: JSON.stringify({ message }),
   });
 }
+
+export function renameBranch(productId: string, oldName: string, newName: string): Promise<{ ok: boolean }> {
+  return fetchApi(`/products/${productId}/git/branch/rename`, {
+    method: 'POST',
+    body: JSON.stringify({ old_name: oldName, new_name: newName }),
+  });
+}
+
+export function deleteBranch(productId: string, branchName: string): Promise<{ ok: boolean }> {
+  return fetchApi(`/products/${productId}/git/branch/${encodeURIComponent(branchName)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function mergeBranch(productId: string, source: string): Promise<{ ok: boolean; message: string }> {
+  return fetchApi(`/products/${productId}/git/merge`, {
+    method: 'POST',
+    body: JSON.stringify({ source }),
+  });
+}

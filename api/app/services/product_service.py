@@ -969,3 +969,82 @@ async def git_commit(db: AsyncSession, product_id: uuid.UUID, message: str) -> d
         raise ValueError(f"Commit failed: {err}")
 
     return {"ok": True, "message": out}
+
+
+async def rename_branch(db: AsyncSession, product_id: uuid.UUID, old_name: str, new_name: str) -> dict:
+    """Rename a branch."""
+    product = await get_product(db, product_id)
+    base = product.workspace_path
+    if not base or not _is_git_repo(base):
+        raise ValueError("No git repository")
+
+    proc = await asyncio.create_subprocess_exec(
+        "git", "branch", "-m", old_name, new_name, cwd=base,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise ValueError(f"Rename failed: {stderr.decode().strip()}")
+
+    return {"ok": True, "old_name": old_name, "new_name": new_name}
+
+
+async def delete_branch(db: AsyncSession, product_id: uuid.UUID, branch_name: str) -> dict:
+    """Delete a branch (must not be current)."""
+    product = await get_product(db, product_id)
+    base = product.workspace_path
+    if not base or not _is_git_repo(base):
+        raise ValueError("No git repository")
+
+    # Check current branch
+    proc_cur = await asyncio.create_subprocess_exec(
+        "git", "branch", "--show-current", cwd=base,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    stdout_cur, _ = await proc_cur.communicate()
+    current = stdout_cur.decode().strip()
+    if current == branch_name:
+        raise ValueError("Нельзя удалить текущую ветку")
+
+    proc = await asyncio.create_subprocess_exec(
+        "git", "branch", "-D", branch_name, cwd=base,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise ValueError(f"Delete failed: {stderr.decode().strip()}")
+
+    return {"ok": True, "branch": branch_name}
+
+
+async def merge_branch(db: AsyncSession, product_id: uuid.UUID, source_branch: str) -> dict:
+    """Merge source branch into current branch."""
+    product = await get_product(db, product_id)
+    base = product.workspace_path
+    if not base or not _is_git_repo(base):
+        raise ValueError("No git repository")
+
+    proc_cur = await asyncio.create_subprocess_exec(
+        "git", "branch", "--show-current", cwd=base,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    stdout_cur, _ = await proc_cur.communicate()
+    current = stdout_cur.decode().strip()
+    if current == source_branch:
+        raise ValueError("Нельзя смержить ветку в саму себя")
+
+    proc = await asyncio.create_subprocess_exec(
+        "git", "merge", source_branch, "--no-edit", cwd=base,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        # Abort merge on conflict
+        abort = await asyncio.create_subprocess_exec(
+            "git", "merge", "--abort", cwd=base,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        await abort.communicate()
+        raise ValueError(f"Merge конфликт. Merge отменён. {stderr.decode().strip()}")
+
+    return {"ok": True, "merged": source_branch, "into": current, "message": stdout.decode().strip()}
