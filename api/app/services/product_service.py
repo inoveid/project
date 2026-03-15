@@ -788,6 +788,13 @@ async def add_remote(db: AsyncSession, product_id: uuid.UUID, url: str) -> dict:
         else:
             raise ValueError(f"Failed to add remote: {err}")
 
+    # Update product record with remote URL
+    product.git_url = url
+    if product.status != "ready":
+        product.status = "ready"
+    await db.commit()
+    await db.refresh(product)
+
     return {"ok": True, "remote": "origin", "url": url}
 
 
