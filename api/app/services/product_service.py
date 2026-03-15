@@ -258,6 +258,23 @@ async def get_product_git_info(db: AsyncSession, product_id: uuid.UUID) -> dict:
         return stdout.decode().strip()
 
     branch = await run_git(["branch", "--show-current"])
+
+    # Fix detached HEAD (e.g. after shallow clone)
+    if not branch:
+        _, symbolic = await run_git(["branch", "-r", "--points-at", "HEAD", "--format=%(refname:short)"])
+        target = "main"
+        for ref in symbolic.splitlines():
+            ref = ref.strip()
+            if ref and not ref.endswith("/HEAD") and "/" in ref:
+                target = ref.split("/", 1)[1]
+                break
+        fix_proc = await asyncio.create_subprocess_exec(
+            "git", "checkout", "-B", target, cwd=base,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        await fix_proc.communicate()
+        branch = target
+
     # Local branches
     local_raw = await run_git(["branch", "--format=%(refname:short)"])
     local_branches = [b.strip() for b in local_raw.splitlines() if b.strip()]
@@ -267,7 +284,7 @@ async def get_product_git_info(db: AsyncSession, product_id: uuid.UUID) -> dict:
     remote_branches = []
     for b in remote_raw.splitlines():
         b = b.strip()
-        if not b or b.endswith("/HEAD"):
+        if not b or b.endswith("/HEAD") or "/" not in b:
             continue
         # Strip origin/ prefix for display
         short = b.split("/", 1)[1] if "/" in b else b
