@@ -162,6 +162,7 @@ export function handleEvent(
         const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
         return [...withoutActivity, mrReviewItem];
       });
+      setPendingApproval(null);  // Clear any pending handoff approval — MR takes priority
       setStatus("awaiting_approval");
       break;
     }

@@ -400,8 +400,13 @@ async def mr_gate_node(state: WorkflowState, config: RunnableConfig) -> dict:
         "diff_preview": (state.get("mr_diff") or "")[:2000],
     })
 
-    approved = decision.get("approved", False)
-    comment = decision.get("comment", "")
+    # Handle both dict {"approved": True} and plain bool from Command(resume=True/False)
+    if isinstance(decision, dict):
+        approved = decision.get("approved", False)
+        comment = decision.get("comment", "")
+    else:
+        approved = bool(decision)
+        comment = ""
 
     if approved:
         # Merge task branch
