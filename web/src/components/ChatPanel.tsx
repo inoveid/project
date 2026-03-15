@@ -102,6 +102,7 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
     stopAgent,
     approveHandoff,
     refineHandoff,
+    mrReview,
     approveMR,
     rejectMR,
   } = useChat(sessionId, session?.messages ?? [], sessionLoaded);
@@ -136,11 +137,7 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
     : null;
   const effectiveApproval = pendingApproval || approvalFromItems;
 
-  // Detect MR review from items
-  const mrReviewItem = items.filter((i) => isHandoffItem(i) && i.itemType === "mr_review").pop();
-  const mrData = mrReviewItem && isHandoffItem(mrReviewItem) ? mrReviewItem.mrData : null;
-
-  const canSend = status === "connected" && !effectiveApproval && !mrData;
+  const canSend = status === "connected" && !effectiveApproval && !mrReview;
 
   return (
     <div className="flex h-full flex-col border-l first:border-l-0">
@@ -177,11 +174,9 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
       )}
 
       <ChatWindow items={items} />
-
-      {(() => { console.log("[DEBUG] ChatPanel render:", { mrData: !!mrData, mrDataFiles: mrData?.diffFiles?.length, effectiveApproval: !!effectiveApproval, pendingApproval: !!pendingApproval, approvalFromItems: !!approvalFromItems, itemTypes: items.filter(i => "itemType" in i).map(i => (i as any).itemType) }); return null; })()}
-      {mrData ? (
+      {mrReview ? (
         <MRReviewCard
-          mrData={mrData}
+          mrData={mrReview}
           onApprove={approveMR}
           onReject={rejectMR}
         />

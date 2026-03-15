@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ApprovalRequest, ChatItem, Message, ToolUse, WsIncoming } from "../../types";
+import type { ApprovalRequest, ChatItem, Message, MRReviewData, ToolUse, WsIncoming } from "../../types";
 import { isHandoffItem } from "../../types";
 import type { ChatStatus, PendingRefs, UseChatResult } from "./chatState";
 import { makeLocalMessage } from "./chatState";
@@ -15,6 +15,7 @@ export function useChat(
   const [status, setStatus] = useState<ChatStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
+  const [mrReview, setMrReview] = useState<MRReviewData | null>(null);
 
   const pendingTextRef = useRef("");
   const pendingToolsRef = useRef<ToolUse[]>([]);
@@ -29,7 +30,7 @@ export function useChat(
 
   const onEvent = useCallback(
     (event: WsIncoming) => {
-      handleEvent(event, refs, { setItems, setStatus, setError, setPendingApproval });
+      handleEvent(event, refs, { setItems, setStatus, setError, setPendingApproval, setMrReview });
     },
     [refs, setItems, setStatus, setError, setPendingApproval],
   );
@@ -100,6 +101,7 @@ export function useChat(
 
   const approveMR = useCallback(() => {
     if (!isOpen()) return;
+    setMrReview(null);
     setItems((prev) => prev.filter((i) => !isHandoffItem(i) || i.itemType !== "mr_review"));
     setStatus("typing");
     send(JSON.stringify({ type: "mr_approve" }));
@@ -107,6 +109,7 @@ export function useChat(
 
   const rejectMR = useCallback((comment: string) => {
     if (!isOpen()) return;
+    setMrReview(null);
     setItems((prev) => {
       const filtered = prev.filter((i) => !isHandoffItem(i) || i.itemType !== "mr_review");
       return [...filtered, makeLocalMessage("user", `MR отклонён: ${comment}`)];
@@ -119,5 +122,5 @@ export function useChat(
   // via publish_command. No auto-send needed — it caused duplicate messages on reconnect.
   const messages = items.filter((i): i is Message => !isHandoffItem(i));
 
-  return { items, messages, status, error, pendingApproval, sendMessage, stopAgent, approveHandoff, refineHandoff, approveMR, rejectMR };
+  return { items, messages, status, error, pendingApproval, mrReview, sendMessage, stopAgent, approveHandoff, refineHandoff, approveMR, rejectMR };
 }

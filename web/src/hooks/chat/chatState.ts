@@ -1,5 +1,5 @@
 import type { MutableRefObject } from "react";
-import type { ApprovalRequest, ChatItem, Message, ToolUse } from "../../types";
+import type { ApprovalRequest, ChatItem, Message, MRReviewData, ToolUse } from "../../types";
 
 export type ChatStatus = "idle" | "connecting" | "connected" | "typing" | "tool" | "disconnected" | "awaiting_approval";
 
@@ -9,6 +9,7 @@ export interface UseChatResult {
   status: ChatStatus;
   error: string | null;
   pendingApproval: ApprovalRequest | null;
+  mrReview: MRReviewData | null;
   sendMessage: (content: string) => void;
   stopAgent: () => void;
   approveHandoff: () => void;
