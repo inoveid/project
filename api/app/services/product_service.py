@@ -15,19 +15,36 @@ from app.schemas.product import ProductCreate, ProductUpdate
 
 logger = logging.getLogger(__name__)
 
-def _git_auth_env() -> dict:
-    """Return env with git credential helper using GITHUB_TOKEN."""
-    token = os.environ.get("GITHUB_TOKEN", "")
-    if not token:
-        return {}
+def _make_git_env(token: str) -> dict:
+    """Build env dict with git credential helper for the given token."""
     env = os.environ.copy()
     env["GIT_ASKPASS"] = "/bin/echo"
     env["GIT_TERMINAL_PROMPT"] = "0"
-    # Use credential helper that returns the token
     env["GIT_CONFIG_COUNT"] = "1"
     env["GIT_CONFIG_KEY_0"] = "credential.helper"
     env["GIT_CONFIG_VALUE_0"] = f"!f() {{ echo username=x-access-token; echo password={token}; }}; f"
     return env
+
+
+async def _git_auth_env(db: AsyncSession = None, product_id: uuid.UUID = None) -> dict:
+    """Return env with git credential helper. Checks product secrets first, then global env."""
+    # 1. Try product-level secret
+    if db and product_id:
+        from app.models.product_secret import ProductSecret
+        result = await db.execute(
+            select(ProductSecret).where(
+                ProductSecret.product_id == product_id,
+                ProductSecret.key == "GITHUB_TOKEN",
+            )
+        )
+        secret = result.scalar_one_or_none()
+        if secret and secret.value:
+            return _make_git_env(secret.value)
+    # 2. Fallback to global env
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if not token:
+        return {}
+    return _make_git_env(token)
 
 
 
@@ -324,7 +341,7 @@ async def get_product_git_info(db: AsyncSession, product_id: uuid.UUID) -> dict:
     remote_check = await run_git(["remote"])
     if remote_check.strip():
         remote_name_for_fetch = remote_check.splitlines()[0].strip()
-        auth_env = _git_auth_env()
+        auth_env = await _git_auth_env(db, product_id)
 
         # Fix single-branch clone: ensure refspec fetches ALL branches
         current_refspec = await run_git(["config", "--get", f"remote.{remote_name_for_fetch}.fetch"])
@@ -614,7 +631,7 @@ async def get_sync_status(db: AsyncSession, product_id: uuid.UUID) -> dict:
     # Unshallow if needed (shallow clones can't count ahead/behind)
     shallow_path = os.path.join(base, ".git", "shallow")
     if os.path.isfile(shallow_path):
-        unshal_env = _git_auth_env()
+        unshal_env = await _git_auth_env(db, product_id)
         unshal = await asyncio.create_subprocess_exec(
             "git", "fetch", "--unshallow", remote_name, cwd=base,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -626,7 +643,7 @@ async def get_sync_status(db: AsyncSession, product_id: uuid.UUID) -> dict:
             pass
 
     # Fetch latest
-    auth_env = _git_auth_env()
+    auth_env = await _git_auth_env(db, product_id)
     fetch_proc = await asyncio.create_subprocess_exec(
         "git", "fetch", "--quiet", remote_name, cwd=base,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -706,7 +723,7 @@ async def git_push(db: AsyncSession, product_id: uuid.UUID) -> dict:
     if not base or not _is_git_repo(base):
         raise ValueError("No git repository")
 
-    auth_env = _git_auth_env()
+    auth_env = await _git_auth_env(db, product_id)
     proc = await asyncio.create_subprocess_exec(
         "git", "push", "-u", "origin", "HEAD", cwd=base,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -717,7 +734,7 @@ async def git_push(db: AsyncSession, product_id: uuid.UUID) -> dict:
     if proc.returncode != 0:
         err = stderr.decode().strip()
         if "could not read Username" in err or "Authentication failed" in err or "Permission denied" in err:
-            raise ValueError("Нет доступа к GitHub. Добавьте GITHUB_TOKEN в Settings → Секреты")
+            raise ValueError("GitHub auth failed. Проверьте GITHUB_TOKEN в секретах продукта")
         raise ValueError(f"Push failed: {err}")
 
     return {"ok": True, "message": stdout.decode().strip() + "\n" + stderr.decode().strip()}
@@ -730,7 +747,7 @@ async def git_pull(db: AsyncSession, product_id: uuid.UUID) -> dict:
     if not base or not _is_git_repo(base):
         raise ValueError("No git repository")
 
-    auth_env = _git_auth_env()
+    auth_env = await _git_auth_env(db, product_id)
     proc = await asyncio.create_subprocess_exec(
         "git", "pull", "--ff-only", cwd=base,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -741,7 +758,7 @@ async def git_pull(db: AsyncSession, product_id: uuid.UUID) -> dict:
     if proc.returncode != 0:
         err = stderr.decode().strip()
         if "could not read Username" in err or "Authentication failed" in err or "Permission denied" in err:
-            raise ValueError("Нет доступа к GitHub. Добавьте GITHUB_TOKEN в Settings → Секреты")
+            raise ValueError("GitHub auth failed. Проверьте GITHUB_TOKEN в секретах продукта")
         raise ValueError(f"Pull failed: {err}")
 
     return {"ok": True, "message": stdout.decode().strip()}
