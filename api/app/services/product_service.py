@@ -800,8 +800,8 @@ async def get_changed_files(db: AsyncSession, product_id: uuid.UUID) -> dict:
         stdout, _ = await proc.communicate()
         return stdout.decode().strip()
 
-    # Get status
-    status_raw = await run_git(["status", "--porcelain"])
+    # Get status — use -u to show individual files inside untracked dirs
+    status_raw = await run_git(["status", "--porcelain", "-u"])
     if not status_raw:
         return {"files": []}
 
@@ -826,17 +826,36 @@ async def get_changed_files(db: AsyncSession, product_id: uuid.UUID) -> dict:
             status = "modified"
         files.append({"path": file_path, "status": status})
 
-    # Get combined diff (staged + unstaged)
+    # Get combined diff (staged + unstaged) for tracked files
     diff_raw = await run_git(["diff", "HEAD"])
     parsed = _parse_diff(diff_raw) if diff_raw else []
 
-    # Also get diff for untracked files — show their content
+    # For untracked files — generate a synthetic diff (all lines as additions)
     for f in files:
         if f["status"] == "untracked":
             full_path = os.path.join(base, f["path"])
             try:
-                content = open(full_path, "r", errors="replace").read()
-                f["content_preview"] = content[:2000]
+                file_content = open(full_path, "r", errors="replace").read()
+                lines = file_content.splitlines()
+                diff_lines = []
+                for i, ln in enumerate(lines[:200]):
+                    diff_lines.append({
+                        "type": "add", "content": "+" + ln,
+                        "old_no": None, "new_no": i + 1,
+                    })
+                parsed.append({
+                    "path": f["path"],
+                    "old_path": None,
+                    "status": "added",
+                    "additions": len(diff_lines),
+                    "deletions": 0,
+                    "hunks": [{
+                        "header": f"@@ -0,0 +1,{len(diff_lines)} @@",
+                        "old_start": 0, "old_lines": 0,
+                        "new_start": 1, "new_lines": len(diff_lines),
+                        "lines": diff_lines,
+                    }],
+                })
             except Exception:
                 pass
 
