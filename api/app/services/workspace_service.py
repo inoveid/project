@@ -109,26 +109,34 @@ class WorkspaceService:
         git_dir = os.path.join(repo_path, ".git")
         if not os.path.isdir(git_dir):
             await self._run_git("init", "-b", "main", cwd=repo_path)
+
+        # Always ensure git config is set (may be missing if .git was created externally)
+        current_email = await self._run_git(
+            "config", "--get", "user.email", cwd=repo_path, check=False
+        )
+        if not current_email:
             await self._run_git(
                 "config", "user.email", "agent@console.local", cwd=repo_path
             )
             await self._run_git(
                 "config", "user.name", "Agent Console", cwd=repo_path
             )
-            _ensure_gitignore(repo_path)
+
+        _ensure_gitignore(repo_path)
 
         # Ensure at least one commit (worktree requires it)
         has_commits = await self._run_git(
             "rev-parse", "HEAD", cwd=repo_path, check=False
         )
         if not has_commits:
-            _ensure_gitignore(repo_path)
+            logger.info("No commits in %s, creating initial commit", repo_path)
             gitkeep = os.path.join(repo_path, ".gitkeep")
             Path(gitkeep).touch()
             await self._run_git("add", ".", cwd=repo_path)
             await self._run_git(
-                "commit", "-m", "initial commit", "--allow-empty", cwd=repo_path
+                "commit", "-m", "initial commit", cwd=repo_path
             )
+            logger.info("Initial commit created in %s", repo_path)
 
     # ── Task-level worktree ──────────────────────────────────────
 
