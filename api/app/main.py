@@ -7,7 +7,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from app.config import settings
 from app.services.redis_service import init_redis, close_redis
 from app.database import async_session
-from app.routers import agents, auth, businesses, evaluations, memory, notifications_ws, products, sessions, specs, tasks, teams, workflow_edges, workflows, ws
+from app.routers import agents, auth, businesses, evaluations, memory, notifications_ws, products, sessions, specs, tasks, teams, terminal_ws, workflow_edges, workflows, ws
 import app.services.graph_service as graph_svc
 from app.services.system_agent_service import seed_system_agent
 from app.services.auth_user_service import get_current_user
@@ -65,3 +65,4 @@ app.include_router(specs.router, prefix="/api", tags=["specs"], dependencies=_au
 # WebSocket — без JWT (используют session-based auth при необходимости)
 app.include_router(ws.router, prefix="/api/ws", tags=["websocket"])
 app.include_router(notifications_ws.router, prefix="/api/ws", tags=["notifications"])
+app.include_router(terminal_ws.router, prefix="/api/ws", tags=["terminal"])
