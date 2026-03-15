@@ -1,4 +1,3 @@
-import shutil
 import uuid
 
 from fastapi import HTTPException
@@ -112,13 +111,15 @@ async def delete_business(
         )
 
     if force and products_count > 0:
+        from app.services.product_service import delete_product
         result = await db.execute(
             select(Product).where(Product.business_id == business_id)
         )
-        products = result.scalars().all()
+        products = list(result.scalars().all())
         for product in products:
-            shutil.rmtree(product.workspace_path, ignore_errors=True)
-            await db.delete(product)
+            await delete_product(db, product.id)
+        # Re-fetch business after product deletions (session may have expired it)
+        business = await _get_business_model(db, business_id)
 
     await db.delete(business)
     await db.commit()
