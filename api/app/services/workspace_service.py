@@ -128,7 +128,7 @@ class WorkspaceService:
         has_commits = await self._run_git(
             "rev-parse", "HEAD", cwd=repo_path, check=False
         )
-        if not has_commits:
+        if not has_commits or len(has_commits) != 40:
             logger.info("No commits in %s, creating initial commit", repo_path)
             gitkeep = os.path.join(repo_path, ".gitkeep")
             Path(gitkeep).touch()
@@ -249,7 +249,7 @@ class WorkspaceService:
         await self._commit_worktree(task_info)
 
         short_id = sub_session_id[:8]
-        branch_name = f"task/{task_id[:8]}/sub-{short_id}"
+        branch_name = f"sub/{task_id[:8]}-{short_id}"
         worktree_dir = os.path.join(WORKTREE_BASE, f"sub-{short_id}")
 
         # Clean up stale
