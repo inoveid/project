@@ -8,6 +8,7 @@ import type { FileEntry, CommitDetail, SyncStatus } from '../api/products';
 import { DiffViewer } from '../components/DiffViewer';
 import { SpecPanel } from '../components/SpecPanel';
 import { SecretsPanel } from '../components/SecretsPanel';
+import { ChangesPanel } from '../components/ChangesPanel';
 
 type ProductTab = 'code' | 'spec' | 'settings';
 
@@ -125,6 +126,7 @@ export function ProductPage() {
   });
 
   const [showBranchInput, setShowBranchInput] = useState(false);
+  const [showChanges, setShowChanges] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
 
   const createBranchMutation = useMutation({
@@ -295,7 +297,12 @@ export function ProductPage() {
           <span className="text-[10px] text-red-500">{(createBranchMutation.error as Error).message}</span>
         )}
         {gitInfo?.changed_files ? (
-          <span className="text-xs text-amber-600">{gitInfo.changed_files} изменений</span>
+          <button
+            onClick={() => setShowChanges(true)}
+            className="text-xs text-amber-600 hover:text-amber-700 hover:underline"
+          >
+            {gitInfo.changed_files} {gitInfo.changed_files === 1 ? 'изменение' : gitInfo.changed_files < 5 ? 'изменения' : 'изменений'}
+          </button>
         ) : null}
         {hasAnyModified && (
           <button
@@ -624,6 +631,12 @@ export function ProductPage() {
           </>
         )}
       </div>
+      {showChanges && (
+        <ChangesPanel
+          productId={id}
+          onClose={() => setShowChanges(false)}
+        />
+      )}
     </div>
   );
 }

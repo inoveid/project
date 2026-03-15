@@ -194,3 +194,25 @@ export function saveSecret(productId: string, key: string, value: string): Promi
 export function deleteSecret(productId: string, secretId: string): Promise<void> {
   return fetchApi<void>(`/products/${productId}/secrets/${secretId}`, { method: 'DELETE' });
 }
+
+export interface ChangedFile {
+  path: string;
+  status: 'modified' | 'added' | 'deleted' | 'untracked' | 'renamed';
+  content_preview?: string;
+}
+
+export interface ChangesResult {
+  files: ChangedFile[];
+  diff_files: DiffFile[];
+}
+
+export function getChangedFiles(productId: string): Promise<ChangesResult> {
+  return fetchApi<ChangesResult>(`/products/${productId}/git/changes`);
+}
+
+export function discardFile(productId: string, path: string): Promise<{ ok: boolean; path: string }> {
+  return fetchApi(`/products/${productId}/git/discard`, {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  });
+}
