@@ -371,10 +371,29 @@ class WorkspaceService:
         if not base or base == info.branch_name:
             base = "main"
 
+        # Debug: check branch exists and has commits
+        branch_log = await self._run_git(
+            "log", "--oneline", "-5", info.branch_name,
+            cwd=info.repo_path, check=False,
+        )
+        base_log = await self._run_git(
+            "log", "--oneline", "-5", base,
+            cwd=info.repo_path, check=False,
+        )
+        logger.info(
+            "get_task_diff: base=%s, branch=%s, repo=%s
+  branch_log: %s
+  base_log: %s",
+            base, info.branch_name, info.repo_path,
+            branch_log[:200] if branch_log else "(empty)",
+            base_log[:200] if base_log else "(empty)",
+        )
+
         diff = await self._run_git(
             "diff", f"{base}...{info.branch_name}",
             cwd=info.repo_path, check=False,
         )
+        logger.info("get_task_diff: diff result length=%d", len(diff))
         return diff
 
     async def merge_task_branch(
