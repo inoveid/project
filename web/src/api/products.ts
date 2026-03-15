@@ -216,3 +216,10 @@ export function discardFile(productId: string, path: string): Promise<{ ok: bool
     body: JSON.stringify({ path }),
   });
 }
+
+export function gitCommit(productId: string, message: string): Promise<{ ok: boolean; message: string }> {
+  return fetchApi(`/products/${productId}/git/commit`, {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  });
+}

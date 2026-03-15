@@ -328,3 +328,21 @@ async def git_discard(
     except ValueError as e:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/products/{product_id}/git/commit")
+async def git_commit_endpoint(
+    product_id: uuid.UUID,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import git_commit
+    message = body.get("message", "")
+    if not message:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Commit message is required")
+    try:
+        return await git_commit(db, product_id, message)
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(e))

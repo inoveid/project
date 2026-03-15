@@ -934,3 +934,34 @@ async def discard_file(db: AsyncSession, product_id: uuid.UUID, file_path: str) 
         await run_git(["reset", "HEAD", "--", file_path])
 
     return {"ok": True, "path": file_path}
+
+
+async def git_commit(db: AsyncSession, product_id: uuid.UUID, message: str) -> dict:
+    """Stage all changes and commit."""
+    product = await get_product(db, product_id)
+    base = product.workspace_path
+    if not base or not _is_git_repo(base):
+        raise ValueError("No git repository")
+
+    if not message.strip():
+        raise ValueError("Commit message is required")
+
+    async def run_git(args: list[str]) -> tuple[int, str, str]:
+        proc = await asyncio.create_subprocess_exec(
+            "git", *args, cwd=base,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        return proc.returncode, stdout.decode().strip(), stderr.decode().strip()
+
+    # Stage all changes
+    rc, _, err = await run_git(["add", "-A"])
+    if rc != 0:
+        raise ValueError(f"git add failed: {err}")
+
+    # Commit
+    rc, out, err = await run_git(["commit", "-m", message])
+    if rc != 0:
+        raise ValueError(f"Commit failed: {err}")
+
+    return {"ok": True, "message": out}

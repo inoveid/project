@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getChangedFiles, discardFile } from '../api/products';
+import { getChangedFiles, discardFile, gitCommit } from '../api/products';
 import type { DiffFile } from '../api/products';
 import { DiffViewer } from './DiffViewer';
 
@@ -21,6 +21,7 @@ export function ChangesPanel({ productId, onClose }: ChangesPanelProps) {
   const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState<string | null>(null);
+  const [commitMessage, setCommitMessage] = useState('');
 
   const { data, isLoading } = useQuery({
     queryKey: ['product-changes', productId],
@@ -55,6 +56,16 @@ export function ChangesPanel({ productId, onClose }: ChangesPanelProps) {
       queryClient.invalidateQueries({ queryKey: ['product-git', productId] });
       queryClient.invalidateQueries({ queryKey: ['product-files', productId] });
       queryClient.invalidateQueries({ queryKey: ['spec-files', productId] });
+    },
+  });
+
+  const commitMut = useMutation({
+    mutationFn: (msg: string) => gitCommit(productId, msg),
+    onSuccess: () => {
+      setCommitMessage('');
+      queryClient.invalidateQueries({ queryKey: ['product-changes', productId] });
+      queryClient.invalidateQueries({ queryKey: ['product-git', productId] });
+      queryClient.invalidateQueries({ queryKey: ['product-sync', productId] });
     },
   });
 
@@ -102,6 +113,32 @@ export function ChangesPanel({ productId, onClose }: ChangesPanelProps) {
           )}
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
         </div>
+
+        {/* Commit form */}
+        {files.length > 0 && (
+          <div className="flex items-center gap-2 px-4 py-2 border-b bg-gray-50 shrink-0">
+            <input
+              type="text"
+              value={commitMessage}
+              onChange={(e) => setCommitMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && commitMessage.trim()) commitMut.mutate(commitMessage.trim());
+              }}
+              placeholder="Сообщение коммита..."
+              className="flex-1 text-xs px-3 py-1.5 border rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+            />
+            <button
+              onClick={() => commitMut.mutate(commitMessage.trim())}
+              disabled={!commitMessage.trim() || commitMut.isPending}
+              className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+            >
+              {commitMut.isPending ? '...' : 'Commit'}
+            </button>
+            {commitMut.isError && (
+              <span className="text-[10px] text-red-500">{(commitMut.error as Error).message}</span>
+            )}
+          </div>
+        )}
 
         {/* Content */}
         <div className="flex flex-1 min-h-0">
