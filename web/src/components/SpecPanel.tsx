@@ -60,7 +60,7 @@ export function SpecPanel({ productId }: SpecPanelProps) {
   };
 
   return (
-    <div className="flex h-full">
+    <div className="flex flex-1 min-h-0">
       {/* Spec file list */}
       <div className="w-48 border-r bg-gray-50 flex flex-col shrink-0">
         <div className="px-3 py-2 border-b">
@@ -102,7 +102,7 @@ export function SpecPanel({ productId }: SpecPanelProps) {
       </div>
 
       {/* Content area */}
-      <div className="flex-1 flex flex-col min-w-0 h-full">
+      <div className="flex-1 flex flex-col min-w-0">
         {selectedFile ? (
           <>
             <div className="px-4 py-2 border-b bg-white flex items-center gap-2 shrink-0">
