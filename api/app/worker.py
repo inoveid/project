@@ -532,6 +532,8 @@ async def _handle_graph_result(
         mr_diff = (last_state or {}).get("mr_diff")
         if mr_diff and (last_state or {}).get("mr_approved") is None:
             # MR gate interrupt — mr_ready was already sent by complete_node
+            # Send done to finalize streaming message before showing MR card
+            await publisher.send_json({"type": "done"})
             return True
         hr = (last_state or {}).get("handoff_result")
         if hr:

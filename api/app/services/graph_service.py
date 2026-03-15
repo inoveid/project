@@ -471,6 +471,9 @@ def route_after_agent(
 ) -> Literal["notify_handoff", "auto_handoff", "complete", "blocked", "__end__"]:
     hr = state.get("handoff_result")
     if not hr:
+        # No handoff, but if there's a worktree — go to complete for MR
+        if state.get("task_worktree_path"):
+            return "complete"
         return END
     rt = hr.get("result_type")
     if rt == HandoffResultType.COMPLETED:
