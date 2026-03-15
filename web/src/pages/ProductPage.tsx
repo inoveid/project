@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Editor, { type Monaco } from '@monaco-editor/react';
 import { getProduct } from '../api/products';
-import { getFileTree, readFile, writeFile, getGitInfo, checkoutBranch, getCommitDetail, getSyncStatus, gitPush, gitPull, addRemote } from '../api/products';
+import { getFileTree, readFile, writeFile, getGitInfo, checkoutBranch, getCommitDetail, getSyncStatus, gitPush, gitPull, addRemote, createBranch } from '../api/products';
 import type { FileEntry, CommitDetail, SyncStatus } from '../api/products';
 import { DiffViewer } from '../components/DiffViewer';
 
@@ -116,6 +116,19 @@ export function ProductPage() {
       setShowRemoteInput(false);
       setRemoteUrl('');
       refetchSync();
+    },
+  });
+
+  const [showBranchInput, setShowBranchInput] = useState(false);
+  const [newBranchName, setNewBranchName] = useState('');
+
+  const createBranchMutation = useMutation({
+    mutationFn: (name: string) => createBranch(id, name),
+    onSuccess: () => {
+      setShowBranchInput(false);
+      setNewBranchName('');
+      queryClient.invalidateQueries({ queryKey: ['product-git', id] });
+      queryClient.invalidateQueries({ queryKey: ['product-files', id] });
     },
   });
 
@@ -234,6 +247,47 @@ export function ProductPage() {
               <option key={b} value={b}>{b}</option>
             ))}
           </select>
+        )}
+        {gitInfo?.initialized && (
+          <button
+            onClick={() => setShowBranchInput(!showBranchInput)}
+            className="text-xs text-gray-500 hover:text-blue-600 px-1"
+            title="Создать ветку"
+          >
+            +
+          </button>
+        )}
+        {showBranchInput && (
+          <form
+            onSubmit={(e) => { e.preventDefault(); if (newBranchName.trim()) createBranchMutation.mutate(newBranchName.trim()); }}
+            className="flex items-center gap-1"
+          >
+            <input
+              type="text"
+              value={newBranchName}
+              onChange={(e) => setNewBranchName(e.target.value)}
+              placeholder="new-branch"
+              autoFocus
+              className="text-xs px-2 py-0.5 border rounded font-mono w-36 focus:outline-none focus:ring-1 focus:ring-blue-400"
+            />
+            <button
+              type="submit"
+              disabled={!newBranchName.trim() || createBranchMutation.isPending}
+              className="text-xs px-2 py-0.5 bg-blue-600 text-white rounded disabled:opacity-50"
+            >
+              {createBranchMutation.isPending ? '...' : 'OK'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowBranchInput(false); setNewBranchName(''); }}
+              className="text-xs text-gray-400 hover:text-gray-600"
+            >
+              ✕
+            </button>
+          </form>
+        )}
+        {createBranchMutation.isError && (
+          <span className="text-[10px] text-red-500">{(createBranchMutation.error as Error).message}</span>
         )}
         {gitInfo?.changed_files ? (
           <span className="text-xs text-amber-600">{gitInfo.changed_files} изменений</span>

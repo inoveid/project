@@ -216,3 +216,22 @@ async def git_add_remote(
     except ValueError as e:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/products/{product_id}/git/branch")
+async def git_create_branch(
+    product_id: uuid.UUID,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import create_branch
+    name = body.get("name", "")
+    if not name:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Branch name required")
+    from_branch = body.get("from_branch")
+    try:
+        return await create_branch(db, product_id, name, from_branch)
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(e))

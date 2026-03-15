@@ -165,3 +165,10 @@ export function addRemote(productId: string, url: string): Promise<{ ok: boolean
     body: JSON.stringify({ url }),
   });
 }
+
+export function createBranch(productId: string, name: string, fromBranch?: string): Promise<{ branch: string }> {
+  return fetchApi(`/products/${productId}/git/branch`, {
+    method: 'POST',
+    body: JSON.stringify({ name, from_branch: fromBranch }),
+  });
+}

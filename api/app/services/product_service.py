@@ -641,6 +641,29 @@ async def add_remote(db: AsyncSession, product_id: uuid.UUID, url: str) -> dict:
     return {"ok": True, "remote": "origin", "url": url}
 
 
+
+
+async def create_branch(db: AsyncSession, product_id: uuid.UUID, branch_name: str, from_branch: str | None = None) -> dict:
+    """Create a new branch and optionally switch to it."""
+    product = await get_product(db, product_id)
+    base = product.workspace_path
+    if not base or not _is_git_repo(base):
+        raise ValueError("No git repository")
+
+    proc = await asyncio.create_subprocess_exec(
+        "git", "checkout", "-b", branch_name,
+        *([] if not from_branch else [from_branch]),
+        cwd=base,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr_bytes = await proc.communicate()
+
+    if proc.returncode != 0:
+        err = stderr_bytes.decode().strip()
+        raise ValueError(f"Failed to create branch: {err}")
+
+    return {"branch": branch_name}
+
 async def get_product_commit_detail(db: AsyncSession, product_id: uuid.UUID, commit_hash: str) -> dict:
     """Get details of a specific commit."""
     import asyncio
