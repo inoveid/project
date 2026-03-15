@@ -173,3 +173,24 @@ export function createBranch(productId: string, name: string, fromBranch?: strin
     body: JSON.stringify({ name, from_branch: fromBranch }),
   });
 }
+
+export interface SecretItem {
+  id: string;
+  key: string;
+  has_value: boolean;
+}
+
+export function getSecrets(productId: string): Promise<SecretItem[]> {
+  return fetchApi<SecretItem[]>(`/products/${productId}/secrets`);
+}
+
+export function saveSecret(productId: string, key: string, value: string): Promise<{ ok: boolean; key: string }> {
+  return fetchApi(`/products/${productId}/secrets`, {
+    method: 'POST',
+    body: JSON.stringify({ key, value }),
+  });
+}
+
+export function deleteSecret(productId: string, secretId: string): Promise<void> {
+  return fetchApi<void>(`/products/${productId}/secrets/${secretId}`, { method: 'DELETE' });
+}

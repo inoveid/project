@@ -6,6 +6,10 @@ import { getProduct } from '../api/products';
 import { getFileTree, readFile, writeFile, getGitInfo, checkoutBranch, getCommitDetail, getSyncStatus, gitPush, gitPull, addRemote, createBranch } from '../api/products';
 import type { FileEntry, CommitDetail, SyncStatus } from '../api/products';
 import { DiffViewer } from '../components/DiffViewer';
+import { SpecPanel } from '../components/SpecPanel';
+import { SecretsPanel } from '../components/SecretsPanel';
+
+type ProductTab = 'code' | 'spec' | 'settings';
 
 // Map file extension to Monaco language
 function getLanguage(path: string): string {
@@ -47,6 +51,7 @@ export function ProductPage() {
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [selectedCommit, setSelectedCommit] = useState<CommitDetail | null>(null);
   const editorRef = useRef<any>(null);
+  const [activeSection, setActiveSection] = useState<ProductTab>('code');
 
   const { data: files } = useQuery({
     queryKey: ['product-files', id, currentPath],
@@ -303,7 +308,30 @@ export function ProductPage() {
         )}
       </div>
 
+      {/* Section tabs */}
+      <div className="flex items-center gap-0 border-b bg-white shrink-0">
+        {(['code', 'spec', 'settings'] as const).map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveSection(tab)}
+            className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
+              activeSection === tab
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {tab === 'code' ? 'Code' : tab === 'spec' ? 'Spec' : 'Settings'}
+          </button>
+        ))}
+      </div>
+
       <div className="flex flex-1 min-h-0">
+        {activeSection === 'spec' ? (
+          <SpecPanel productId={id} />
+        ) : activeSection === 'settings' ? (
+          <SecretsPanel productId={id} />
+        ) : (
+          <>
         {/* File tree */}
         <div className="w-56 border-r bg-gray-50 flex flex-col overflow-hidden shrink-0">
           {/* Breadcrumb */}
@@ -592,6 +620,8 @@ export function ProductPage() {
               </div>
             </div>
           </div>
+        )}
+          </>
         )}
       </div>
     </div>
