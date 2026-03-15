@@ -178,6 +178,7 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
 
       <ChatWindow items={items} />
 
+      {(() => { console.log("[DEBUG] ChatPanel render:", { mrData: !!mrData, mrDataFiles: mrData?.diffFiles?.length, effectiveApproval: !!effectiveApproval, pendingApproval: !!pendingApproval, approvalFromItems: !!approvalFromItems, itemTypes: items.filter(i => "itemType" in i).map(i => (i as any).itemType) }); return null; })()}
       {mrData ? (
         <MRReviewCard
           mrData={mrData}

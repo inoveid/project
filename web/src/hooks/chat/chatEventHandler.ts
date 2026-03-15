@@ -146,6 +146,7 @@ export function handleEvent(
     }
 
     case "mr_ready": {
+      console.log("[DEBUG] mr_ready received:", JSON.stringify(event).slice(0, 500));
       const mrReviewItem: HandoffItem = {
         id: `mr-review-${event.task_id}`,
         itemType: "mr_review",
@@ -169,6 +170,7 @@ export function handleEvent(
     }
 
     case "done": {
+      console.log("[DEBUG] done received, items count:", callbacks.setItems.length);
       setPendingApproval(null);
       setItems((prev) => prev.filter((i) => !isHandoffItem(i) || (i.id !== "__activity__" && i.itemType !== "approval_required" && i.itemType !== "handoff_start")));
       const text = refs.textRef.current;
@@ -204,6 +206,7 @@ export function handleEvent(
       break;
 
     case "approval_required": {
+      console.log("[DEBUG] approval_required received:", JSON.stringify(event).slice(0, 300));
       setPendingApproval({
         fromAgent: event.from_agent,
         toAgent: event.to_agent,
@@ -237,6 +240,7 @@ export function handleEvent(
     }
 
     case "status": {
+      console.log("[DEBUG] status received:", event.status);
       const statusLabels: Record<string, string> = {
         thinking: "Думает...",
       };
