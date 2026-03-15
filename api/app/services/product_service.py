@@ -302,13 +302,28 @@ async def get_product_git_info(db: AsyncSession, product_id: uuid.UUID) -> dict:
     if remote_check.strip():
         remote_name_for_fetch = remote_check.splitlines()[0].strip()
         auth_env = _git_auth_env()
-        # For shallow clones, also unshallow to get full branch info
+
+        # Fix single-branch clone: ensure refspec fetches ALL branches
+        current_refspec = await run_git(["config", "--get", f"remote.{remote_name_for_fetch}.fetch"])
+        if current_refspec and "*" not in current_refspec:
+            await run_git(["config", f"remote.{remote_name_for_fetch}.fetch", f"+refs/heads/*:refs/remotes/{remote_name_for_fetch}/*"])
+
+        # For shallow clones, unshallow first
         shallow_path = os.path.join(base, ".git", "shallow")
-        fetch_args = ["git", "fetch", remote_name_for_fetch]
         if os.path.isfile(shallow_path):
-            fetch_args = ["git", "fetch", "--unshallow", remote_name_for_fetch]
+            unshal_proc = await asyncio.create_subprocess_exec(
+                "git", "fetch", "--unshallow", remote_name_for_fetch, cwd=base,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                **({"env": auth_env} if auth_env else {}),
+            )
+            try:
+                await asyncio.wait_for(unshal_proc.communicate(), timeout=30)
+            except asyncio.TimeoutError:
+                pass
+
+        # Fetch all branches
         fetch_proc = await asyncio.create_subprocess_exec(
-            *fetch_args, cwd=base,
+            "git", "fetch", remote_name_for_fetch, cwd=base,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             **({"env": auth_env} if auth_env else {}),
         )
