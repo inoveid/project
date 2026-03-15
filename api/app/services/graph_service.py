@@ -339,6 +339,14 @@ async def complete_node(state: WorkflowState, config: RunnableConfig) -> dict:
         try:
             diff = await workspace_service.get_task_diff(task_id)
             logger.info("complete_node: diff length=%d lines", len(diff.splitlines()) if diff else 0)
+
+            # If diff is empty, try to get commit log as fallback
+            if not diff.strip():
+                commit_log = await workspace_service.get_task_commit_log(task_id)
+                if commit_log:
+                    logger.info("complete_node: diff empty but commits exist, using commit log")
+                    diff = commit_log  # Use commit log as diff content
+
             if diff.strip():
                 # Publish MR event for frontend
                 diff_files = parse_unified_diff(diff)

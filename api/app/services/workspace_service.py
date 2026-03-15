@@ -411,6 +411,26 @@ class WorkspaceService:
 
         return diff
 
+    async def get_task_commit_log(self, task_id: str) -> str:
+        """Get commit log of task branch vs base (fallback when diff is empty)."""
+        info = self._task_worktrees.get(task_id)
+        if not info:
+            return ""
+
+        base = await self._run_git(
+            "rev-parse", "--abbrev-ref", "HEAD",
+            cwd=info.repo_path, check=False,
+        )
+        if not base or base == info.branch_name or base == "HEAD":
+            base = "main"
+
+        # Show commits on task branch not in base, with full diff
+        log_diff = await self._run_git(
+            "log", "--patch", f"{base}..{info.branch_name}",
+            cwd=info.repo_path, check=False,
+        )
+        return log_diff
+
     async def merge_task_branch(
         self,
         task_id: str,

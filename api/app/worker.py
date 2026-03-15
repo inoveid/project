@@ -510,6 +510,9 @@ async def _handle_graph_result(
         await _try_update_task_status(db, task_id, "awaiting_user")
         # Check if this is an MR gate interrupt (not handoff)
         mr_diff = (last_state or {}).get("mr_diff")
+        logger.info("_handle_graph_result: interrupted=True, mr_diff=%s, mr_approved=%s, hr=%s",
+                     bool(mr_diff), (last_state or {}).get("mr_approved"),
+                     bool((last_state or {}).get("handoff_result")))
         if mr_diff and (last_state or {}).get("mr_approved") is None:
             # MR gate interrupt — mr_ready was already sent by complete_node
             # Send done to finalize streaming message before showing MR card
