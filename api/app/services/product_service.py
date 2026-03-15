@@ -693,6 +693,8 @@ async def git_push(db: AsyncSession, product_id: uuid.UUID) -> dict:
 
     if proc.returncode != 0:
         err = stderr.decode().strip()
+        if "could not read Username" in err or "Authentication failed" in err or "Permission denied" in err:
+            raise ValueError("Нет доступа к GitHub. Добавьте GITHUB_TOKEN в Settings → Секреты")
         raise ValueError(f"Push failed: {err}")
 
     return {"ok": True, "message": stdout.decode().strip() + "\n" + stderr.decode().strip()}
@@ -715,6 +717,8 @@ async def git_pull(db: AsyncSession, product_id: uuid.UUID) -> dict:
 
     if proc.returncode != 0:
         err = stderr.decode().strip()
+        if "could not read Username" in err or "Authentication failed" in err or "Permission denied" in err:
+            raise ValueError("Нет доступа к GitHub. Добавьте GITHUB_TOKEN в Settings → Секреты")
         raise ValueError(f"Pull failed: {err}")
 
     return {"ok": True, "message": stdout.decode().strip()}
