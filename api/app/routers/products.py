@@ -235,3 +235,69 @@ async def git_create_branch(
     except ValueError as e:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ─── Product Secrets ───
+
+
+@router.get("/products/{product_id}/secrets")
+async def list_secrets(
+    product_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """List secrets for a product (values masked)."""
+    from sqlalchemy import select
+    from app.models.product_secret import ProductSecret
+    await get_product(db, product_id)  # ensure exists
+    result = await db.execute(
+        select(ProductSecret).where(ProductSecret.product_id == product_id).order_by(ProductSecret.key)
+    )
+    secrets = result.scalars().all()
+    return [{"id": str(s.id), "key": s.key, "has_value": bool(s.value)} for s in secrets]
+
+
+@router.post("/products/{product_id}/secrets", status_code=201)
+async def create_or_update_secret(
+    product_id: uuid.UUID,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create or update a secret."""
+    from sqlalchemy import select
+    from app.models.product_secret import ProductSecret
+    await get_product(db, product_id)
+    key = body.get("key", "").strip()
+    value = body.get("value", "")
+    if not key:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Key is required")
+
+    result = await db.execute(
+        select(ProductSecret).where(ProductSecret.product_id == product_id, ProductSecret.key == key)
+    )
+    existing = result.scalar_one_or_none()
+    if existing:
+        existing.value = value
+    else:
+        secret = ProductSecret(product_id=product_id, key=key, value=value)
+        db.add(secret)
+    await db.commit()
+    return {"ok": True, "key": key}
+
+
+@router.delete("/products/{product_id}/secrets/{secret_id}", status_code=204)
+async def delete_secret(
+    product_id: uuid.UUID,
+    secret_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a secret."""
+    from sqlalchemy import select
+    from app.models.product_secret import ProductSecret
+    result = await db.execute(
+        select(ProductSecret).where(ProductSecret.id == secret_id, ProductSecret.product_id == product_id)
+    )
+    secret = result.scalar_one_or_none()
+    if secret:
+        await db.delete(secret)
+        await db.commit()
