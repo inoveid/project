@@ -589,6 +589,9 @@ async def _run_graph(graph, input, config: dict) -> tuple[bool, bool, bool, dict
             hr = chunk.get("handoff_result")
             if isinstance(hr, dict) and hr.get("result_type") == "completed":
                 completed = True
+            # MR approved and merged — also counts as completed
+            if chunk.get("mr_approved") is True:
+                completed = True
         logger.info("_run_graph: stream ended after %d chunks, completed=%s", chunk_count, completed)
     except Exception as exc:
         logger.error("Graph error for session %s: %s",

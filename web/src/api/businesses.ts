@@ -41,15 +41,21 @@ export function updateBusiness(id: string, data: BusinessUpdate): Promise<Busine
 
 export async function deleteBusiness(id: string, force = false): Promise<void> {
   const query = force ? '?force=true' : '';
-  const response = await fetch(`${BASE_URL}/businesses/${id}${query}`, {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (response.ok || response.status === 204) return;
-  if (response.status === 409) {
-    const body: unknown = await response.json();
-    throw new BusinessConflictError(hasProductsCount(body) ? body.products_count : 0);
+  try {
+    await fetchApi<void>(`/businesses/${id}${query}`, { method: 'DELETE' });
+  } catch (err) {
+    if (err instanceof Error) {
+      // fetchApi extracts detail from JSON — check for products_count
+      try {
+        const parsed = JSON.parse(err.message);
+        if (hasProductsCount(parsed)) {
+          throw new BusinessConflictError(parsed.products_count);
+        }
+      } catch (e) {
+        if (e instanceof BusinessConflictError) throw e;
+        // Not JSON or no products_count — rethrow original
+      }
+    }
+    throw err;
   }
-  const text = await response.text();
-  throw new Error(`API error ${response.status}: ${text}`);
 }
