@@ -24,6 +24,8 @@ export function TerminalPanel({ productId, visible }: TerminalProps) {
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const initializedRef = useRef(false);
+  const lastSizeRef = useRef<{ cols: number; rows: number }>({ cols: 0, rows: 0 });
+  const connectedAtRef = useRef(0);
 
   const handleData = useCallback((data: string) => {
     xtermRef.current?.write(data);
@@ -34,6 +36,13 @@ export function TerminalPanel({ productId, visible }: TerminalProps) {
     enabled: visible,
     onData: handleData,
   });
+
+  // Track connection time to suppress early resizes
+  useEffect(() => {
+    if (status === "connected") {
+      connectedAtRef.current = Date.now();
+    }
+  }, [status]);
 
   // Initialize xterm
   useEffect(() => {
@@ -71,6 +80,7 @@ export function TerminalPanel({ productId, visible }: TerminalProps) {
     // Fit after open
     requestAnimationFrame(() => {
       fitAddon.fit();
+      lastSizeRef.current = { cols: term.cols, rows: term.rows };
     });
 
     // Send user input to PTY
@@ -82,6 +92,9 @@ export function TerminalPanel({ productId, visible }: TerminalProps) {
     fitAddonRef.current = fitAddon;
     initializedRef.current = true;
 
+    // Focus terminal so keyboard input works
+    term.focus();
+
     return () => {
       term.dispose();
       xtermRef.current = null;
@@ -90,32 +103,58 @@ export function TerminalPanel({ productId, visible }: TerminalProps) {
     };
   }, [visible, send]);
 
-  // Handle resize
+  // Handle resize — only send if cols/rows actually changed and not right after connect
   useEffect(() => {
     if (!visible || !fitAddonRef.current) return;
 
     const handleResize = () => {
       const fitAddon = fitAddonRef.current;
-      if (!fitAddon) return;
-      fitAddon.fit();
       const term = xtermRef.current;
-      if (term) {
-        resize(term.cols, term.rows);
+      if (!fitAddon || !term) return;
+
+      fitAddon.fit();
+
+      const { cols, rows } = term;
+      const last = lastSizeRef.current;
+
+      // Skip if size didn't actually change
+      if (cols === last.cols && rows === last.rows) return;
+
+      // Skip resize within 500ms of initial connection (prevents duplicate prompt)
+      if (Date.now() - connectedAtRef.current < 500) {
+        lastSizeRef.current = { cols, rows };
+        return;
       }
+
+      lastSizeRef.current = { cols, rows };
+      resize(cols, rows);
     };
 
-    // Fit on visibility change
-    requestAnimationFrame(handleResize);
+    // Fit on visibility change (debounced)
+    const timer = setTimeout(handleResize, 50);
 
     // Observe container size changes
     const container = containerRef.current;
-    if (!container) return;
+    if (!container) return () => clearTimeout(timer);
 
-    const observer = new ResizeObserver(handleResize);
+    let resizeTimeout: ReturnType<typeof setTimeout>;
+    const observer = new ResizeObserver(() => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(handleResize, 100);
+    });
     observer.observe(container);
 
-    return () => observer.disconnect();
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(resizeTimeout);
+      observer.disconnect();
+    };
   }, [visible, resize]);
+
+  // Focus terminal when clicking on it (Monaco may steal focus)
+  const handleContainerClick = useCallback(() => {
+    xtermRef.current?.focus();
+  }, []);
 
   if (!visible) return null;
 
@@ -135,7 +174,11 @@ export function TerminalPanel({ productId, visible }: TerminalProps) {
           </button>
         )}
       </div>
-      <div ref={containerRef} className="flex-1 min-h-0" />
+      <div
+        ref={containerRef}
+        className="flex-1 min-h-0"
+        onClick={handleContainerClick}
+      />
     </div>
   );
 }
