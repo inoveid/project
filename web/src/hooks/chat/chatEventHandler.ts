@@ -159,8 +159,9 @@ export function handleEvent(
         },
       };
       setItems((prev) => {
-        const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
-        return [...withoutActivity, mrReviewItem];
+        // Remove activity items AND approval_required items (MR replaces handoff approval)
+        const cleaned = prev.filter((i) => !isHandoffItem(i) || (i.id !== "__activity__" && i.itemType !== "approval_required" && i.itemType !== "handoff_start"));
+        return [...cleaned, mrReviewItem];
       });
       setPendingApproval(null);  // Clear any pending handoff approval — MR takes priority
       setStatus("awaiting_approval");
@@ -240,8 +241,12 @@ export function handleEvent(
         thinking: "Думает...",
       };
       const label = statusLabels[event.status] || event.status;
+      // Clear stale approval/MR items when agent starts thinking
+      if (event.status === "thinking") {
+        setPendingApproval(null);
+      }
       setItems((prev) => {
-        const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
+        const withoutActivity = prev.filter((i) => !isHandoffItem(i) || (i.id !== "__activity__" && i.itemType !== "approval_required" && i.itemType !== "mr_review"));
         const activityItem: HandoffItem = {
           id: "__activity__",
           itemType: "activity",
