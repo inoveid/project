@@ -7,6 +7,7 @@ import { ChatWindow } from '../ChatWindow';
 import type { Task, Session, SessionListItem } from '../../types';
 import { isHandoffItem } from '../../types';
 import { ApprovalCard } from '../ApprovalCard';
+import { MRReviewCard } from '../MRReviewCard';
 
 interface TaskChatsTabProps {
   task: Task;
@@ -132,11 +133,13 @@ function ActiveSessionChat({
   }
 
   const wsReady = chat.status === 'connected' || chat.status === 'awaiting_approval' || chat.status === 'typing';
+  const showMrReview = chat.mrReview && isActive && wsReady && !approvedLocally;
   const showApproval =
-    (task.status === 'awaiting_user' || chat.status === 'awaiting_approval')
+    !showMrReview
+    && (task.status === 'awaiting_user' || chat.status === 'awaiting_approval')
     && isActive && wsReady && !approvedLocally;
 
-  const canSend = chat.status === 'connected' && isActive && !showApproval;
+  const canSend = chat.status === 'connected' && isActive && !showApproval && !showMrReview;
 
   return (
     <>
@@ -168,6 +171,22 @@ function ActiveSessionChat({
       )}
 
       <ChatWindow items={isActive ? chat.items : (session?.messages ?? [])} />
+
+      {showMrReview && chat.mrReview && (
+        <MRReviewCard
+          mrData={chat.mrReview}
+          onApprove={() => {
+            chat.approveMR();
+            setApprovedLocally(true);
+            void queryClient.invalidateQueries({ queryKey: ['tasks', 'detail', task.id] });
+            void queryClient.invalidateQueries({ queryKey: ['sessions', 'by-task', task.id] });
+          }}
+          onReject={(comment) => {
+            chat.rejectMR(comment);
+            void queryClient.invalidateQueries({ queryKey: ['tasks', 'detail', task.id] });
+          }}
+        />
+      )}
 
       {showApproval && (
         <ApprovalCard
