@@ -261,7 +261,7 @@ async def get_product_git_info(db: AsyncSession, product_id: uuid.UUID) -> dict:
 
     # Fix detached HEAD (e.g. after shallow clone)
     if not branch:
-        _, symbolic = await run_git(["branch", "-r", "--points-at", "HEAD", "--format=%(refname:short)"])
+        symbolic = await run_git(["branch", "-r", "--points-at", "HEAD", "--format=%(refname:short)"])
         target = "main"
         for ref in symbolic.splitlines():
             ref = ref.strip()
