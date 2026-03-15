@@ -27,7 +27,10 @@ export function TerminalPanel({ productId, visible }: TerminalProps) {
   const lastSizeRef = useRef<{ cols: number; rows: number }>({ cols: 0, rows: 0 });
   const connectedAtRef = useRef(0);
 
+  console.log("[Terminal] render, visible:", visible, "productId:", productId, "initialized:", initializedRef.current);
+
   const handleData = useCallback((data: string) => {
+    console.log("[Terminal] handleData called, len:", data.length, "xterm exists:", !!xtermRef.current);
     xtermRef.current?.write(data);
   }, []);
 
@@ -40,14 +43,17 @@ export function TerminalPanel({ productId, visible }: TerminalProps) {
   // Track connection time to suppress early resizes
   useEffect(() => {
     if (status === "connected") {
+      console.log("[Terminal] status=connected, setting connectedAt");
       connectedAtRef.current = Date.now();
     }
   }, [status]);
 
   // Initialize xterm
   useEffect(() => {
+    console.log("[Terminal] init effect, visible:", visible, "container:", !!containerRef.current, "initialized:", initializedRef.current);
     if (!visible || !containerRef.current || initializedRef.current) return;
 
+    console.log("[Terminal] creating xterm instance");
     const term = new XTerm({
       cursorBlink: true,
       fontSize: 13,
@@ -76,15 +82,18 @@ export function TerminalPanel({ productId, visible }: TerminalProps) {
     term.loadAddon(fitAddon);
     term.loadAddon(webLinksAddon);
     term.open(containerRef.current);
+    console.log("[Terminal] xterm opened in container");
 
     // Fit after open
     requestAnimationFrame(() => {
       fitAddon.fit();
       lastSizeRef.current = { cols: term.cols, rows: term.rows };
+      console.log("[Terminal] initial fit:", term.cols, "x", term.rows);
     });
 
     // Send user input to PTY
     term.onData((data) => {
+      console.log("[Terminal] term.onData fired, data:", JSON.stringify(data), "calling send()");
       send(data);
     });
 
@@ -94,8 +103,10 @@ export function TerminalPanel({ productId, visible }: TerminalProps) {
 
     // Focus terminal so keyboard input works
     term.focus();
+    console.log("[Terminal] focused, hasFocus:", term.textarea?.ownerDocument.activeElement === term.textarea);
 
     return () => {
+      console.log("[Terminal] cleanup, disposing xterm");
       term.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;
@@ -103,7 +114,7 @@ export function TerminalPanel({ productId, visible }: TerminalProps) {
     };
   }, [visible, send]);
 
-  // Handle resize — only send if cols/rows actually changed and not right after connect
+  // Handle resize
   useEffect(() => {
     if (!visible || !fitAddonRef.current) return;
 
@@ -117,23 +128,24 @@ export function TerminalPanel({ productId, visible }: TerminalProps) {
       const { cols, rows } = term;
       const last = lastSizeRef.current;
 
-      // Skip if size didn't actually change
-      if (cols === last.cols && rows === last.rows) return;
+      if (cols === last.cols && rows === last.rows) {
+        console.log("[Terminal] resize skipped — same size:", cols, "x", rows);
+        return;
+      }
 
-      // Skip resize within 500ms of initial connection (prevents duplicate prompt)
       if (Date.now() - connectedAtRef.current < 500) {
+        console.log("[Terminal] resize suppressed (early after connect):", cols, "x", rows);
         lastSizeRef.current = { cols, rows };
         return;
       }
 
+      console.log("[Terminal] resize sending:", cols, "x", rows);
       lastSizeRef.current = { cols, rows };
       resize(cols, rows);
     };
 
-    // Fit on visibility change (debounced)
     const timer = setTimeout(handleResize, 50);
 
-    // Observe container size changes
     const container = containerRef.current;
     if (!container) return () => clearTimeout(timer);
 
@@ -151,8 +163,9 @@ export function TerminalPanel({ productId, visible }: TerminalProps) {
     };
   }, [visible, resize]);
 
-  // Focus terminal when clicking on it (Monaco may steal focus)
+  // Focus terminal when clicking on it
   const handleContainerClick = useCallback(() => {
+    console.log("[Terminal] container clicked, focusing xterm");
     xtermRef.current?.focus();
   }, []);
 
