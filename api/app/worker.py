@@ -169,12 +169,14 @@ Description: {desc}"""
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 )
                 await proc.communicate()
-                # Set git user for commits and create initial commit
-                # so that main branch exists for worktree forking
+                # Create .gitignore and set git user
+                from app.services.workspace_service import _ensure_gitignore
+                _ensure_gitignore(effective_workdir)
                 for cmd in [
                     ["git", "config", "user.email", "agent@console.local"],
                     ["git", "config", "user.name", "Agent Console"],
-                    ["git", "commit", "--allow-empty", "-m", "Initial commit"],
+                    ["git", "add", "."],
+                    ["git", "commit", "-m", "Initial commit"],
                 ]:
                     p = await asyncio.create_subprocess_exec(
                         *cmd, cwd=effective_workdir,

@@ -43,11 +43,21 @@ async def create_product(db: AsyncSession, data: ProductCreate) -> Product:
     # Auto-init git with initial commit so branches exist from the start
     if not data.git_url:
         import asyncio as _aio
+        from app.services.workspace_service import _ensure_gitignore
         for cmd in [
             ['git', 'init', '-b', 'main'],
             ['git', 'config', 'user.email', 'agent@console.local'],
             ['git', 'config', 'user.name', 'Agent Console'],
-            ['git', 'commit', '--allow-empty', '-m', 'Initial commit'],
+        ]:
+            p = await _aio.create_subprocess_exec(
+                *cmd, cwd=workspace_path,
+                stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.PIPE,
+            )
+            await p.communicate()
+        _ensure_gitignore(workspace_path)
+        for cmd in [
+            ['git', 'add', '.'],
+            ['git', 'commit', '-m', 'Initial commit'],
         ]:
             p = await _aio.create_subprocess_exec(
                 *cmd, cwd=workspace_path,
@@ -264,10 +274,13 @@ async def get_product_git_info(db: AsyncSession, product_id: uuid.UUID) -> dict:
         out, _ = await proc.communicate()
         if not out.decode().strip():
             # No branch = no commits yet, create initial commit
+            from app.services.workspace_service import _ensure_gitignore
+            _ensure_gitignore(base)
             for cmd in [
                 ['git', 'config', 'user.email', 'agent@console.local'],
                 ['git', 'config', 'user.name', 'Agent Console'],
-                ['git', 'commit', '--allow-empty', '-m', 'Initial commit'],
+                ['git', 'add', '.'],
+                ['git', 'commit', '-m', 'Initial commit'],
             ]:
                 p = await asyncio.create_subprocess_exec(
                     *cmd, cwd=base,

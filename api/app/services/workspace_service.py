@@ -24,6 +24,42 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_GITIGNORE = """# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+venv/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+"""
+
+
+def _ensure_gitignore(repo_path: str) -> bool:
+    """Create .gitignore if missing. Returns True if created."""
+    gi_path = os.path.join(repo_path, ".gitignore")
+    if os.path.exists(gi_path):
+        return False
+    with open(gi_path, "w") as f:
+        f.write(DEFAULT_GITIGNORE)
+    return True
+
 WORKTREE_BASE = "/workspace/.agent-worktrees"
 
 
@@ -79,15 +115,17 @@ class WorkspaceService:
             await self._run_git(
                 "config", "user.name", "Agent Console", cwd=repo_path
             )
+            _ensure_gitignore(repo_path)
 
         # Ensure at least one commit (worktree requires it)
         has_commits = await self._run_git(
             "rev-parse", "HEAD", cwd=repo_path, check=False
         )
         if not has_commits:
+            _ensure_gitignore(repo_path)
             gitkeep = os.path.join(repo_path, ".gitkeep")
             Path(gitkeep).touch()
-            await self._run_git("add", ".gitkeep", cwd=repo_path)
+            await self._run_git("add", ".", cwd=repo_path)
             await self._run_git(
                 "commit", "-m", "initial commit", "--allow-empty", cwd=repo_path
             )
