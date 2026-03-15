@@ -606,11 +606,6 @@ async def get_sync_status(db: AsyncSession, product_id: uuid.UUID) -> dict:
     ahead = int(parts[0]) if len(parts) >= 1 else 0
     behind = int(parts[1]) if len(parts) >= 2 else 0
 
-    # Debug: compare actual HEADs
-    _, local_head = await run_git(["rev-parse", "HEAD"])
-    _, remote_head = await run_git(["rev-parse", f"{upstream}"])
-    _, is_shallow = await run_git(["rev-parse", "--is-shallow-repository"])
-
     return {
         "has_remote": True,
         "remote": remote_name,
@@ -621,12 +616,6 @@ async def get_sync_status(db: AsyncSession, product_id: uuid.UUID) -> dict:
         "behind": behind,
         "remote_branch_exists": True,
         "fetch_error": fetch_err or None,
-        "debug": {
-            "local_head": local_head[:8],
-            "remote_head": remote_head[:8],
-            "is_shallow": is_shallow,
-            "rev_list_raw": rev_list,
-        },
     }
 
 
