@@ -15,6 +15,22 @@ from app.schemas.product import ProductCreate, ProductUpdate
 
 logger = logging.getLogger(__name__)
 
+def _git_auth_env() -> dict:
+    """Return env with git credential helper using GITHUB_TOKEN."""
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if not token:
+        return {}
+    env = os.environ.copy()
+    env["GIT_ASKPASS"] = "/bin/echo"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    # Use credential helper that returns the token
+    env["GIT_CONFIG_COUNT"] = "1"
+    env["GIT_CONFIG_KEY_0"] = "credential.helper"
+    env["GIT_CONFIG_VALUE_0"] = f"!f() {{ echo username=x-access-token; echo password={token}; }}; f"
+    return env
+
+
+
 
 def _is_git_repo(path: str) -> bool:
     """Check if path is a git repo (works for both regular repos and worktrees)."""
@@ -538,9 +554,11 @@ async def get_sync_status(db: AsyncSession, product_id: uuid.UUID) -> dict:
     # Unshallow if needed (shallow clones can't count ahead/behind)
     shallow_path = os.path.join(base, ".git", "shallow")
     if os.path.isfile(shallow_path):
+        unshal_env = _git_auth_env()
         unshal = await asyncio.create_subprocess_exec(
             "git", "fetch", "--unshallow", remote_name, cwd=base,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            **({"env": unshal_env} if unshal_env else {}),
         )
         try:
             await asyncio.wait_for(unshal.communicate(), timeout=60)
@@ -548,9 +566,11 @@ async def get_sync_status(db: AsyncSession, product_id: uuid.UUID) -> dict:
             pass
 
     # Fetch latest
+    auth_env = _git_auth_env()
     fetch_proc = await asyncio.create_subprocess_exec(
         "git", "fetch", "--quiet", remote_name, cwd=base,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        **({"env": auth_env} if auth_env else {}),
     )
     fetch_err = ""
     try:
@@ -626,9 +646,11 @@ async def git_push(db: AsyncSession, product_id: uuid.UUID) -> dict:
     if not base or not _is_git_repo(base):
         raise ValueError("No git repository")
 
+    auth_env = _git_auth_env()
     proc = await asyncio.create_subprocess_exec(
         "git", "push", "-u", "origin", "HEAD", cwd=base,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        **({"env": auth_env} if auth_env else {}),
     )
     stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
 
@@ -646,9 +668,11 @@ async def git_pull(db: AsyncSession, product_id: uuid.UUID) -> dict:
     if not base or not _is_git_repo(base):
         raise ValueError("No git repository")
 
+    auth_env = _git_auth_env()
     proc = await asyncio.create_subprocess_exec(
         "git", "pull", "--ff-only", cwd=base,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        **({"env": auth_env} if auth_env else {}),
     )
     stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
 
