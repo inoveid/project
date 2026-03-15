@@ -43,6 +43,8 @@ export function SpecPanel({ productId }: SpecPanelProps) {
     mutationFn: (name: string) => writeFile(productId, `${SPEC_DIR}/${name}`, `# ${name.replace('.md', '')}\n\n`),
     onSuccess: (_, name) => {
       queryClient.invalidateQueries({ queryKey: ['spec-files', productId] });
+      queryClient.invalidateQueries({ queryKey: ['product-git', productId] });
+      queryClient.invalidateQueries({ queryKey: ['product-changes', productId] });
       setSelectedFile(`${SPEC_DIR}/${name}`);
     },
   });

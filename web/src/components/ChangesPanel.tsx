@@ -25,6 +25,8 @@ export function ChangesPanel({ productId, onClose }: ChangesPanelProps) {
   const { data, isLoading } = useQuery({
     queryKey: ['product-changes', productId],
     queryFn: () => getChangedFiles(productId),
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
 
   const discardMut = useMutation({
