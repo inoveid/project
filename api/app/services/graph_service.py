@@ -439,7 +439,11 @@ async def mr_gate_node(state: WorkflowState, config: RunnableConfig) -> dict:
                     "message": f"Ошибка при мерже: {exc}",
                     "task_id": task_id,
                 })
-        return {"mr_approved": True}
+        # If there was a pending handoff, approve it too
+        result = {"mr_approved": True}
+        if state.get("handoff_result"):
+            result["gateway_approved"] = True
+        return result
     else:
         # Rejected — return to first agent with comment
         return {
@@ -501,6 +505,10 @@ def route_after_agent(
     if rt == HandoffResultType.BLOCKED:
         return "blocked"
     if rt == HandoffResultType.AWAITING_APPROVAL:
+        # If worktree exists, show MR review instead of handoff approval
+        if wt:
+            logger.info("route_after_agent → complete (AWAITING_APPROVAL + worktree)")
+            return "complete"
         return "notify_handoff"
     if rt == HandoffResultType.FORWARDED:
         return "auto_handoff"
