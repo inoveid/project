@@ -36,6 +36,8 @@ export function handleEvent(
 ): void {
   const { setItems, setStatus, setError, setPendingApproval, setMrReview } = callbacks;
 
+  console.log("[WS-EVENT]", event.type, event.type === "mr_ready" ? JSON.stringify(event).slice(0, 300) : "");
+
   switch (event.type) {
     case "assistant_text":
       setStatus("typing");
@@ -147,6 +149,7 @@ export function handleEvent(
     }
 
     case "mr_ready": {
+      console.log("[MR_READY] task_id:", event.task_id, "diff_files:", event.diff_files?.length, "diff_lines:", event.diff_lines);
       const mrReviewItem: HandoffItem = {
         id: `mr-review-${event.task_id}`,
         itemType: "mr_review",
@@ -165,16 +168,19 @@ export function handleEvent(
         return [...cleaned, mrReviewItem];
       });
       setPendingApproval(null);  // Clear any pending handoff approval — MR takes priority
-      setMrReview({
+      const mrReviewData = {
         taskId: event.task_id,
         diffFiles: event.diff_files || [],
         diffLines: event.diff_lines || 0,
-      });
+      };
+      console.log("[MR_READY] calling setMrReview with:", JSON.stringify(mrReviewData).slice(0, 200));
+      setMrReview(mrReviewData);
       setStatus("awaiting_approval");
       break;
     }
 
     case "done": {
+      console.log("[DONE] received. NOT clearing mrReview.");
       setPendingApproval(null);
       setItems((prev) => prev.filter((i) => !isHandoffItem(i) || (i.id !== "__activity__" && i.itemType !== "approval_required" && i.itemType !== "handoff_start")));
       const text = refs.textRef.current;
@@ -210,6 +216,7 @@ export function handleEvent(
       break;
 
     case "approval_required": {
+      console.log("[APPROVAL_REQUIRED] from:", event.from_agent, "to:", event.to_agent);
       setPendingApproval({
         fromAgent: event.from_agent,
         toAgent: event.to_agent,
@@ -249,6 +256,7 @@ export function handleEvent(
       const label = statusLabels[event.status] || event.status;
       // Clear stale approval/MR items when agent starts thinking
       if (event.status === "thinking") {
+        console.log("[STATUS] thinking → clearing pendingApproval and mrReview");
         setPendingApproval(null);
         setMrReview(null);
       }
