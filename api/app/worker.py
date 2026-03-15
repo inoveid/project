@@ -331,6 +331,33 @@ Description: {desc}"""
                 if interrupted is None:
                     return  # Session done
 
+            elif cmd_type == "mr_approve" and interrupted:
+                await _try_update_task_status(db, task_id, "in_progress")
+                await publish_event(sid, {"type": "status", "status": "thinking"})
+                result = await _run_graph(
+                    graph, Command(resume={"approved": True}), graph_config,
+                )
+                interrupted = await _handle_graph_result(
+                    publisher, db, task_id, session, *result
+                )
+                if interrupted is None:
+                    return
+
+            elif cmd_type == "mr_reject" and interrupted:
+                comment = command.get("comment", "")
+                await _try_update_task_status(db, task_id, "in_progress")
+                await publish_event(sid, {"type": "status", "status": "thinking"})
+                result = await _run_graph(
+                    graph,
+                    Command(resume={"approved": False, "comment": comment}),
+                    graph_config,
+                )
+                interrupted = await _handle_graph_result(
+                    publisher, db, task_id, session, *result
+                )
+                if interrupted is None:
+                    return
+
             elif cmd_type == "message" and interrupted:
                 await publish_event(sid, {
                     "type": "error",
@@ -501,6 +528,11 @@ async def _handle_graph_result(
 
     if interrupted:
         await _try_update_task_status(db, task_id, "awaiting_user")
+        # Check if this is an MR gate interrupt (not handoff)
+        mr_diff = (last_state or {}).get("mr_diff")
+        if mr_diff and (last_state or {}).get("mr_approved") is None:
+            # MR gate interrupt — mr_ready was already sent by complete_node
+            return True
         hr = (last_state or {}).get("handoff_result")
         if hr:
             steps = []

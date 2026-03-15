@@ -37,6 +37,7 @@ from app.services.handoff_server import (
 )
 from app.services.runtime import runtime
 from app.services.workspace_service import workspace_service
+from app.services.diff_parser import parse_unified_diff, diff_files_to_dict
 from app.services.session_service import (
     SessionNotFoundError,
     add_message,
@@ -337,11 +338,13 @@ async def complete_node(state: WorkflowState, config: RunnableConfig) -> dict:
             diff = await workspace_service.get_task_diff(task_id)
             if diff.strip():
                 # Publish MR event for frontend
+                diff_files = parse_unified_diff(diff)
                 await ws.send_json({
                     "type": "mr_ready",
                     "task_id": task_id,
                     "diff_preview": diff[:2000],
                     "diff_lines": len(diff.splitlines()),
+                    "diff_files": diff_files_to_dict(diff_files),
                 })
                 if state.get("auto_merge"):
                     # Auto-merge: skip MR gate
