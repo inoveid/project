@@ -297,6 +297,18 @@ async def get_product_git_info(db: AsyncSession, product_id: uuid.UUID) -> dict:
         await track_proc.communicate()
         branch = target
 
+    # Fetch remote refs so we know about all remote branches
+    auth_env = _git_auth_env()
+    fetch_proc = await asyncio.create_subprocess_exec(
+        "git", "fetch", "--quiet", cwd=base,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        **({"env": auth_env} if auth_env else {}),
+    )
+    try:
+        await asyncio.wait_for(fetch_proc.communicate(), timeout=15)
+    except asyncio.TimeoutError:
+        pass
+
     # Local branches
     local_raw = await run_git(["branch", "--format=%(refname:short)"])
     local_branches = [b.strip() for b in local_raw.splitlines() if b.strip()]
