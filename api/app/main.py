@@ -1,4 +1,7 @@
+import logging
 from contextlib import asynccontextmanager
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(message)s")
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,6 +38,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Agent Console API", version="0.1.0", lifespan=lifespan)
+
+
+@app.get("/api/health")
+async def health():
+    return {"status": "ok"}
 
 app.add_middleware(
     CORSMiddleware,
