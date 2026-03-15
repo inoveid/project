@@ -160,29 +160,40 @@ Description: {desc}"""
         if not os.path.isdir(effective_workdir):
             os.makedirs(effective_workdir, exist_ok=True)
 
-        # Auto-init git
+        # Auto-init git (or fix orphan HEAD — git dir exists but no commits)
         git_dir = os.path.join(effective_workdir, ".git")
-        if not os.path.exists(git_dir):
+        needs_init = not os.path.exists(git_dir)
+        if not needs_init:
+            # Check if repo has any commits (orphan HEAD)
+            check = await asyncio.create_subprocess_exec(
+                "git", "rev-parse", "HEAD", cwd=effective_workdir,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            _, _ = await check.communicate()
+            needs_init = check.returncode != 0  # HEAD invalid → need initial commit
+        if needs_init:
             try:
-                proc = await asyncio.create_subprocess_exec(
-                    "git", "init", "-b", "main", cwd=effective_workdir,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-                await proc.communicate()
-                # Create .gitignore and set git user
+                if not os.path.exists(git_dir):
+                    proc = await asyncio.create_subprocess_exec(
+                        "git", "init", "-b", "main", cwd=effective_workdir,
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    )
+                    await proc.communicate()
+                # Create .gitignore and set git user + initial commit
                 from app.services.workspace_service import _ensure_gitignore
                 _ensure_gitignore(effective_workdir)
                 for cmd in [
                     ["git", "config", "user.email", "agent@console.local"],
                     ["git", "config", "user.name", "Agent Console"],
                     ["git", "add", "."],
-                    ["git", "commit", "-m", "Initial commit"],
+                    ["git", "commit", "--allow-empty", "-m", "Initial commit"],
                 ]:
                     p = await asyncio.create_subprocess_exec(
                         *cmd, cwd=effective_workdir,
                         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                     )
                     await p.communicate()
+                logger.info("Git initialized with initial commit in %s", effective_workdir)
             except Exception:
                 pass
 
