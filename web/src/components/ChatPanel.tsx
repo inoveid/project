@@ -178,17 +178,17 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
 
       <ChatWindow items={items} />
 
-      {effectiveApproval ? (
-        <ApprovalCard
-          approval={effectiveApproval}
-          onApprove={approveHandoff}
-          onRefine={refineHandoff}
-        />
-      ) : mrData ? (
+      {mrData ? (
         <MRReviewCard
           mrData={mrData}
           onApprove={approveMR}
           onReject={rejectMR}
+        />
+      ) : effectiveApproval ? (
+        <ApprovalCard
+          approval={effectiveApproval}
+          onApprove={approveHandoff}
+          onRefine={refineHandoff}
         />
       ) : (
         <ChatInput onSend={sendMessage} disabled={!canSend} />
