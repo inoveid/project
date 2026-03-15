@@ -98,9 +98,26 @@ export function useChat(
     send(JSON.stringify({ type: "refine", comment }));
   }, [send, isOpen]);
 
+  const approveMR = useCallback(() => {
+    if (!isOpen()) return;
+    setItems((prev) => prev.filter((i) => !isHandoffItem(i) || i.itemType !== "mr_review"));
+    setStatus("typing");
+    send(JSON.stringify({ type: "mr_approve" }));
+  }, [send, isOpen]);
+
+  const rejectMR = useCallback((comment: string) => {
+    if (!isOpen()) return;
+    setItems((prev) => {
+      const filtered = prev.filter((i) => !isHandoffItem(i) || i.itemType !== "mr_review");
+      return [...filtered, makeLocalMessage("user", `MR отклонён: ${comment}`)];
+    });
+    setStatus("typing");
+    send(JSON.stringify({ type: "mr_reject", comment }));
+  }, [send, isOpen]);
+
   // Note: initial command is sent by backend (update_task_status / _handle_peer_handoff)
   // via publish_command. No auto-send needed — it caused duplicate messages on reconnect.
   const messages = items.filter((i): i is Message => !isHandoffItem(i));
 
-  return { items, messages, status, error, pendingApproval, sendMessage, stopAgent, approveHandoff, refineHandoff };
+  return { items, messages, status, error, pendingApproval, sendMessage, stopAgent, approveHandoff, refineHandoff, approveMR, rejectMR };
 }

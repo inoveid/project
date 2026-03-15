@@ -66,6 +66,19 @@ export function HandoffBlock({ item }: HandoffBlockProps) {
     );
   }
 
+  if (item.itemType === "mr_review") {
+    // MRReviewCard is rendered at ChatPanel level (needs callbacks), show placeholder here
+    return (
+      <div className="my-3">
+        <div className="flex items-center gap-2 text-xs text-indigo-600 uppercase tracking-wide">
+          <div className="flex-1 h-px bg-indigo-200" />
+          <span>⎇ Merge Request (review)</span>
+          <div className="flex-1 h-px bg-indigo-200" />
+        </div>
+      </div>
+    );
+  }
+
   if (item.itemType === "mr_merged") {
     return (
       <div className="my-3">

@@ -13,6 +13,8 @@ export interface UseChatResult {
   stopAgent: () => void;
   approveHandoff: () => void;
   refineHandoff: (comment: string) => void;
+  approveMR: () => void;
+  rejectMR: (comment: string) => void;
 }
 
 export interface PendingRefs {

@@ -6,6 +6,7 @@ import type { ChatStatus } from "../hooks/useChat";
 import { ChatWindow } from "./ChatWindow";
 import { isHandoffItem } from "../types";
 import { ApprovalCard } from "./ApprovalCard";
+import { MRReviewCard } from "./MRReviewCard";
 
 function StatusIndicator({ status }: { status: ChatStatus }) {
   const dotColors: Record<ChatStatus, string> = {
@@ -101,6 +102,8 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
     stopAgent,
     approveHandoff,
     refineHandoff,
+    approveMR,
+    rejectMR,
   } = useChat(sessionId, session?.messages ?? [], sessionLoaded);
 
   async function handleStop() {
@@ -132,7 +135,12 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
       })()
     : null;
   const effectiveApproval = pendingApproval || approvalFromItems;
-  const canSend = status === "connected" && !effectiveApproval;
+
+  // Detect MR review from items
+  const mrReviewItem = items.filter((i) => isHandoffItem(i) && i.itemType === "mr_review").pop();
+  const mrData = mrReviewItem && isHandoffItem(mrReviewItem) ? mrReviewItem.mrData : null;
+
+  const canSend = status === "connected" && !effectiveApproval && !mrData;
 
   return (
     <div className="flex h-full flex-col border-l first:border-l-0">
@@ -175,6 +183,12 @@ export function ChatPanel({ sessionId, onClose, showClose }: ChatPanelProps) {
           approval={effectiveApproval}
           onApprove={approveHandoff}
           onRefine={refineHandoff}
+        />
+      ) : mrData ? (
+        <MRReviewCard
+          mrData={mrData}
+          onApprove={approveMR}
+          onReject={rejectMR}
         />
       ) : (
         <ChatInput onSend={sendMessage} disabled={!canSend} />

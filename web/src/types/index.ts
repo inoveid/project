@@ -126,7 +126,9 @@ export type WsOutgoing =
   | { type: "message"; content: string }
   | { type: "stop" }
   | { type: "approve" }
-  | { type: "refine"; comment: string };
+  | { type: "refine"; comment: string }
+  | { type: "mr_approve" }
+  | { type: "mr_reject"; comment: string };
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -160,16 +162,19 @@ export type WsIncoming =
   | { type: "sub_agent_tool_use"; sub_session_id: string; sub_agent_name: string; tool_name: string; tool_input: Record<string, unknown> }
   | { type: "sub_agent_tool_result"; sub_session_id: string; sub_agent_name: string; content: string }
   | { type: "sub_agent_done"; sub_session_id: string; role: string; name: string; output_preview: string }
-  | { type: "sub_agent_error"; sub_session_id: string; role: string; name: string; error: string };
+  | { type: "sub_agent_error"; sub_session_id: string; role: string; name: string; error: string }
+  | { type: "mr_ready"; task_id: string; diff_preview: string; diff_lines: number; diff_files: MRDiffFile[] }
+  | { type: "mr_status"; status: string; message: string; task_id: string };
 
 export interface HandoffItem {
   id: string;
-  itemType: "handoff_start" | "handoff_cycle" | "approval_required" | "activity" | "mr_merged" | "mr_error" | "handoff_completed";
+  itemType: "handoff_start" | "handoff_cycle" | "approval_required" | "activity" | "mr_merged" | "mr_error" | "handoff_completed" | "mr_review";
   agentName: string;
   fromAgent?: string;
   toAgent?: string;
   content: string;
   toolUses?: ToolUse[];
+  mrData?: MRReviewData;
   created_at: string;
 }
 
@@ -177,6 +182,20 @@ export type ChatItem = Message | HandoffItem;
 
 export function isHandoffItem(item: ChatItem): item is HandoffItem {
   return "itemType" in item;
+}
+
+export interface MRDiffFile {
+  path: string;
+  status: string; // M, A, D, R
+  additions: number;
+  deletions: number;
+  patch: string;
+}
+
+export interface MRReviewData {
+  taskId: string;
+  diffFiles: MRDiffFile[];
+  diffLines: number;
 }
 
 export interface ApprovalRequest {

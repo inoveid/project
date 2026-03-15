@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
-import type { ApprovalRequest, ChatItem, HandoffItem, Message, WsIncoming } from "../../types";
+import type { ApprovalRequest, ChatItem, HandoffItem, MRReviewData, Message, WsIncoming } from "../../types";
 import { isHandoffItem } from "../../types";
 import type { ChatStatus, PendingRefs } from "./chatState";
 import { makeLocalMessage } from "./chatState";
@@ -146,17 +146,23 @@ export function handleEvent(
     }
 
     case "mr_ready": {
-      const mrReadyItem: HandoffItem = {
-        id: "__activity__",
-        itemType: "activity",
+      const mrReviewItem: HandoffItem = {
+        id: `mr-review-${event.task_id}`,
+        itemType: "mr_review",
         agentName: "system",
         content: `Merge Request готов (${event.diff_lines || 0} строк изменений)`,
         created_at: new Date().toISOString(),
+        mrData: {
+          taskId: event.task_id,
+          diffFiles: event.diff_files || [],
+          diffLines: event.diff_lines || 0,
+        },
       };
       setItems((prev) => {
         const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
-        return [...withoutActivity, mrReadyItem];
+        return [...withoutActivity, mrReviewItem];
       });
+      setStatus("awaiting_approval");
       break;
     }
 
