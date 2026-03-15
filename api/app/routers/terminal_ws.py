@@ -38,7 +38,8 @@ def _resize_pty(fd: int, rows: int, cols: int) -> None:
 async def _get_product_env(db: AsyncSession, product_id: uuid.UUID) -> dict[str, str]:
     env = os.environ.copy()
     env["TERM"] = "xterm-256color"
-    env["LANG"] = "en_US.UTF-8"
+    env["LANG"] = "C.UTF-8"
+    env["LC_ALL"] = "C.UTF-8"
     try:
         from app.models.product_secret import ProductSecret
         result = await db.execute(
