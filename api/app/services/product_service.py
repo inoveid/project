@@ -298,16 +298,26 @@ async def get_product_git_info(db: AsyncSession, product_id: uuid.UUID) -> dict:
         branch = target
 
     # Fetch remote refs so we know about all remote branches
-    auth_env = _git_auth_env()
-    fetch_proc = await asyncio.create_subprocess_exec(
-        "git", "fetch", "--quiet", cwd=base,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        **({"env": auth_env} if auth_env else {}),
-    )
-    try:
-        await asyncio.wait_for(fetch_proc.communicate(), timeout=15)
-    except asyncio.TimeoutError:
-        pass
+    remote_check = await run_git(["remote"])
+    if remote_check.strip():
+        remote_name_for_fetch = remote_check.splitlines()[0].strip()
+        auth_env = _git_auth_env()
+        # For shallow clones, also unshallow to get full branch info
+        shallow_path = os.path.join(base, ".git", "shallow")
+        fetch_args = ["git", "fetch", remote_name_for_fetch]
+        if os.path.isfile(shallow_path):
+            fetch_args = ["git", "fetch", "--unshallow", remote_name_for_fetch]
+        fetch_proc = await asyncio.create_subprocess_exec(
+            *fetch_args, cwd=base,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            **({"env": auth_env} if auth_env else {}),
+        )
+        try:
+            _, fetch_stderr = await asyncio.wait_for(fetch_proc.communicate(), timeout=30)
+            if fetch_proc.returncode != 0:
+                logger.warning("git fetch failed in git_info: %s", fetch_stderr.decode().strip())
+        except asyncio.TimeoutError:
+            logger.warning("git fetch timed out in git_info for product %s", product_id)
 
     # Local branches
     local_raw = await run_git(["branch", "--format=%(refname:short)"])
