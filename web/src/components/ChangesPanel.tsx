@@ -35,6 +35,7 @@ export function ChangesPanel({ productId, onClose }: ChangesPanelProps) {
       queryClient.invalidateQueries({ queryKey: ['product-changes', productId] });
       queryClient.invalidateQueries({ queryKey: ['product-git', productId] });
       queryClient.invalidateQueries({ queryKey: ['product-files', productId] });
+      queryClient.invalidateQueries({ queryKey: ['spec-files', productId] });
     },
   });
 
@@ -51,6 +52,7 @@ export function ChangesPanel({ productId, onClose }: ChangesPanelProps) {
       queryClient.invalidateQueries({ queryKey: ['product-changes', productId] });
       queryClient.invalidateQueries({ queryKey: ['product-git', productId] });
       queryClient.invalidateQueries({ queryKey: ['product-files', productId] });
+      queryClient.invalidateQueries({ queryKey: ['spec-files', productId] });
     },
   });
 
