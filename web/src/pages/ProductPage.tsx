@@ -9,6 +9,7 @@ import { DiffViewer } from '../components/DiffViewer';
 import { SpecPanel } from '../components/SpecPanel';
 import { SecretsPanel } from '../components/SecretsPanel';
 import { ChangesPanel } from '../components/ChangesPanel';
+import { TerminalPanel } from '../components/Terminal';
 
 type ProductTab = 'code' | 'spec' | 'settings';
 
@@ -127,6 +128,11 @@ export function ProductPage() {
 
   const [showBranchInput, setShowBranchInput] = useState(false);
   const [showChanges, setShowChanges] = useState(false);
+  const [showTerminal, setShowTerminal] = useState(() => localStorage.getItem('terminal-open') === 'true');
+  const [terminalHeight, setTerminalHeight] = useState(() => parseInt(localStorage.getItem('terminal-height') || '200', 10));
+  const isDraggingRef = useRef(false);
+  const dragStartYRef = useRef(0);
+  const dragStartHeightRef = useRef(0);
   const [newBranchName, setNewBranchName] = useState('');
   const [showBranchDropdown, setShowBranchDropdown] = useState(false);
   const [branchSearch, setBranchSearch] = useState('');
@@ -137,6 +143,34 @@ export function ProductPage() {
   const [confirmDeleteBranch, setConfirmDeleteBranch] = useState<string | null>(null);
   const [branchFromName, setBranchFromName] = useState<string | null>(null);
   const [branchError, setBranchError] = useState<string | null>(null);
+
+  // Terminal persistence
+  useEffect(() => {
+    localStorage.setItem('terminal-open', String(showTerminal));
+  }, [showTerminal]);
+  useEffect(() => {
+    localStorage.setItem('terminal-height', String(terminalHeight));
+  }, [terminalHeight]);
+
+  const handleTerminalDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDraggingRef.current = true;
+    dragStartYRef.current = e.clientY;
+    dragStartHeightRef.current = terminalHeight;
+    const onMove = (ev: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      const delta = dragStartYRef.current - ev.clientY;
+      const newH = Math.max(100, Math.min(600, dragStartHeightRef.current + delta));
+      setTerminalHeight(newH);
+    };
+    const onUp = () => {
+      isDraggingRef.current = false;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [terminalHeight]);
 
   const createBranchMutation = useMutation({
     mutationFn: (name: string) => createBranch(id, name),
@@ -253,6 +287,18 @@ export function ProductPage() {
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [handleSave]);
+
+  // Ctrl+` to toggle terminal
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === '`') {
+        e.preventDefault();
+        setShowTerminal(v => !v);
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
 
   // Close branch dropdown on click outside
   useEffect(() => {
@@ -614,6 +660,19 @@ export function ProductPage() {
           )
         )}
 
+        {/* Terminal toggle */}
+        <button
+          onClick={() => setShowTerminal(v => !v)}
+          className={`text-xs px-2 py-1 rounded transition-colors ${
+            showTerminal
+              ? 'bg-gray-700 text-white'
+              : 'text-gray-500 hover:bg-gray-100'
+          }`}
+          title={showTerminal ? 'Скрыть терминал' : 'Показать терминал (Ctrl+`)'}
+        >
+          {'>_'}
+        </button>
+
         {/* Save button */}
         {hasAnyModified && (
           <button
@@ -707,7 +766,7 @@ export function ProductPage() {
           </div>
         </div>
 
-        {/* Editor area */}
+        {/* Editor + Terminal column */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Tabs */}
           {openTabs.length > 0 && (
@@ -800,6 +859,18 @@ export function ProductPage() {
             <div className="flex-1 flex items-center justify-center bg-[#1e1e1e] text-gray-500 text-sm">
               Выберите файл или коммит для просмотра
             </div>
+          )}
+          {/* Terminal panel */}
+          {showTerminal && activeSection === 'code' && (
+            <>
+              <div
+                onMouseDown={handleTerminalDragStart}
+                className="h-1 bg-gray-800 hover:bg-blue-500 cursor-row-resize shrink-0 transition-colors"
+              />
+              <div style={{ height: terminalHeight }} className="shrink-0">
+                <TerminalPanel productId={id} visible={showTerminal} />
+              </div>
+            </>
           )}
         </div>
 
