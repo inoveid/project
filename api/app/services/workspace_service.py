@@ -391,7 +391,24 @@ class WorkspaceService:
             "diff", f"{base}...{info.branch_name}",
             cwd=info.repo_path, check=False,
         )
-        logger.info("get_task_diff: diff result length=%d", len(diff))
+        logger.info("get_task_diff: three-dot diff length=%d", len(diff))
+
+        if not diff.strip():
+            # Fallback: try two-dot diff
+            diff = await self._run_git(
+                "diff", f"{base}..{info.branch_name}",
+                cwd=info.repo_path, check=False,
+            )
+            logger.info("get_task_diff: two-dot diff length=%d", len(diff))
+
+        if not diff.strip():
+            # Last resort: diff worktree against base
+            diff = await self._run_git(
+                "diff", base,
+                cwd=info.worktree_path, check=False,
+            )
+            logger.info("get_task_diff: worktree diff length=%d", len(diff))
+
         return diff
 
     async def merge_task_branch(
@@ -499,7 +516,11 @@ class WorkspaceService:
     ) -> Optional[str]:
         """Commit all changes in a worktree. Returns hash or None."""
         status = await self._run_git("status", "--porcelain", cwd=info.worktree_path)
+        logger.info("_commit_worktree %s: status=%r", info.branch_name, status[:200] if status else "(clean)")
         if not status.strip():
+            # Log current HEAD even if nothing to commit
+            head = await self._run_git("rev-parse", "--short", "HEAD", cwd=info.worktree_path, check=False)
+            logger.info("_commit_worktree %s: nothing to commit, HEAD=%s", info.branch_name, head)
             return None
 
         await self._run_git("add", "-A", cwd=info.worktree_path)
