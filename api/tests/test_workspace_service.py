@@ -225,6 +225,43 @@ class TestTaskWorktree:
             await ws.get_task_diff("nonexistent-id")
 
 
+
+    async def test_diff_with_detached_head_repo(self, ws, tmp_path, monkeypatch):
+        """Diff works even when main repo has detached HEAD."""
+        wt_base = str(tmp_path / "worktrees")
+        monkeypatch.setattr("app.services.workspace_service.WORKTREE_BASE", wt_base)
+
+        # Create repo with only "main" branch
+        repo = str(tmp_path / "detached_repo")
+        os.makedirs(repo)
+        await ws.ensure_repo_initialized(repo)
+
+        task_id = "detached-head-task-1234"
+        info = await ws.create_task_worktree(repo, task_id)
+
+        # Detach HEAD in main repo (simulates what happens after worktree checkout)
+        proc = await asyncio.create_subprocess_exec(
+            "git", "rev-parse", "HEAD", cwd=repo,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        head_sha = stdout.decode().strip()
+        proc = await asyncio.create_subprocess_exec(
+            "git", "checkout", head_sha, cwd=repo,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.communicate()
+
+        # Make change in worktree
+        with open(os.path.join(info.worktree_path, "detached_test.py"), "w") as f:
+            f.write("x = 1\n")
+
+        diff = await ws.get_task_diff(task_id)
+        assert "detached_test.py" in diff
+        assert "+x = 1" in diff
+
+        await ws.cleanup_task(task_id)
+
 class TestSubAgentFork:
     async def test_fork_and_merge(self, ws, git_repo, tmp_path, monkeypatch):
         """Sub-agent fork: create, modify, merge back."""

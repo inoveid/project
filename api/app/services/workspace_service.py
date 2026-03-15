@@ -368,7 +368,7 @@ class WorkspaceService:
             "rev-parse", "--abbrev-ref", "HEAD",
             cwd=info.repo_path, check=False,
         )
-        if not base or base == info.branch_name:
+        if not base or base == info.branch_name or base == "HEAD":
             base = "main"
 
         # Debug: check branch exists and has commits
