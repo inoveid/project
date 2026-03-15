@@ -552,10 +552,14 @@ async def get_sync_status(db: AsyncSession, product_id: uuid.UUID) -> dict:
         "git", "fetch", "--quiet", remote_name, cwd=base,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
+    fetch_err = ""
     try:
-        await asyncio.wait_for(fetch_proc.communicate(), timeout=30)
+        _, fetch_stderr = await asyncio.wait_for(fetch_proc.communicate(), timeout=30)
+        if fetch_proc.returncode != 0:
+            fetch_err = fetch_stderr.decode().strip()
+            logger.warning("git fetch failed for product %s: %s", product_id, fetch_err)
     except asyncio.TimeoutError:
-        pass
+        fetch_err = "timeout"
 
     # Get current branch
     _, branch = await run_git(["branch", "--show-current"])
@@ -565,7 +569,25 @@ async def get_sync_status(db: AsyncSession, product_id: uuid.UUID) -> dict:
     # Check if upstream is set
     rc_upstream, upstream = await run_git(["rev-parse", "--abbrev-ref", f"{branch}@{{u}}"])
     if rc_upstream != 0:
+        # No upstream tracking — try to count via remote ref directly
         rc_remote_ref, _ = await run_git(["rev-parse", "--verify", f"{remote_name}/{branch}"])
+        if rc_remote_ref == 0:
+            # Remote branch exists but no tracking — count manually
+            _, rev_list = await run_git(["rev-list", "--left-right", "--count", f"{branch}...{remote_name}/{branch}"])
+            parts = rev_list.split()
+            ahead = int(parts[0]) if len(parts) >= 1 else 0
+            behind = int(parts[1]) if len(parts) >= 2 else 0
+            return {
+                "has_remote": True,
+                "remote": remote_name,
+                "remote_url": remote_url,
+                "branch": branch,
+                "upstream": None,
+                "ahead": ahead,
+                "behind": behind,
+                "remote_branch_exists": True,
+                "fetch_error": fetch_err or None,
+            }
         return {
             "has_remote": True,
             "remote": remote_name,
@@ -574,7 +596,8 @@ async def get_sync_status(db: AsyncSession, product_id: uuid.UUID) -> dict:
             "upstream": None,
             "ahead": 0,
             "behind": 0,
-            "remote_branch_exists": rc_remote_ref == 0,
+            "remote_branch_exists": False,
+            "fetch_error": fetch_err or None,
         }
 
     # Count ahead/behind
@@ -592,6 +615,7 @@ async def get_sync_status(db: AsyncSession, product_id: uuid.UUID) -> dict:
         "ahead": ahead,
         "behind": behind,
         "remote_branch_exists": True,
+        "fetch_error": fetch_err or None,
     }
 
 

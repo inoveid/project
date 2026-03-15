@@ -516,6 +516,9 @@ export function ProductPage() {
                     {pullMutation.isError && (
                       <p className="text-[10px] text-red-500 break-all">{(pullMutation.error as Error).message}</p>
                     )}
+                    {syncStatus.fetch_error && (
+                      <p className="text-[10px] text-red-500 break-all">Fetch: {syncStatus.fetch_error}</p>
+                    )}
                   </div>
                 ) : syncStatus && !syncStatus.has_remote ? (
                   <div className="space-y-1.5">

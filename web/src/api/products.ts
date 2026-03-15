@@ -145,6 +145,7 @@ export interface SyncStatus {
   ahead?: number;
   behind?: number;
   remote_branch_exists?: boolean;
+  fetch_error?: string | null;
 }
 
 export function getSyncStatus(productId: string): Promise<SyncStatus> {
