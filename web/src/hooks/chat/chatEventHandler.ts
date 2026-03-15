@@ -282,10 +282,10 @@ export function handleEvent(
     case "sub_agent_spawned": {
       // Persistent item showing sub-agent was spawned
       const spawnItem: HandoffItem = {
-        id: `sub-spawn-\${event.sub_session_id}`,
+        id: `sub-spawn-${event.sub_session_id}`,
         itemType: "activity",
         agentName: event.name,
-        content: `→ \${event.name} (\${event.role}): \${event.task.slice(0, 150)}`,
+        content: `→ ${event.name} (${event.role}): ${event.task.slice(0, 150)}`,
         created_at: new Date().toISOString(),
       };
       setItems((prev) => {
@@ -295,7 +295,7 @@ export function handleEvent(
           id: "__activity__",
           itemType: "activity",
           agentName: event.name,
-          content: `\${event.name}: запущен...`,
+          content: `${event.name}: запущен...`,
           created_at: new Date().toISOString(),
         };
         return [...withoutActivity, spawnItem, activityItem];
@@ -307,8 +307,8 @@ export function handleEvent(
     case "sub_agent_tool_use":
     case "sub_agent_tool_result": {
       const label = event.type === "sub_agent_tool_use"
-        ? `\${(event as any).sub_agent_name}: \${(event as any).tool_name}...`
-        : `\${(event as any).sub_agent_name}: работает...`;
+        ? `${(event as any).sub_agent_name}: ${(event as any).tool_name}...`
+        : `${(event as any).sub_agent_name}: работает...`;
       setItems((prev) => {
         const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
         const activityItem: HandoffItem = {
@@ -328,10 +328,10 @@ export function handleEvent(
       setItems((prev) => {
         const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
         return withoutActivity.map((item) => {
-          if (isHandoffItem(item) && item.id === `sub-spawn-\${event.sub_session_id}`) {
+          if (isHandoffItem(item) && item.id === `sub-spawn-${event.sub_session_id}`) {
             return {
               ...item,
-              content: `✓ \${event.name} (\${event.role}): завершён\${event.output_preview ? " — " + event.output_preview.slice(0, 100) : ""}`,
+              content: `✓ ${event.name} (${event.role}): завершён${event.output_preview ? " — " + event.output_preview.slice(0, 100) : ""}`,
             };
           }
           return item;
@@ -347,8 +347,8 @@ export function handleEvent(
         const withoutActivity = prev.filter((i) => !isHandoffItem(i) || i.id !== "__activity__");
         if (errSubId) {
           return withoutActivity.map((item) => {
-            if (isHandoffItem(item) && item.id === `sub-spawn-\${errSubId}`) {
-              return { ...item, content: `✗ \${event.name || "sub-agent"}: \${(event as any).error || "error"}` };
+            if (isHandoffItem(item) && item.id === `sub-spawn-${errSubId}`) {
+              return { ...item, content: `✗ ${event.name || "sub-agent"}: ${(event as any).error || "error"}` };
             }
             return item;
           });
@@ -358,7 +358,7 @@ export function handleEvent(
           id: crypto.randomUUID(),
           itemType: "activity",
           agentName: event.name || "sub-agent",
-          content: `✗ Sub-agent error: \${(event as any).error || "unknown"}`,
+          content: `✗ Sub-agent error: ${(event as any).error || "unknown"}`,
           created_at: new Date().toISOString(),
         };
         return [...withoutActivity, errorItem];
