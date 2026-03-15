@@ -574,13 +574,22 @@ async def _run_graph(graph, input, config: dict) -> tuple[bool, bool, bool, dict
     last_state = None
 
     try:
+        chunk_count = 0
         async for chunk in graph.astream(input, config, stream_mode="values"):
+            chunk_count += 1
+            chunk_keys = list(chunk.keys()) if isinstance(chunk, dict) else []
+            logger.info("_run_graph chunk #%d: keys=%s, mr_diff=%s, mr_approved=%s",
+                       chunk_count, chunk_keys[:5],
+                       bool(chunk.get("mr_diff")) if isinstance(chunk, dict) else "N/A",
+                       chunk.get("mr_approved") if isinstance(chunk, dict) else "N/A")
             if "__interrupt__" in chunk:
+                logger.info("_run_graph: interrupt detected in chunk")
                 return True, False, False, chunk
             last_state = chunk
             hr = chunk.get("handoff_result")
             if isinstance(hr, dict) and hr.get("result_type") == "completed":
                 completed = True
+        logger.info("_run_graph: stream ended after %d chunks, completed=%s", chunk_count, completed)
     except Exception as exc:
         logger.error("Graph error for session %s: %s",
                      config["configurable"]["thread_id"], exc, exc_info=True)
@@ -599,11 +608,15 @@ async def _run_graph(graph, input, config: dict) -> tuple[bool, bool, bool, dict
     # Check for pending interrupts
     try:
         graph_state = await graph.aget_state(config)
+        logger.info("_run_graph: aget_state next=%s", graph_state.next if graph_state else None)
         if graph_state and graph_state.next:
-            return True, False, False, graph_state.values or {}
+            gs_vals = graph_state.values or {}
+            logger.info("_run_graph: interrupted at %s, mr_diff=%s", graph_state.next, bool(gs_vals.get("mr_diff")))
+            return True, False, False, gs_vals
     except Exception as exc:
         logger.warning("Failed to check graph state: %s", exc)
 
+    logger.info("_run_graph: returning completed=%s", completed)
     return False, completed, False, last_state
 
 

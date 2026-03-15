@@ -333,9 +333,12 @@ async def complete_node(state: WorkflowState, config: RunnableConfig) -> dict:
 
     # Check if task has a worktree — if so, generate MR diff
     task_id = state.get("task_id")
-    if task_id and state.get("task_worktree_path"):
+    wt_path = state.get("task_worktree_path")
+    logger.info("complete_node: task_id=%s, worktree=%s", task_id, wt_path)
+    if task_id and wt_path:
         try:
             diff = await workspace_service.get_task_diff(task_id)
+            logger.info("complete_node: diff length=%d lines", len(diff.splitlines()) if diff else 0)
             if diff.strip():
                 # Publish MR event for frontend
                 diff_files = parse_unified_diff(diff)
@@ -470,10 +473,14 @@ def route_after_agent(
     state: WorkflowState,
 ) -> Literal["notify_handoff", "auto_handoff", "complete", "blocked", "__end__"]:
     hr = state.get("handoff_result")
+    wt = state.get("task_worktree_path")
+    logger.info("route_after_agent: handoff_result=%s, task_worktree_path=%s", type(hr).__name__ if hr else None, wt)
     if not hr:
         # No handoff, but if there's a worktree — go to complete for MR
-        if state.get("task_worktree_path"):
+        if wt:
+            logger.info("route_after_agent → complete (worktree exists)")
             return "complete"
+        logger.info("route_after_agent → END (no handoff, no worktree)")
         return END
     rt = hr.get("result_type")
     if rt == HandoffResultType.COMPLETED:
