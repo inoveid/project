@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Editor, { type Monaco } from '@monaco-editor/react';
 import { getProduct } from '../api/products';
-import { getFileTree, readFile, writeFile, getGitInfo, checkoutBranch, getCommitDetail, getSyncStatus, gitPush, gitPull, addRemote, createBranch } from '../api/products';
+import { getFileTree, readFile, writeFile, getGitInfo, checkoutBranch, getCommitDetail, getSyncStatus, gitPush, gitPull, addRemote, createBranch, renameBranch, deleteBranch, mergeBranch } from '../api/products';
 import type { FileEntry, CommitDetail, SyncStatus } from '../api/products';
 import { DiffViewer } from '../components/DiffViewer';
 import { SpecPanel } from '../components/SpecPanel';
@@ -131,6 +131,12 @@ export function ProductPage() {
   const [showBranchDropdown, setShowBranchDropdown] = useState(false);
   const [branchSearch, setBranchSearch] = useState('');
   const branchDropdownRef = useRef<HTMLDivElement>(null);
+  const [branchContextMenu, setBranchContextMenu] = useState<string | null>(null);
+  const [renamingBranch, setRenamingBranch] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [confirmDeleteBranch, setConfirmDeleteBranch] = useState<string | null>(null);
+  const [branchFromName, setBranchFromName] = useState<string | null>(null);
+  const [branchError, setBranchError] = useState<string | null>(null);
 
   const createBranchMutation = useMutation({
     mutationFn: (name: string) => createBranch(id, name),
@@ -140,6 +146,40 @@ export function ProductPage() {
       queryClient.invalidateQueries({ queryKey: ['product-git', id] });
       queryClient.invalidateQueries({ queryKey: ['product-files', id] });
     },
+  });
+
+  const renameBranchMutation = useMutation({
+    mutationFn: ({ oldName, newName }: { oldName: string; newName: string }) => renameBranch(id, oldName, newName),
+    onSuccess: () => {
+      setRenamingBranch(null);
+      setRenameValue('');
+      setBranchContextMenu(null);
+      setBranchError(null);
+      queryClient.invalidateQueries({ queryKey: ['product-git', id] });
+    },
+    onError: (err: Error) => setBranchError(err.message),
+  });
+
+  const deleteBranchMutation = useMutation({
+    mutationFn: (name: string) => deleteBranch(id, name),
+    onSuccess: () => {
+      setConfirmDeleteBranch(null);
+      setBranchContextMenu(null);
+      setBranchError(null);
+      queryClient.invalidateQueries({ queryKey: ['product-git', id] });
+    },
+    onError: (err: Error) => setBranchError(err.message),
+  });
+
+  const mergeBranchMutation = useMutation({
+    mutationFn: (source: string) => mergeBranch(id, source),
+    onSuccess: () => {
+      setBranchContextMenu(null);
+      setBranchError(null);
+      queryClient.invalidateQueries({ queryKey: ['product-git', id] });
+      queryClient.invalidateQueries({ queryKey: ['product-files', id] });
+    },
+    onError: (err: Error) => setBranchError(err.message),
   });
 
   // Open file in a tab
@@ -222,6 +262,11 @@ export function ProductPage() {
         setBranchSearch('');
         setShowBranchInput(false);
         setNewBranchName('');
+        setBranchContextMenu(null);
+        setRenamingBranch(null);
+        setConfirmDeleteBranch(null);
+        setBranchFromName(null);
+        setBranchError(null);
       }
     };
     if (showBranchDropdown) {
@@ -286,25 +331,157 @@ export function ProductPage() {
                     className="w-full text-xs px-2 py-1.5 border rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
                   />
                 </div>
-                <div className="max-h-48 overflow-y-auto">
+                <div className="max-h-64 overflow-y-auto">
                   {gitInfo.branches
                     ?.filter(b => !branchSearch || b.toLowerCase().includes(branchSearch.toLowerCase()))
-                    .map(b => (
-                      <button
-                        key={b}
-                        onClick={() => {
-                          if (b !== gitInfo.branch) checkoutMutation.mutate(b);
-                          setShowBranchDropdown(false);
-                          setBranchSearch('');
-                        }}
-                        className={`w-full text-left px-3 py-1.5 text-xs font-mono hover:bg-blue-50 flex items-center gap-2 ${
-                          b === gitInfo.branch ? 'bg-blue-50 text-blue-700' : 'text-gray-700'
-                        }`}
-                      >
-                        {b === gitInfo.branch && <span className="text-blue-500 text-[10px]">●</span>}
-                        <span className={b === gitInfo.branch ? '' : 'pl-4'}>{b}</span>
-                      </button>
-                    ))
+                    .map(b => {
+                      const isCurrent = b === gitInfo.branch;
+                      const isRemote = b.includes('/');
+                      const showCtx = branchContextMenu === b;
+
+                      return (
+                        <div key={b} className="relative">
+                          <div
+                            className={`flex items-center px-3 py-1.5 text-xs font-mono hover:bg-blue-50 cursor-pointer group ${
+                              isCurrent ? 'bg-blue-50 text-blue-700' : 'text-gray-700'
+                            }`}
+                            onClick={() => {
+                              if (showCtx) { setBranchContextMenu(null); return; }
+                              if (!isCurrent) checkoutMutation.mutate(b);
+                              setShowBranchDropdown(false);
+                              setBranchSearch('');
+                            }}
+                          >
+                            {isCurrent ? <span className="text-blue-500 text-[10px] w-4 shrink-0">●</span> : <span className="w-4 shrink-0" />}
+                            <span className="truncate flex-1">{b}</span>
+                            {isRemote && <span className="text-[9px] text-gray-400 shrink-0 ml-1">remote</span>}
+                            {!isRemote && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setBranchContextMenu(showCtx ? null : b);
+                                  setRenamingBranch(null);
+                                  setConfirmDeleteBranch(null);
+                                  setBranchFromName(null);
+                                  setBranchError(null);
+                                }}
+                                className="text-gray-400 hover:text-gray-600 opacity-0 group-hover:opacity-100 text-[10px] shrink-0 ml-1"
+                              >
+                                ⋯
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Context menu */}
+                          {showCtx && !isRemote && (
+                            <div className="border-t border-b bg-gray-50 py-1">
+                              {/* Rename */}
+                              {renamingBranch === b ? (
+                                <form
+                                  className="flex items-center gap-1 px-3 py-1"
+                                  onSubmit={(e) => {
+                                    e.preventDefault();
+                                    if (renameValue.trim() && renameValue.trim() !== b) {
+                                      renameBranchMutation.mutate({ oldName: b, newName: renameValue.trim() });
+                                    }
+                                  }}
+                                >
+                                  <input
+                                    type="text"
+                                    value={renameValue}
+                                    onChange={(e) => setRenameValue(e.target.value)}
+                                    autoFocus
+                                    className="flex-1 text-[11px] px-2 py-0.5 border rounded font-mono focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                  />
+                                  <button type="submit" disabled={!renameValue.trim() || renameValue.trim() === b} className="text-[10px] px-1.5 py-0.5 bg-blue-600 text-white rounded disabled:opacity-50">OK</button>
+                                  <button type="button" onClick={() => setRenamingBranch(null)} className="text-[10px] text-gray-400">✕</button>
+                                </form>
+                              ) : (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setRenamingBranch(b); setRenameValue(b); }}
+                                  className="w-full text-left px-3 py-1 text-[11px] text-gray-700 hover:bg-gray-100"
+                                >
+                                  Переименовать
+                                </button>
+                              )}
+
+                              {/* New branch from */}
+                              {branchFromName === b ? (
+                                <form
+                                  className="flex items-center gap-1 px-3 py-1"
+                                  onSubmit={(e) => {
+                                    e.preventDefault();
+                                    if (newBranchName.trim()) {
+                                      createBranchMutation.mutate(newBranchName.trim());
+                                      setBranchFromName(null);
+                                      setShowBranchDropdown(false);
+                                    }
+                                  }}
+                                >
+                                  <input
+                                    type="text"
+                                    value={newBranchName}
+                                    onChange={(e) => setNewBranchName(e.target.value)}
+                                    placeholder="new-branch"
+                                    autoFocus
+                                    className="flex-1 text-[11px] px-2 py-0.5 border rounded font-mono focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                  />
+                                  <button type="submit" disabled={!newBranchName.trim()} className="text-[10px] px-1.5 py-0.5 bg-blue-600 text-white rounded disabled:opacity-50">OK</button>
+                                  <button type="button" onClick={() => setBranchFromName(null)} className="text-[10px] text-gray-400">✕</button>
+                                </form>
+                              ) : (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setBranchFromName(b); setNewBranchName(''); }}
+                                  className="w-full text-left px-3 py-1 text-[11px] text-gray-700 hover:bg-gray-100"
+                                >
+                                  Новая ветка от {b.length > 20 ? b.slice(0, 20) + '...' : b}
+                                </button>
+                              )}
+
+                              {/* Merge */}
+                              {!isCurrent && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); mergeBranchMutation.mutate(b); }}
+                                  disabled={mergeBranchMutation.isPending}
+                                  className="w-full text-left px-3 py-1 text-[11px] text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                                >
+                                  {mergeBranchMutation.isPending ? '...' : `Merge в ${gitInfo.branch}`}
+                                </button>
+                              )}
+
+                              {/* Delete */}
+                              {!isCurrent && (
+                                confirmDeleteBranch === b ? (
+                                  <div className="flex items-center gap-1 px-3 py-1">
+                                    <span className="text-[10px] text-red-600">Удалить?</span>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); deleteBranchMutation.mutate(b); }}
+                                      disabled={deleteBranchMutation.isPending}
+                                      className="text-[10px] px-1.5 py-0.5 bg-red-600 text-white rounded"
+                                    >
+                                      {deleteBranchMutation.isPending ? '...' : 'Да'}
+                                    </button>
+                                    <button onClick={() => setConfirmDeleteBranch(null)} className="text-[10px] text-gray-500">Нет</button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setConfirmDeleteBranch(b); }}
+                                    className="w-full text-left px-3 py-1 text-[11px] text-red-600 hover:bg-red-50"
+                                  >
+                                    Удалить
+                                  </button>
+                                )
+                              )}
+
+                              {/* Error */}
+                              {branchError && (
+                                <p className="px-3 py-1 text-[10px] text-red-500">{branchError}</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
                   }
                   {gitInfo.branches?.filter(b => !branchSearch || b.toLowerCase().includes(branchSearch.toLowerCase())).length === 0 && (
                     <p className="text-xs text-gray-400 px-3 py-2">Не найдено</p>
