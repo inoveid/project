@@ -163,3 +163,56 @@ async def git_commit_detail(
     except ValueError as e:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/products/{product_id}/git/sync-status")
+async def git_sync_status(
+    product_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import get_sync_status
+    return await get_sync_status(db, product_id)
+
+
+@router.post("/products/{product_id}/git/push")
+async def git_push(
+    product_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import git_push as do_push
+    try:
+        return await do_push(db, product_id)
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/products/{product_id}/git/pull")
+async def git_pull(
+    product_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import git_pull as do_pull
+    try:
+        return await do_pull(db, product_id)
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/products/{product_id}/git/remote")
+async def git_add_remote(
+    product_id: uuid.UUID,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import add_remote
+    url = body.get("url", "")
+    if not url:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Remote URL required")
+    try:
+        return await add_remote(db, product_id, url)
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(e))

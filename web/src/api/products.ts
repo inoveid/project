@@ -135,3 +135,33 @@ export interface CommitDetail {
 export function getCommitDetail(productId: string, hash: string): Promise<CommitDetail> {
   return fetchApi<CommitDetail>(`/products/${productId}/git/commits/${hash}`);
 }
+
+export interface SyncStatus {
+  has_remote: boolean;
+  remote?: string;
+  remote_url?: string;
+  branch?: string;
+  upstream?: string | null;
+  ahead?: number;
+  behind?: number;
+  remote_branch_exists?: boolean;
+}
+
+export function getSyncStatus(productId: string): Promise<SyncStatus> {
+  return fetchApi<SyncStatus>(`/products/${productId}/git/sync-status`);
+}
+
+export function gitPush(productId: string): Promise<{ ok: boolean; message: string }> {
+  return fetchApi(`/products/${productId}/git/push`, { method: 'POST' });
+}
+
+export function gitPull(productId: string): Promise<{ ok: boolean; message: string }> {
+  return fetchApi(`/products/${productId}/git/pull`, { method: 'POST' });
+}
+
+export function addRemote(productId: string, url: string): Promise<{ ok: boolean; remote: string; url: string }> {
+  return fetchApi(`/products/${productId}/git/remote`, {
+    method: 'POST',
+    body: JSON.stringify({ url }),
+  });
+}

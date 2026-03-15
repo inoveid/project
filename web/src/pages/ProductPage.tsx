@@ -3,8 +3,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Editor, { type Monaco } from '@monaco-editor/react';
 import { getProduct } from '../api/products';
-import { getFileTree, readFile, writeFile, getGitInfo, checkoutBranch, getCommitDetail } from '../api/products';
-import type { FileEntry, CommitDetail } from '../api/products';
+import { getFileTree, readFile, writeFile, getGitInfo, checkoutBranch, getCommitDetail, getSyncStatus, gitPush, gitPull, addRemote } from '../api/products';
+import type { FileEntry, CommitDetail, SyncStatus } from '../api/products';
 import { DiffViewer } from '../components/DiffViewer';
 
 // Map file extension to Monaco language
@@ -80,6 +80,42 @@ export function ProductPage() {
       setOpenTabs([]);
       setActiveTab(null);
       setSelectedCommit(null);
+    },
+  });
+
+  const { data: syncStatus, refetch: refetchSync } = useQuery({
+    queryKey: ['product-sync', id],
+    queryFn: () => getSyncStatus(id),
+    enabled: !!id && !!gitInfo?.initialized,
+    refetchOnWindowFocus: true,
+  });
+
+  const [remoteUrl, setRemoteUrl] = useState('');
+  const [showRemoteInput, setShowRemoteInput] = useState(false);
+
+  const pushMutation = useMutation({
+    mutationFn: () => gitPush(id),
+    onSuccess: () => {
+      refetchSync();
+      queryClient.invalidateQueries({ queryKey: ['product-git', id] });
+    },
+  });
+
+  const pullMutation = useMutation({
+    mutationFn: () => gitPull(id),
+    onSuccess: () => {
+      refetchSync();
+      queryClient.invalidateQueries({ queryKey: ['product-git', id] });
+      queryClient.invalidateQueries({ queryKey: ['product-files', id] });
+    },
+  });
+
+  const addRemoteMutation = useMutation({
+    mutationFn: (url: string) => addRemote(id, url),
+    onSuccess: () => {
+      setShowRemoteInput(false);
+      setRemoteUrl('');
+      refetchSync();
     },
   });
 
@@ -374,6 +410,105 @@ export function ProductPage() {
               <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Git</p>
             </div>
             <div className="flex-1 overflow-y-auto">
+              {/* Sync status */}
+              <div className="px-3 py-2 border-b">
+                {syncStatus?.has_remote ? (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-gray-400 truncate flex-1" title={syncStatus.remote_url}>
+                        {syncStatus.remote_url?.replace(/^https?:\/\//, '').replace(/\.git$/, '') ?? syncStatus.remote}
+                      </span>
+                      <button
+                        onClick={() => refetchSync()}
+                        className="text-[10px] text-gray-400 hover:text-gray-600"
+                        title="Обновить"
+                      >
+                        ⟳
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {(syncStatus.ahead ?? 0) > 0 && (
+                        <span className="text-[10px] text-green-600">↑{syncStatus.ahead}</span>
+                      )}
+                      {(syncStatus.behind ?? 0) > 0 && (
+                        <span className="text-[10px] text-orange-600">↓{syncStatus.behind}</span>
+                      )}
+                      {(syncStatus.ahead ?? 0) === 0 && (syncStatus.behind ?? 0) === 0 && syncStatus.upstream && (
+                        <span className="text-[10px] text-gray-400">Up to date</span>
+                      )}
+                      {!syncStatus.upstream && (
+                        <span className="text-[10px] text-gray-400">Нет upstream</span>
+                      )}
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => pushMutation.mutate()}
+                        disabled={pushMutation.isPending}
+                        className="flex-1 text-[10px] px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {pushMutation.isPending ? '...' : `Push${(syncStatus.ahead ?? 0) > 0 ? ` (${syncStatus.ahead})` : ''}`}
+                      </button>
+                      <button
+                        onClick={() => pullMutation.mutate()}
+                        disabled={pullMutation.isPending || (syncStatus.behind ?? 0) === 0}
+                        className="flex-1 text-[10px] px-2 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-50"
+                      >
+                        {pullMutation.isPending ? '...' : `Pull${(syncStatus.behind ?? 0) > 0 ? ` (${syncStatus.behind})` : ''}`}
+                      </button>
+                    </div>
+                    {pushMutation.isError && (
+                      <p className="text-[10px] text-red-500 break-all">{(pushMutation.error as Error).message}</p>
+                    )}
+                    {pullMutation.isError && (
+                      <p className="text-[10px] text-red-500 break-all">{(pullMutation.error as Error).message}</p>
+                    )}
+                  </div>
+                ) : syncStatus && !syncStatus.has_remote ? (
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] text-gray-400">Нет remote</p>
+                    {showRemoteInput ? (
+                      <div className="space-y-1">
+                        <input
+                          type="text"
+                          value={remoteUrl}
+                          onChange={(e) => setRemoteUrl(e.target.value)}
+                          placeholder="https://github.com/..."
+                          className="w-full text-[10px] px-2 py-1 border rounded"
+                        />
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => addRemoteMutation.mutate(remoteUrl)}
+                            disabled={!remoteUrl || addRemoteMutation.isPending}
+                            className="flex-1 text-[10px] px-2 py-1 bg-blue-600 text-white rounded disabled:opacity-50"
+                          >
+                            {addRemoteMutation.isPending ? '...' : 'Добавить'}
+                          </button>
+                          <button
+                            onClick={() => { setShowRemoteInput(false); setRemoteUrl(''); }}
+                            className="text-[10px] px-2 py-1 text-gray-500 hover:text-gray-700"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                        {addRemoteMutation.isError && (
+                          <p className="text-[10px] text-red-500">{(addRemoteMutation.error as Error).message}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setShowRemoteInput(true)}
+                        className="text-[10px] text-blue-600 hover:underline"
+                      >
+                        + Добавить remote
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-gray-300">Загрузка...</p>
+                )}
+              </div>
+
+              {/* Commits */}
               <div className="px-3 py-2">
                 <p className="text-[10px] text-gray-400 mb-2">Последние коммиты</p>
                 {gitInfo.commits?.map((c, i) => (

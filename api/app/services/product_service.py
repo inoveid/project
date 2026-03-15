@@ -42,28 +42,8 @@ async def create_product(db: AsyncSession, data: ProductCreate) -> Product:
 
     # Auto-init git with initial commit so branches exist from the start
     if not data.git_url:
-        import asyncio as _aio
-        from app.services.workspace_service import _ensure_gitignore
-        for cmd in [
-            ['git', 'init', '-b', 'main'],
-            ['git', 'config', 'user.email', 'agent@console.local'],
-            ['git', 'config', 'user.name', 'Agent Console'],
-        ]:
-            p = await _aio.create_subprocess_exec(
-                *cmd, cwd=workspace_path,
-                stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.PIPE,
-            )
-            await p.communicate()
-        _ensure_gitignore(workspace_path)
-        for cmd in [
-            ['git', 'add', '.'],
-            ['git', 'commit', '-m', 'Initial commit'],
-        ]:
-            p = await _aio.create_subprocess_exec(
-                *cmd, cwd=workspace_path,
-                stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.PIPE,
-            )
-            await p.communicate()
+        from app.services.workspace_service import workspace_service
+        await workspace_service.ensure_repo_initialized(workspace_path)
 
     return product
 
@@ -266,29 +246,8 @@ async def get_product_git_info(db: AsyncSession, product_id: uuid.UUID) -> dict:
         return {"initialized": False}
 
     # Auto-fix repos without initial commit (no branches)
-    async def _ensure_initial_commit():
-        proc = await asyncio.create_subprocess_exec(
-            'git', 'branch', '--show-current', cwd=base,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        out, _ = await proc.communicate()
-        if not out.decode().strip():
-            # No branch = no commits yet, create initial commit
-            from app.services.workspace_service import _ensure_gitignore
-            _ensure_gitignore(base)
-            for cmd in [
-                ['git', 'config', 'user.email', 'agent@console.local'],
-                ['git', 'config', 'user.name', 'Agent Console'],
-                ['git', 'add', '.'],
-                ['git', 'commit', '-m', 'Initial commit'],
-            ]:
-                p = await asyncio.create_subprocess_exec(
-                    *cmd, cwd=base,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-                await p.communicate()
-
-    await _ensure_initial_commit()
+    from app.services.workspace_service import workspace_service as ws
+    await ws.ensure_repo_initialized(base)
 
     async def run_git(args: list[str]) -> str:
         proc = await asyncio.create_subprocess_exec(
@@ -528,6 +487,142 @@ def _parse_diff(raw_diff: str) -> list[dict]:
         files.append(current_file)
 
     return files
+
+
+async def get_sync_status(db: AsyncSession, product_id: uuid.UUID) -> dict:
+    """Fetch from remote and return ahead/behind counts."""
+    product = await get_product(db, product_id)
+    base = product.workspace_path
+    if not base or not _is_git_repo(base):
+        return {"has_remote": False}
+
+    async def run_git(args: list[str]) -> tuple[int, str]:
+        proc = await asyncio.create_subprocess_exec(
+            "git", *args, cwd=base,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        return proc.returncode, stdout.decode().strip()
+
+    # Check if remote exists
+    rc, remote_out = await run_git(["remote"])
+    if rc != 0 or not remote_out.strip():
+        return {"has_remote": False}
+
+    remote_name = remote_out.splitlines()[0].strip()
+    _, remote_url = await run_git(["remote", "get-url", remote_name])
+
+    # Fetch latest
+    fetch_proc = await asyncio.create_subprocess_exec(
+        "git", "fetch", "--quiet", remote_name, cwd=base,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    await asyncio.wait_for(fetch_proc.communicate(), timeout=30)
+
+    # Get current branch
+    _, branch = await run_git(["branch", "--show-current"])
+    if not branch:
+        branch = "main"
+
+    # Check if upstream is set
+    rc_upstream, upstream = await run_git(["rev-parse", "--abbrev-ref", f"{branch}@{{u}}"])
+    if rc_upstream != 0:
+        rc_remote_ref, _ = await run_git(["rev-parse", "--verify", f"{remote_name}/{branch}"])
+        return {
+            "has_remote": True,
+            "remote": remote_name,
+            "remote_url": remote_url,
+            "branch": branch,
+            "upstream": None,
+            "ahead": 0,
+            "behind": 0,
+            "remote_branch_exists": rc_remote_ref == 0,
+        }
+
+    # Count ahead/behind
+    _, rev_list = await run_git(["rev-list", "--left-right", "--count", f"{branch}...{upstream}"])
+    parts = rev_list.split()
+    ahead = int(parts[0]) if len(parts) >= 1 else 0
+    behind = int(parts[1]) if len(parts) >= 2 else 0
+
+    return {
+        "has_remote": True,
+        "remote": remote_name,
+        "remote_url": remote_url,
+        "branch": branch,
+        "upstream": upstream,
+        "ahead": ahead,
+        "behind": behind,
+        "remote_branch_exists": True,
+    }
+
+
+async def git_push(db: AsyncSession, product_id: uuid.UUID) -> dict:
+    """Push current branch to remote."""
+    product = await get_product(db, product_id)
+    base = product.workspace_path
+    if not base or not _is_git_repo(base):
+        raise ValueError("No git repository")
+
+    proc = await asyncio.create_subprocess_exec(
+        "git", "push", "-u", "origin", "HEAD", cwd=base,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+
+    if proc.returncode != 0:
+        err = stderr.decode().strip()
+        raise ValueError(f"Push failed: {err}")
+
+    return {"ok": True, "message": stdout.decode().strip() + "\n" + stderr.decode().strip()}
+
+
+async def git_pull(db: AsyncSession, product_id: uuid.UUID) -> dict:
+    """Pull from remote for current branch."""
+    product = await get_product(db, product_id)
+    base = product.workspace_path
+    if not base or not _is_git_repo(base):
+        raise ValueError("No git repository")
+
+    proc = await asyncio.create_subprocess_exec(
+        "git", "pull", "--ff-only", cwd=base,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+
+    if proc.returncode != 0:
+        err = stderr.decode().strip()
+        raise ValueError(f"Pull failed: {err}")
+
+    return {"ok": True, "message": stdout.decode().strip()}
+
+
+async def add_remote(db: AsyncSession, product_id: uuid.UUID, url: str) -> dict:
+    """Add or update remote origin."""
+    product = await get_product(db, product_id)
+    base = product.workspace_path
+    if not base or not _is_git_repo(base):
+        raise ValueError("No git repository")
+
+    proc = await asyncio.create_subprocess_exec(
+        "git", "remote", "add", "origin", url, cwd=base,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+
+    if proc.returncode != 0:
+        err = stderr.decode().strip()
+        if "already exists" in err:
+            proc2 = await asyncio.create_subprocess_exec(
+                "git", "remote", "set-url", "origin", url, cwd=base,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            await proc2.communicate()
+        else:
+            raise ValueError(f"Failed to add remote: {err}")
+
+    return {"ok": True, "remote": "origin", "url": url}
+
 
 async def get_product_commit_detail(db: AsyncSession, product_id: uuid.UUID, commit_hash: str) -> dict:
     """Get details of a specific commit."""
