@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useToast, type Toast } from "../../hooks/useToast";
 
+
 const TYPE_STYLES: Record<Toast["type"], { bg: string; border: string; icon: string }> = {
   info: { bg: "bg-blue-50", border: "border-blue-200", icon: "ℹ" },
   success: { bg: "bg-green-50", border: "border-green-200", icon: "✓" },
@@ -15,7 +16,7 @@ const ICON_COLORS: Record<Toast["type"], string> = {
   error: "text-red-600",
 };
 
-function ToastItem({ toast, onClose }: { toast: Toast; onClose: () => void }) {
+function ToastItem({ toast, onClose, onPause, onResume }: { toast: Toast; onClose: () => void; onPause: () => void; onResume: () => void }) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -34,8 +35,10 @@ function ToastItem({ toast, onClose }: { toast: Toast; onClose: () => void }) {
   return (
     <div
       role="alert"
+      onMouseEnter={onPause}
+      onMouseLeave={onResume}
       className={[
-        "pointer-events-auto w-80 rounded-lg border shadow-lg p-3 transition-all duration-200",
+        "pointer-events-auto w-80 rounded-lg border shadow-lg p-3 transition-all duration-200 cursor-default",
         style.bg,
         style.border,
         visible ? "translate-x-0 opacity-100" : "translate-x-4 opacity-0",
@@ -73,7 +76,7 @@ function ToastItem({ toast, onClose }: { toast: Toast; onClose: () => void }) {
 }
 
 export function ToastContainer() {
-  const { toasts, removeToast } = useToast();
+  const { toasts, removeToast, pauseToast, resumeToast } = useToast();
 
   if (toasts.length === 0) return null;
 
@@ -87,6 +90,8 @@ export function ToastContainer() {
           key={toast.id}
           toast={toast}
           onClose={() => removeToast(toast.id)}
+          onPause={() => pauseToast(toast.id)}
+          onResume={() => resumeToast(toast.id)}
         />
       ))}
     </div>

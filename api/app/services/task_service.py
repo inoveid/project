@@ -51,6 +51,11 @@ REQUIRED_FOR_IN_PROGRESS = [
 
 
 async def create_task(db: AsyncSession, data: TaskCreate) -> Task:
+    if not data.product_id:
+        raise HTTPException(status_code=400, detail="Выберите продукт для задачи")
+    if not data.team_id:
+        raise HTTPException(status_code=400, detail="Выберите команду для задачи")
+
     task = Task(
         title=data.title,
         description=data.description,

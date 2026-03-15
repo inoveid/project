@@ -44,7 +44,17 @@ export async function fetchApi<T>(
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`API error ${response.status}: ${body}`);
+    // Try to extract detail from FastAPI error response
+    let message = body;
+    try {
+      const json = JSON.parse(body);
+      if (json.detail) {
+        message = typeof json.detail === "string" ? json.detail : JSON.stringify(json.detail);
+      }
+    } catch {
+      // body is not JSON, use as-is
+    }
+    throw new Error(message || `Ошибка ${response.status}`);
   }
 
   if (response.status === 204) {

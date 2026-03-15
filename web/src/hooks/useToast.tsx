@@ -29,6 +29,8 @@ interface ToastContextValue {
   toasts: Toast[];
   addToast: (toast: ToastInput) => string;
   removeToast: (id: string) => void;
+  pauseToast: (id: string) => void;
+  resumeToast: (id: string) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -39,12 +41,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
+  const startTimesRef = useRef(new Map<string, number>());
+  const durationsRef = useRef(new Map<string, number>());
+
   const removeToast = useCallback((id: string) => {
     const timer = timersRef.current.get(id);
     if (timer) {
       clearTimeout(timer);
       timersRef.current.delete(id);
     }
+    startTimesRef.current.delete(id);
+    durationsRef.current.delete(id);
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
@@ -56,8 +63,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
       const duration = input.duration ?? DEFAULT_DURATION;
       if (duration > 0) {
+        startTimesRef.current.set(id, Date.now());
+        durationsRef.current.set(id, duration);
         const timer = setTimeout(() => {
           timersRef.current.delete(id);
+          startTimesRef.current.delete(id);
+          durationsRef.current.delete(id);
           setToasts((prev) => prev.filter((t) => t.id !== id));
         }, duration);
         timersRef.current.set(id, timer);
@@ -67,6 +78,35 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     },
     [],
   );
+
+  const pauseToast = useCallback((id: string) => {
+    const timer = timersRef.current.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      timersRef.current.delete(id);
+      // Calculate remaining time
+      const startTime = startTimesRef.current.get(id) || Date.now();
+      const totalDuration = durationsRef.current.get(id) || DEFAULT_DURATION;
+      const elapsed = Date.now() - startTime;
+      const remaining = Math.max(0, totalDuration - elapsed);
+      durationsRef.current.set(id, remaining);
+    }
+  }, []);
+
+  const RESUME_DELAY = 7000;
+
+  const resumeToast = useCallback((id: string) => {
+    // After hover ends, wait RESUME_DELAY before removing
+    const timer = setTimeout(() => {
+      timersRef.current.delete(id);
+      startTimesRef.current.delete(id);
+      durationsRef.current.delete(id);
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, RESUME_DELAY);
+    timersRef.current.set(id, timer);
+    startTimesRef.current.set(id, Date.now());
+    durationsRef.current.set(id, RESUME_DELAY);
+  }, []);
 
   useEffect(() => {
     const timers = timersRef.current;
@@ -79,8 +119,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ toasts, addToast, removeToast }),
-    [toasts, addToast, removeToast],
+    () => ({ toasts, addToast, removeToast, pauseToast, resumeToast }),
+    [toasts, addToast, removeToast, pauseToast, resumeToast],
   );
 
   return (
